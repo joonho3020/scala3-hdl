@@ -6,50 +6,32 @@ import scala.compiletime.ops.int.*
 import scala.annotation.targetName
 
 
+sealed class Width(val value: Int):
+  override def toString: String = s"${value}"
+
+object Width:
+  def apply(x: Int): Width = new Width(x)
 
 sealed trait Signal
 
+sealed case class UInt(val w: Width) extends Signal:
+  override def toString(): String = s"UInt($w)"
 
-sealed trait WidthType
-sealed trait Width[N <: Int] extends WidthType
+sealed case class UIntLit(val w: Width, val v: Int) extends Signal:
+  override def toString(): String = s"UIntLit($w, $v)"
 
-sealed case class UInt[W <: WidthType]() extends Signal
-
-sealed trait Dir
-sealed trait In  extends Dir
-sealed trait Out extends Dir
-
-type Opp[D <: Dir] = D match
-  case In  => Out
-  case Out => In
-
-final case class Port[D <: Dir, T](payload: T)
-
-
-
-
+trait Bundle extends Signal
 
 object Main:
   def main(args: Array[String]): Unit =
-    case class X(
-      a: Port[Out, UInt[Width[12]]],
-      b: Port[Out, UInt[Width[8]]]
-    )
+    val uint_3 = UInt(Width(3))
+    println(s"UInt(3): $uint_3")
 
-    object X:
-      def apply(w1: Int, w2: Int) =
-        new X(
-          Port[Out, UInt[Width[w1]]](UInt[Width[12]]()), 
-          Port[Out, UInt[Width[8]]](UInt[Width[8]]())
-        )
 
-    println("Hello, HDL!")
+    class MyBundle(w1: Int, w2: Int) extends Bundle:
+      val a = UInt(Width(w1))
+      val b = UInt(Width(w2))
 
-    val x = new X()
-    print(x)
-
-// case class Y(
-// x: Port[Out, X],
-// c: Port[In,  UInt[Width[w1 * w2]]]
-// )
+    val my_bundle = new MyBundle(2, 3)
+    println(s"my_bundle ${my_bundle} ${my_bundle.a} ${my_bundle.b}")
 
