@@ -19,12 +19,19 @@ sealed class UInt(val w: Width) extends Signal:
   def apply(w: Width): UInt = new UInt(w)
   override def toString(): String = s"UInt($w.W)"
 
-sealed class UIntLit(val w: Width)(val v: Int) extends Signal:
+sealed class UIntLit(override val w: Width)(val v: Int) extends UInt(w):
   override def toString(): String = s"UIntLit($v($w.W))"
 
 class Bundle(elems: (String, Any)*) extends Selectable:
   private val fields = elems.toMap
   def selectDynamic(name: String): Any = fields(name)
+  override def toString: String =
+    val body = fields.map { case (k, v) => s"$k=$v" }.mkString(", ")
+    s"Bundle($body)"
+
+object Bundle:
+  inline def lit[B <: Bundle](inline elems: (String, Any)*): Bundle =
+    ${ BundleMacros.bundleLitImpl[B]('elems) }
 
 object Main:
   def main(args: Array[String]): Unit =
@@ -37,6 +44,10 @@ object Main:
       val a = UInt(Width(x))
       val b = UInt(Width(y))
 
+    object MyBundle:
+      inline def lit(inline a: UInt, inline b: UInt): Bundle =
+        Bundle.lit[MyBundle]("a" -> a, "b" -> b)
+
     val my_bundle = new MyBundle(2, 3)
 
     println(s"${my_bundle}")
@@ -44,10 +55,27 @@ object Main:
     println(s"${my_bundle.b}")
 
     class NestedBundle(x: Int, y: Int, z: Int) extends Bundle:
+      val width_outer = x + y + z
       val inner = new MyBundle(x, y)
-      val outer = UInt(Width(z))
+      val outer = UInt(Width(width_outer))
+
+    object NestedBundle:
+      inline def lit(inline inner: Bundle, inline outer: UInt): Bundle =
+        Bundle.lit[NestedBundle]("inner" -> inner, "outer" -> outer)
 
     val nested_bundle = new NestedBundle(2, 3, 4)
     println(s"${nested_bundle.outer}")
     println(s"${nested_bundle.inner.a}")
     println(s"${nested_bundle.inner.b}")
+
+    val my_bundle_lit = MyBundle.lit(
+      a = UIntLit(Width(1))(3),
+      b = UIntLit(Width(2))(4)
+    )
+    println(s"${my_bundle_lit}")
+
+    val nested_bundle_lit = NestedBundle.lit(
+      inner = MyBundle.lit(a = UIntLit(Width(1))(3), b = UIntLit(Width(2))(4)),
+      outer = UIntLit(Width(9))(6)
+    )
+    println(s"${nested_bundle_lit}")
