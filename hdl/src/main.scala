@@ -45,7 +45,7 @@ object Main:
       val b = UInt(Width(y))
 
     object MyBundle:
-      inline def lit(inline a: UInt, inline b: UInt): Bundle =
+      inline def lit(inline a: UIntLit, inline b: UIntLit): Bundle =
         Bundle.lit[MyBundle]("a" -> a, "b" -> b)
 
     val my_bundle = new MyBundle(2, 3)
@@ -60,7 +60,7 @@ object Main:
       val outer = UInt(Width(width_outer))
 
     object NestedBundle:
-      inline def lit(inline inner: Bundle, inline outer: UInt): Bundle =
+      inline def lit(inline inner: Bundle, inline outer: UIntLit): Bundle =
         Bundle.lit[NestedBundle]("inner" -> inner, "outer" -> outer)
 
     val nested_bundle = new NestedBundle(2, 3, 4)
@@ -79,3 +79,9 @@ object Main:
       outer = UIntLit(Width(9))(6)
     )
     println(s"${nested_bundle_lit}")
+
+// Compile error
+// val nested_bundle_lit_2 = NestedBundle.lit(
+// inner = MyBundle.lit(a = UInt(Width(1)), b = UIntLit(Width(2))(4)),
+// outer = UIntLit(Width(9))(6)
+// )

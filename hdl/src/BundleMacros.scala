@@ -39,7 +39,8 @@ object BundleMacros:
                   case Some(expectedTpe) =>
                     val providedTpe = vTerm.tpe
                     val ok =
-                      if expectedTpe <:< TypeRepr.of[Bundle] then providedTpe <:< TypeRepr.of[Bundle]
+                      if expectedTpe <:< TypeRepr.of[UInt] then providedTpe <:< TypeRepr.of[UIntLit]
+                      else if expectedTpe <:< TypeRepr.of[Bundle] then providedTpe <:< TypeRepr.of[Bundle]
                       else providedTpe <:< expectedTpe
                     if !ok then
                       report.errorAndAbort(s"Field '$fieldName' expects value of type ${expectedTpe.show}, but got ${providedTpe.show}")
