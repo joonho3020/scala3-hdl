@@ -1,4 +1,4 @@
-package hdl
+package playground
 
 import scala.compiletime.{erasedValue, constValue, summonInline}
 import scala.deriving.*
@@ -7,6 +7,8 @@ import scala.annotation.targetName
 import scala.compiletime.erasedValue
 import scala.quoted.*
 import scala.language.strictEquality
+
+// - Conversions
 
 trait Book:
     def author: String
@@ -55,6 +57,21 @@ given CanEqual[AudioBook, AudioBook] = CanEqual.derived
 given CanEqual[PrintedBook, AudioBook] = CanEqual.derived
 given CanEqual[AudioBook, PrintedBook] = CanEqual.derived
 
+// Macros
+// - splices ${...}: insert code into the AST
+// - quotes  '{...}: the AST of this code block
+inline def inspect(inline x: Any): Any = ${ inspectCode('x) }
+
+inline def power(inline x: Double, inline n: Int): Double = ${ powerCode('x, 'n) }
+
+inline def sumAll(inline nums: Int*): Int = ${ sumCode('nums) }
+
+inline def test(inline ignore: Boolean, computation: => Unit): Boolean =
+  ${ testCode('ignore, 'computation) }
+
+inline def iterativeFunctionDeconstruction(inline f: FieldName => FieldName): List[String] =
+  ${ collectUsedMethods('{f}) }
+
 object Main:
   def main(args: Array[String]): Unit =
     println("Hello World")
@@ -67,3 +84,14 @@ object Main:
     val aBook = AudioBook("1984", "George Orwell", 2006, 682)
     println(aBook == pBook)
     println(pBook == aBook)
+
+    inspect(println("INSPECT"))
+    println(s"3.0^2 = ${power(3.0, 2)}")
+    println(s"1 + 2 + 3 + 4 = ${sumAll(1, 2, 3, 4)}")
+
+    println(test(false, println("DONT   IGNORE ME")))
+    println(test(true,  println("PLEASE IGNORE ME")))
+
+    val f = (name: FieldName) => name.lowercase.uppercase.lowercase
+    val used = iterativeFunctionDeconstruction(f)
+    println(s"Used ${used}")
