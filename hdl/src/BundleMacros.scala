@@ -3,7 +3,7 @@ package hdl
 import scala.quoted.*
 
 object BundleMacros:
-  def bundleLitImpl[B: Type](elemsExpr: Expr[Seq[(String, Any)]])(using Quotes): Expr[Bundle] =
+  def bundleLitImpl[B: Type](elemsExpr: Expr[Seq[(String, Signal)]])(using Quotes): Expr[Bundle] =
     import quotes.reflect.*
 
     val bundleTpe = TypeRepr.of[B]
@@ -26,8 +26,8 @@ object BundleMacros:
 
     elemsExpr match
       case Varargs(args) =>
-        val validatedPairs: List[Expr[(String, Any)]] = args.map { pairExpr =>
-          def handle(k: Expr[String], v: Expr[Any]): Expr[(String, Any)] =
+        val validatedPairs: List[Expr[(String, Signal)]] = args.map { pairExpr =>
+          def handle(k: Expr[String], v: Expr[Signal]): Expr[(String, Signal)] =
             val vTerm = v.asTerm
 
             k.value match
@@ -45,15 +45,15 @@ object BundleMacros:
                       else providedTpe <:< expectedTpe
                     if !ok then
                       report.errorAndAbort(s"Field '$fieldName' expects value of type ${expectedTpe.show}, but got ${providedTpe.show}")
-                    '{ Tuple2($k, $v.asInstanceOf[Any]) }
+                    '{ Tuple2($k, $v.asInstanceOf[Signal]) }
               case None =>
                 report.errorAndAbort("Bundle.lit requires string literal field names")
 
           pairExpr match
             // Tuple literal
-            case '{ ($k: String, $v) } => handle(k, v)
+            case '{ ($k: String, $v: Signal) } => handle(k, v)
             // ArrowAssoc '->' syntax
-            case '{ ($k: String) -> ($v) } => handle(k, v)
+            case '{ ($k: String) -> ($v: Signal) } => handle(k, v)
             case _ =>
               report.errorAndAbort("Invalid argument to Bundle.lit; expected (String, Signal) pairs")
         }.toList

@@ -22,7 +22,7 @@ sealed class UInt(val w: Width) extends Signal:
 sealed class UIntLit(override val w: Width)(val v: Int) extends UInt(w):
   override def toString(): String = s"UIntLit($v($w.W))"
 
-class Bundle(elems: (String, Any)*) extends Selectable:
+class Bundle(elems: (String, Any)*) extends Selectable with Signal:
   private val fields = elems.toMap
   def selectDynamic(name: String): Any = fields(name)
   override def toString: String =
@@ -30,7 +30,7 @@ class Bundle(elems: (String, Any)*) extends Selectable:
     s"Bundle($body)"
 
 object Bundle:
-  inline def lit[B <: Bundle](inline elems: (String, Any)*): Bundle =
+  inline def lit[B <: Bundle](inline elems: (String, Signal)*): Bundle =
     ${ BundleMacros.bundleLitImpl[B]('elems) }
 
 object Main:
