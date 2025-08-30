@@ -6,7 +6,6 @@ import scala.compiletime.ops.int.*
 import scala.annotation.targetName
 import scala.compiletime.erasedValue
 import scala.quoted.*
-import scala.annotation.experimental
 
 sealed class Width(val value: Int):
   override def toString: String = s"${value}"
@@ -34,6 +33,8 @@ class Bundle(elems: (String, Any)*) extends Selectable with Signal:
 // transparent inline def lit[B <: Bundle](inline elems: (String, Signal)*): Any =
 // ${ BundleMacros.bundleLitImpl[B]('elems) }
 
+trait BundleLit[B]
+
 object Main:
   def main(args: Array[String]): Unit =
     println("Hello World")
@@ -41,8 +42,7 @@ object Main:
     println(s"${UInt(Width(3))}")
     println(s"${UIntLit(Width(3))(4)}")
 
-    @experimental
-    class MyBundle(x: Int, y: Int) extends Bundle derives BundleLit:
+    class MyBundle(x: Int, y: Int) extends Bundle:
       val a = UInt(Width(x))
       val b = UInt(Width(y))
 
@@ -56,26 +56,21 @@ object Main:
     println(s"${my_bundle.a}")
     println(s"${my_bundle.b}")
 
-// object MyBundle:
-// given BundleLit[MyBundle] = BundleLit.derived[MyBundle]
-
-    val my_bundle_lit = MyBundle.lit()
-
-// object MyBundle:
-// given BundleLit[MyBundle] with
-// extension(comp: MyBundle.type)
-// transparent inline def lit(a: UIntLit, b: UIntLit): Bundle { val a: UIntLit; val b: UIntLit }=
-// new Bundle ( "a" -> a, "b" -> b )
-// .asInstanceOf[Bundle { val a: UIntLit; val b: UIntLit }]
+    object MyBundle:
+      given BundleLit[MyBundle] with
+        extension(comp: MyBundle.type)
+          transparent inline def lit(a: UIntLit, b: UIntLit): Bundle { val a: UIntLit; val b: UIntLit }=
+            new Bundle ( "a" -> a, "b" -> b )
+                      .asInstanceOf[Bundle { val a: UIntLit; val b: UIntLit }]
 
     val width1 = 20
     val width2 = 30
 
-// val my_bundle_lit = MyBundle.lit(
-// a = UIntLit(Width(width1))(3),
-// b = UIntLit(Width(width2))(4)
-// )
-// println(s"my_bundle_lit: ${my_bundle_lit} ${my_bundle_lit.a} ${my_bundle_lit.b}")
+    val my_bundle_lit = MyBundle.lit(
+      a = UIntLit(Width(width1))(3),
+      b = UIntLit(Width(width2))(4)
+    )
+    println(s"my_bundle_lit: ${my_bundle_lit} ${my_bundle_lit.a} ${my_bundle_lit.b}")
 
 
 
@@ -84,19 +79,19 @@ object Main:
       val inner = new MyBundle(x, y)
       val outer = UInt(Width(width_outer))
 
-// object NestedBundle:
-// given BundleLit[NestedBundle] with
-// extension(comp: NestedBundle.type)
-// transparent inline def lit(
-// inner: Bundle { val a: UIntLit; val b: UIntLit },
-// outer: UIntLit
-// ): Bundle { val inner: Bundle { val a: UIntLit; val b: UIntLit }; val outer: UIntLit } =
-// new Bundle ( "inner" -> inner, "outer" -> outer )
-// .asInstanceOf[Bundle
-// {
-// val inner: Bundle { val a: UIntLit; val b: UIntLit };
-// val outer: UIntLit
-// }]
+    object NestedBundle:
+      given BundleLit[NestedBundle] with
+        extension(comp: NestedBundle.type)
+          transparent inline def lit(
+            inner: Bundle { val a: UIntLit; val b: UIntLit },
+            outer: UIntLit
+          ): Bundle { val inner: Bundle { val a: UIntLit; val b: UIntLit }; val outer: UIntLit } =
+            new Bundle ( "inner" -> inner, "outer" -> outer )
+                      .asInstanceOf[Bundle
+                        {
+                          val inner: Bundle { val a: UIntLit; val b: UIntLit };
+                          val outer: UIntLit
+                        }]
 
     val nested_bundle = new NestedBundle(2, 3, 4)
     println(s"${nested_bundle.outer}")
@@ -107,11 +102,11 @@ object Main:
 // transparent inline def lit(inline inner: Bundle, inline outer: UIntLit): Any =
 // Bundle.lit[NestedBundle]("inner" -> inner, "outer" -> outer)
 
-// val nested_bundle_lit = NestedBundle.lit(
-// inner = MyBundle.lit(a = UIntLit(Width(1))(3), b = UIntLit(Width(2))(4)),
-// outer = UIntLit(Width(9))(6)
-// )
-// println(s"${nested_bundle_lit} ${nested_bundle_lit.inner.a} ${nested_bundle_lit.outer}")
+    val nested_bundle_lit = NestedBundle.lit(
+      inner = MyBundle.lit(a = UIntLit(Width(1))(3), b = UIntLit(Width(2))(4)),
+      outer = UIntLit(Width(9))(6)
+    )
+    println(s"${nested_bundle_lit} ${nested_bundle_lit.inner.a} ${nested_bundle_lit.outer}")
 
 // Compile error
 // val nested_bundle_lit_2 = NestedBundle.lit(
