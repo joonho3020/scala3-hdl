@@ -49,7 +49,7 @@ final class InjectPhase extends PluginPhase {
             case d: DefDef if d.name == termName("lit") => true
             case _ => false
           }
-          println(s"already: ${already} isTarget ${isTarget}")
+          println(s"  already: ${already} isTarget ${isTarget}")
 
           if isTarget && !already then
             val mSym: TermSymbol = newSymbol(
@@ -63,6 +63,7 @@ final class InjectPhase extends PluginPhase {
             val defdef = DefDef(mSym, _ => rhs)
 
             val impl2  = cpy.Template(impl)(body = impl.body :+ defdef)
+            println(s"impl2 ${impl2} td.name ${td.name} td ${td} ${td.show}")
             cpy.TypeDef(td)(td.name, impl2)
           else td
         else td

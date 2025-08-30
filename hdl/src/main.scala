@@ -33,6 +33,19 @@ object Bundle:
   transparent inline def lit[B <: Bundle](inline elems: (String, Signal)*): Any =
     ${ BundleMacros.bundleLitImpl[B]('elems) }
 
+class MyBundle(x: Int, y: Int) extends Bundle:
+  val a = UInt(Width(x))
+  val b = UInt(Width(y))
+
+object MyBundle
+
+class NestedBundle(x: Int, y: Int, z: Int) extends Bundle:
+  val width_outer = x + y + z
+  val inner = new MyBundle(x, y)
+  val outer = UInt(Width(width_outer))
+
+object NestedBundle
+
 object Main:
   def main(args: Array[String]): Unit =
     println("Hello World")
@@ -40,11 +53,6 @@ object Main:
     println(s"${UInt(Width(3))}")
     println(s"${UIntLit(Width(3))(4)}")
 
-    class MyBundle(x: Int, y: Int) extends Bundle:
-      val a = UInt(Width(x))
-      val b = UInt(Width(y))
-
-    object MyBundle
 
 // object MyBundle:
 // transparent inline def lit(inline a: UIntLit, inline b: UIntLit): Any =
