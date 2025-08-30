@@ -7,6 +7,7 @@ import scala.annotation.targetName
 import scala.compiletime.erasedValue
 import scala.quoted.*
 import scala.language.strictEquality
+import hdl._
 
 // - Conversions
 
@@ -95,3 +96,4 @@ object Main:
     val f = (name: FieldName) => name.lowercase.uppercase.lowercase
     val used = iterativeFunctionDeconstruction(f)
     println(s"Used ${used}")
+    val x = MyBundle.lit()

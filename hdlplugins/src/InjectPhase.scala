@@ -14,7 +14,7 @@ import dotty.tools.dotc.core.Definitions._
 
 final class InjectPhase extends PluginPhase {
   override val phaseName  = "bundleinject"
-  override val runsAfter  = Set("pickler")
+  override val runsAfter  = Set("typer")
   override val runsBefore = Set("bundleexamine")
 
   override def transformPackageDef(tree: PackageDef)(using Context): Tree = {
@@ -82,7 +82,7 @@ final class InjectPhase extends PluginPhase {
 final class ExaminePhase extends PluginPhase {
   override val phaseName  = "bundleexamine"
   override val runsAfter  = Set("bundleinject")
-  override val runsBefore = Set("erasure")
+  override val runsBefore = Set("pickler")
 
   override def transformPackageDef(tree: PackageDef)(using Context): Tree = {
     println(s"[bundle-lit] visiting ${tree.pid.show}")

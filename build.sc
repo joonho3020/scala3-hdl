@@ -19,4 +19,5 @@ object hdl extends ScalaModule {
 
 object playground extends ScalaModule {
   def scalaVersion = "3.3.1"
+  override def moduleDeps = Seq(hdl)
 }
