@@ -78,3 +78,30 @@ object BundleMacros:
         report.errorAndAbort("Invalid varargs for Bundle.lit")
 
     resultExpr
+
+  /** Build a bundle literal by taking the bundle class from a companion object receiver. */
+  def bundleLitFromCompImpl(
+    compExpr: Expr[Any],
+    elemsExpr: Expr[Seq[(String, Signal)]]
+  )(using Quotes): Expr[Any] =
+    import quotes.reflect.*
+
+    val compSym = compExpr.asTerm.tpe.typeSymbol
+
+    if compSym == Symbol.noSymbol then
+      report.errorAndAbort("Unable to resolve companion symbol for lit receiver")
+
+    val bundleClassSym = compSym.companionClass
+
+    if bundleClassSym == Symbol.noSymbol || !bundleClassSym.exists then
+      report.errorAndAbort(s"Receiver ${compSym.name} has no companion class")
+
+    val bundleClassTpe = bundleClassSym.typeRef
+
+    // Ensure the resolved companion class is a subtype of Bundle
+    if !(bundleClassTpe <:< TypeRepr.of[Bundle]) then
+      report.errorAndAbort(s"Receiver ${compSym.name} companion class ${bundleClassSym.name} is not a Bundle")
+
+    bundleClassTpe.asType match
+      case '[b] =>
+        bundleLitImpl[b](elemsExpr)
