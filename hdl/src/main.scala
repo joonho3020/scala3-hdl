@@ -83,5 +83,5 @@ object Main:
 // Compile error
 // val nested_bundle_lit_2 = NestedBundle.lit(
 // inner = MyBundle.lit(a = UInt(Width(1)), b = UIntLit(Width(2))(4)),
-// outer = UIntLit(Width(9))(6)
+// outer = UInt(Width(9))
 // )

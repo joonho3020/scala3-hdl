@@ -19,18 +19,18 @@ object BundleMacros:
         .filter { case (_, tpe) => tpe <:< TypeRepr.of[Signal] || tpe <:< TypeRepr.of[Bundle] }
         .toMap
 
-    def extractLiteralString(expr: Expr[String]): Option[String] = expr match
-      case Expr(value) => Some(value)
-      case _           => None
+    println(s"${bundleTpe.show}: ${bundleSym}, ${bundleSym.declaredFields}")
+    bundleSym.declaredFields.foreach(sym => {
+      println(s"${sym.name} ${bundleTpe.memberType(sym)}")
+    })
 
     elemsExpr match
       case Varargs(args) =>
         val validatedPairs: List[Expr[(String, Any)]] = args.map { pairExpr =>
           def handle(k: Expr[String], v: Expr[Any]): Expr[(String, Any)] =
             val vTerm = v.asTerm
-            extractLiteralString(k) match
-              case None =>
-                report.errorAndAbort("Bundle.lit requires string literal field names")
+
+            k.value match
               case Some(fieldName) =>
                 declaredVals.get(fieldName) match
                   case None =>
@@ -38,6 +38,7 @@ object BundleMacros:
                     report.errorAndAbort(s"Field '$fieldName' is not a member of ${bundleSym.name}. Known fields: [$known]")
                   case Some(expectedTpe) =>
                     val providedTpe = vTerm.tpe
+                    println(s"providedTpe ${providedTpe} ${providedTpe.show}")
                     val ok =
                       if expectedTpe <:< TypeRepr.of[UInt] then providedTpe <:< TypeRepr.of[UIntLit]
                       else if expectedTpe <:< TypeRepr.of[Bundle] then providedTpe <:< TypeRepr.of[Bundle]
@@ -45,6 +46,8 @@ object BundleMacros:
                     if !ok then
                       report.errorAndAbort(s"Field '$fieldName' expects value of type ${expectedTpe.show}, but got ${providedTpe.show}")
                     '{ Tuple2($k, $v.asInstanceOf[Any]) }
+              case None =>
+                report.errorAndAbort("Bundle.lit requires string literal field names")
 
           pairExpr match
             // Tuple literal
