@@ -3,7 +3,9 @@ package hdl
 import scala.quoted.*
 
 object BundleMacros:
-  def bundleLitImpl[B: Type](elemsExpr: Expr[Seq[(String, Signal)]])(using Quotes): Expr[Bundle] =
+  def bundleLitImpl[B: Type](
+    elemsExpr: Expr[Seq[(String, Signal)]]
+  )(using Quotes): Expr[Any] =
     import quotes.reflect.*
 
     val bundleTpe = TypeRepr.of[B]
@@ -24,10 +26,11 @@ object BundleMacros:
       println(s"${sym.name} ${bundleTpe.memberType(sym)}")
     })
 
-    elemsExpr match
+    val resultExpr: Expr[Any] = elemsExpr match
       case Varargs(args) =>
-        val validatedPairs: List[Expr[(String, Signal)]] = args.map { pairExpr =>
-          def handle(k: Expr[String], v: Expr[Signal]): Expr[(String, Signal)] =
+        // Build validated pairs and collect field type info for structural refinement
+        val validatedAndInfos: List[(Expr[(String, Signal)], Option[(String, TypeRepr)])] = args.map { pairExpr =>
+          def handle(k: Expr[String], v: Expr[Signal]): (Expr[(String, Signal)], Option[(String, TypeRepr)]) =
             val vTerm = v.asTerm
 
             k.value match
@@ -45,19 +48,33 @@ object BundleMacros:
                       else providedTpe <:< expectedTpe
                     if !ok then
                       report.errorAndAbort(s"Field '$fieldName' expects value of type ${expectedTpe.show}, but got ${providedTpe.show}")
-                    '{ Tuple2($k, $v.asInstanceOf[Signal]) }
+                    val pairExpr: Expr[(String, Signal)] = '{ Tuple2($k, $v.asInstanceOf[Signal]) }
+                    // For refinement, keep the provided type (more precise), but erase to a non-singleton
+                    val refineTpe = providedTpe.widen
+                    (pairExpr, Some(fieldName -> refineTpe))
               case None =>
                 report.errorAndAbort("Bundle.lit requires string literal field names")
 
           pairExpr match
-            // Tuple literal
-            case '{ ($k: String, $v: Signal) } => handle(k, v)
             // ArrowAssoc '->' syntax
             case '{ ($k: String) -> ($v: Signal) } => handle(k, v)
             case _ =>
               report.errorAndAbort("Invalid argument to Bundle.lit; expected (String, Signal) pairs")
         }.toList
 
-        '{ new Bundle(${ Varargs(validatedPairs) }: _*) }
+        val validatedPairs: List[Expr[(String, Signal)]] = validatedAndInfos.map(_._1)
+        val fieldInfos: List[(String, TypeRepr)] = validatedAndInfos.flatMap(_._2)
+
+        // Construct structural refinement type: Bundle { val f1: T1; val f2: T2; ... }
+        val refinedTpe: TypeRepr = fieldInfos.foldLeft(TypeRepr.of[Bundle]) { case (acc, (name, tpe)) =>
+          Refinement(acc, name, tpe)
+        }
+
+        val baseExpr: Expr[Bundle] = '{ new Bundle(${ Varargs(validatedPairs) }: _*) }
+
+        refinedTpe.asType match
+          case '[t] => '{ $baseExpr.asInstanceOf[t] }
       case _ =>
         report.errorAndAbort("Invalid varargs for Bundle.lit")
+
+    resultExpr
