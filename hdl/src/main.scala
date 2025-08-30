@@ -68,9 +68,12 @@ object Main:
     println(s"${nested_bundle.inner.a}")
     println(s"${nested_bundle.inner.b}")
 
+    val width1 = 20
+    val width2 = 30
+
     val my_bundle_lit = MyBundle.lit(
-      a = UIntLit(Width(1))(3),
-      b = UIntLit(Width(2))(4)
+      a = UIntLit(Width(width1))(3),
+      b = UIntLit(Width(width2))(4)
     )
     println(s"${my_bundle_lit} ${my_bundle_lit.a} ${my_bundle_lit.b}")
 
