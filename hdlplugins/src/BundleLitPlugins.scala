@@ -8,5 +8,5 @@ class BundleLitPlugins extends StandardPlugin {
   val description = "Inject lit methods into Bundle companions"
 
   def init(options: List[String]): List[PluginPhase] =
-    List(new InjectPhase)
+    List(new InjectPhase, new ExaminePhase)
 }

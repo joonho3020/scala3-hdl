@@ -66,11 +66,6 @@ object Main:
 
 // val my_bundle_lit = MyBundle.lit
 
-    class NestedBundle(x: Int, y: Int, z: Int) extends Bundle:
-      val width_outer = x + y + z
-      val inner = new MyBundle(x, y)
-      val outer = UInt(Width(width_outer))
-
 // object NestedBundle:
 // transparent inline def lit(inline inner: Bundle, inline outer: UIntLit): Any =
 // Bundle.lit[NestedBundle]("inner" -> inner, "outer" -> outer)

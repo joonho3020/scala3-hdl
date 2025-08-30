@@ -10,11 +10,12 @@ import dotty.tools.dotc.core.Names._
 import dotty.tools.dotc.core.StdNames._
 import dotty.tools.dotc.core.Flags._
 import dotty.tools.dotc.core.Types._
+import dotty.tools.dotc.core.Definitions._
 
 final class InjectPhase extends PluginPhase {
-  override val phaseName  = "bundle-lit-inject"
+  override val phaseName  = "bundleinject"
   override val runsAfter  = Set("pickler")
-  override val runsBefore = Set("erasure")
+  override val runsBefore = Set("bundleexamine")
 
   override def transformPackageDef(tree: PackageDef)(using Context): Tree = {
     println(s"[bundle-lit] visiting ${tree.pid.show}")
@@ -59,7 +60,10 @@ final class InjectPhase extends PluginPhase {
               info  = MethodType(Nil)(_ => Nil, _ => bundleClass.typeRef)
             ).asTerm
             val ctor  = Select(New(TypeTree(bundleClass.typeRef)), nme.CONSTRUCTOR)
-            val rhs   = Apply(ctor, Nil)
+            val tuple2Type = defn.PairClass.typeRef.appliedTo(defn.StringType :: defn.AnyType :: Nil)
+            val seqOfTuple = defn.SeqType.appliedTo(tuple2Type)
+            val emptySeqArg = Typed(ref(defn.NilModule.termRef), TypeTree(seqOfTuple))
+            val rhs   = Apply(ctor, emptySeqArg :: Nil)
             val defdef = DefDef(mSym, _ => rhs)
 
             val impl2  = cpy.Template(impl)(body = impl.body :+ defdef)
@@ -72,5 +76,32 @@ final class InjectPhase extends PluginPhase {
     }
 
     cpy.PackageDef(tree)(tree.pid, newStats)
+  }
+}
+
+final class ExaminePhase extends PluginPhase {
+  override val phaseName  = "bundleexamine"
+  override val runsAfter  = Set("bundleinject")
+  override val runsBefore = Set("erasure")
+
+  override def transformPackageDef(tree: PackageDef)(using Context): Tree = {
+    println(s"[bundle-lit] visiting ${tree.pid.show}")
+
+    // Resolve hdl.Bundle
+    val bundleClass: ClassSymbol = requiredClass("hdl.Bundle")
+
+    // Collect classes in this package that are subclasses of Bundle
+    val bundleOwners = scala.collection.mutable.HashSet[ClassSymbol]()
+    tree.foreachSubTree {
+      case td: TypeDef if td.isClassDef =>
+        val cls = td.symbol.asClass
+        val isSubclass = cls.isSubClass(bundleClass)
+        println(s"cls: ${cls}")
+        println(td.show)
+        if isSubclass && cls != bundleClass then
+          bundleOwners += cls
+      case _ =>
+    }
+    tree
   }
 }
