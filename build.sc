@@ -21,3 +21,12 @@ object playground extends ScalaModule {
   def scalaVersion = "3.3.1"
   override def moduleDeps = Seq(hdl)
 }
+
+object hdl2 extends ScalaModule {
+  def scalaVersion = "3.3.1"
+}
+
+object hdl2_playground extends ScalaModule {
+  def scalaVersion = "3.3.1"
+  override def moduleDeps = super.moduleDeps ++ Seq(hdl2)
+}
