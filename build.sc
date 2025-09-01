@@ -42,3 +42,7 @@ object dynamic extends ScalaModule {
   def scalaVersion = "3.7.0"
   override def moduleDeps = Seq(hdl)
 }
+
+object hdl3 extends ScalaModule {
+  def scalaVersion = SCALAVERSION
+}

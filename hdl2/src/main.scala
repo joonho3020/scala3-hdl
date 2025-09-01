@@ -118,6 +118,11 @@ object Main:
 
     val mb = new MyBundle(2, 3)
     println(mb)
+    println(mb.a)
+
+    // NOTE Okay. This works, but is undesirable for a few reaons
+    // - One, we have to use reflection in Bundle in order to find the subfields for Reg[MyBundle]
+    // - Second, we lose LSP support when performing subfield access of Reg[MyBundle]. So `regbundle.` will not suggest `a: UInt` for example
     val regbundle = new Reg(new MyBundle(2, 3))
     println(regbundle.a)
 // regbundle.a
