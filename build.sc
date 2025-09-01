@@ -37,3 +37,8 @@ object hdl2_playground extends ScalaModule {
   def scalaVersion = SCALAVERSION
   override def moduleDeps = super.moduleDeps ++ Seq(hdl2)
 }
+
+object dynamic extends ScalaModule {
+  def scalaVersion = "3.7.0"
+  override def moduleDeps = Seq(hdl)
+}

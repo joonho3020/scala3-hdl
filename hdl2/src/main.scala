@@ -28,37 +28,29 @@ final class UInt(w: Width) extends ValueType:
 final class Clock extends ValueType:
   override def toString(): String = "Clock"
 
-trait Bundle extends ValueType
+class Bundle(elems: (String, ValueType)*) extends Selectable with ValueType:
+  private val fields = elems.toMap
+  def selectDynamic(name: String): ValueType = fields(name)
+  override def toString: String =
+    val body = fields.map { case (k, v) => s"$k=$v" }.mkString(", ")
+    s"Bundle($body)"
 
 sealed trait RefType[V <: ValueType]
 
-final class BundleType(private val fields: Map[String, ValueType]) extends Bundle:
-  def field(name: String): Option[ValueType] = fields.get(name)
-  def fieldNames: Iterable[String] = fields.keys
-  override def toString(): String =
-    val rendered = fields.map { case (n, v) => s"$n: $v" }.mkString(", ")
-    s"Bundle($rendered)"
+final class FieldRef[V <: ValueType](name: String, v: V) extends RefType[V]:
+  override def toString(): String = s".${name} : ${v}"
 
-object Bundle:
-  def apply(fields: (String, ValueType)*): BundleType = new BundleType(Map.from(fields))
-
-final class FieldRef[V <: ValueType](parent: RefType[Bundle], name: String, v: V) extends RefType[V]:
-  override def toString(): String = s"${parent}.${name} : ${v}"
-
-class Reg[V <: ValueType](v: V) extends RefType[V], scala.Dynamic:
+class Reg[V <: ValueType](v: V) extends RefType[V] with Dynamic:
   override def toString(): String = s"Reg(${v})"
   def selectDynamic(name: String): FieldRef[ValueType] =
     v match
-      case b: BundleType =>
-        val parent = this.asInstanceOf[RefType[Bundle]]
-        b.field(name)
-          .map(ft => new FieldRef[ValueType](parent, name, ft))
-          .getOrElse(throw new NoSuchElementException(s"Bundle has no field '$name'"))
+      case b: Bundle =>
+        new FieldRef(
+          name,
+          v.selectDynamic(name)
+        )
       case _ =>
         throw new UnsupportedOperationException("Subfield selection is only supported on Reg[Bundle]")
-
-class Lit[V <: ValueType](v: V)(using h: HostLit[V])(lit: h.Repr) extends RefType[V]:
-  override def toString(): String = s"Lit(${v}, ${lit})"
 
 // Allow passing Int where BigInt is expected
 given Conversion[Int, BigInt] with
@@ -68,6 +60,8 @@ given Conversion[Int, BigInt] with
 given Conversion[BigInt, BigInt] with
   def apply(b: BigInt): BigInt = b
 
+class Lit[V <: ValueType](v: V)(using h: HostLit[V])(lit: h.Repr) extends RefType[V]:
+  override def toString(): String = s"Lit(${v}, ${lit})"
 
 object Lit:
   def apply[V <: ValueType, R](v: V, r: R)(using h: HostLit[V], c: Conversion[R, h.Repr]): Lit[V] =
@@ -101,13 +95,11 @@ object Main:
     val l2 = Lit(UInt(Width(4)), 2)
     println(l2)
 
-    val myBundle = Bundle(
-      "x" -> UInt(Width(8)),
-      "y" -> UInt(Width(8))
-    )
-    val rb = Reg(myBundle)
-    println(rb)
-    val rx = rb.x
-    val ry = rb.y
-    println(rx)
-    println(ry)
+    class MyBundle(wa: Int, wb: Int) extends Bundle:
+      val a = UInt(Width(wa))
+      val b = UInt(Width(wb))
+
+    val mb = new MyBundle(2, 3)
+    val regbundle = new Reg(new MyBundle(2, 3))
+    regbundle.a
+// regbundle.a
