@@ -34,34 +34,39 @@ trait Bundle extends ValueType
 
 sealed trait RefType
 
-final class Reg[V <: ValueType](v: V):
-  override def toString(): String = s"Reg($v)"
+final class Reg[V <: ValueType](val value: V) extends Dynamic:
+  override def toString(): String = s"Reg($value)"
+  transparent inline def selectDynamic(name: String): Any =
+    ${ RegMacros.selectFieldFromReg[V]('this, 'name) }
 
-trait RegImpl[V <: ValueType] extends RefType:
-  def asReg(v: V): Reg[V]
+// trait RegImpl[V <: ValueType] extends RefType:
+// def asReg(v: V): Reg[V]
 
-object RegImpl:
-  given RegImpl[Clock]:
-    def asReg(v: Clock): Reg[Clock] = new Reg(v)
+// object RegImpl:
+// given RegImpl[Clock]:
+// def asReg(v: Clock): Reg[Clock] = new Reg(v)
 
-  given RegImpl[UInt]:
-    def asReg(v: UInt): Reg[UInt] = new Reg(v)
+// given RegImpl[UInt]:
+// def asReg(v: UInt): Reg[UInt] = new Reg(v)
 
-  inline def derived[T <: ValueType](using m: Mirror.Of[T]): RegImpl[T] =
-    inline m match
-      case p: Mirror.ProductOf[T] =>
-        val elemRegImpls: List[RegImpl[?]] = summonAll[p.MirroredElemTypes]
-        ???
-      case s: Mirror.SumOf[T] => ???
+// inline def derived[T <: Bundle](using m: Mirror.Of[T]): RegImpl[T] =
+// inline m match
+// case p: Mirror.ProductOf[T] =>
+// new RegImpl[T]:
+// def asReg(v: T): Reg[T] = new Reg(v)
+// case s: Mirror.SumOf[T] =>
+// compiletime.error("RegImpl cannot be derived for sum types")
 
-  private inline def summonAll[T <: Tuple]: List[RegImpl[?]] =
-    inline erasedValue[T] match
-      case _: EmptyTuple => Nil
-      case _: (t *: ts) => summonInline[RegImpl[t]] :: summonAll[ts]
+// private inline def summonAll[T <: Tuple]: List[RegImpl[?]] =
+// inline erasedValue[T] match
+// case _: EmptyTuple => Nil
+// case _: (t *: ts) => summonInline[RegImpl[t & ValueType]] :: summonAll[ts]
 
 object Reg:
-  def apply[V <: ValueType](v: V)(using regimpl: RegImpl[V]) =
-    regimpl.asReg(v)
+  def apply[V <: ValueType](v: V) = new Reg(v)
+  ()
+
+// macro moved to separate file to avoid cyclic macro dependencies
 
 object Main:
   def main(args: Array[String]): Unit =
@@ -84,3 +89,7 @@ object Main:
     object MyBundle:
       def apply(w1: Int, w2: Int): MyBundle =
         new MyBundle(a = UInt(Width(w1)), b = UInt(Width(w2)))
+
+    val mybundle = MyBundle(2, 3)
+    val rmb = Reg(MyBundle(4, 5))
+    println(rmb.a)
