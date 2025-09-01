@@ -46,3 +46,7 @@ object dynamic extends ScalaModule {
 object hdl3 extends ScalaModule {
   def scalaVersion = SCALAVERSION
 }
+
+object hdl4 extends ScalaModule {
+  def scalaVersion = SCALAVERSION
+}
