@@ -2,6 +2,7 @@ package hdl2
 
 import scala.deriving.Mirror
 import scala.compiletime.{constValue, erasedValue, summonInline}
+import scala.language.implicitConversions
 
 object Width:
   opaque type Width = Int
@@ -17,9 +18,6 @@ object Width:
     def show: String = s"Width($x)"
 
 import Width.Width
-
-
-
 
 sealed trait ValueType
 
@@ -38,11 +36,22 @@ class Reg[V <: ValueType](v: V) extends RefType[V]:
   override def toString(): String = s"Reg(${v})"
 
 class Lit[V <: ValueType](v: V)(using h: HostLit[V])(lit: h.Repr) extends RefType[V]:
-  override def toString(): String = s"Lit(${v})"
+  override def toString(): String = s"Lit(${v}, ${lit})"
+
+
+
+// Allow passing Int where BigInt is expected
+given Conversion[Int, BigInt] with
+  def apply(i: Int): BigInt = BigInt(i)
+
+// Identity conversions to satisfy the generic (v, r) overload
+given Conversion[BigInt, BigInt] with
+  def apply(b: BigInt): BigInt = b
+
 
 object Lit:
-  def apply[V <: ValueType, R](v: V, r: R)(using HostLit.Aux[V, R]): Lit[V] =
-    new Lit[V](v)(using summon)(r)
+  def apply[V <: ValueType, R](v: V, r: R)(using h: HostLit[V], c: Conversion[R, h.Repr]): Lit[V] =
+    new Lit[V](v)(using h)(c(r))
 
 trait HostLit[V <: ValueType]:
   type Repr
@@ -50,11 +59,8 @@ trait HostLit[V <: ValueType]:
 object HostLit:
   type Aux[V <: ValueType, R] = HostLit[V] { type Repr = R }
 
-  given uint: Aux[UInt, Int | BigInt] = new HostLit[UInt]{ type Repr = Int | BigInt }
+  given uint_bigint: Aux[UInt, BigInt] = new HostLit[UInt]{ type Repr = BigInt }
   given clock: Aux[Clock, Boolean]    = new HostLit[Clock]{ type Repr = Boolean }
-
-  // given uint: HostLit[UInt] = new HostLit[UInt]{ type Repr = Int | BigInt }
-  // given clock: HostLit[Clock] = new HostLit[Clock]{ type Repr = Boolean }
 
 object Main:
   def main(args: Array[String]): Unit =
@@ -69,5 +75,8 @@ object Main:
     val uhost = summon[HostLit[UInt]]
     println(uhost)
 
-    val l1 = Lit(UInt(Width(4)), 2 : Int | BigInt)
+    val l1 = Lit(UInt(Width(4)), BigInt(2))
     println(l1)
+
+    val l2 = Lit(UInt(Width(4)), 2)
+    println(l2)
