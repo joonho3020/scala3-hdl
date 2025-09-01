@@ -28,12 +28,29 @@ final class UInt(w: Width) extends ValueType:
 final class Clock extends ValueType:
   override def toString(): String = "Clock"
 
-class Bundle(elems: (String, ValueType)*) extends Selectable with ValueType:
-  private val fields = elems.toMap
-  def selectDynamic(name: String): ValueType = fields(name)
+class Bundle extends Selectable with ValueType:
+  def selectDynamic(name: String): ValueType =
+    try
+      val m = this.getClass.getMethod(name)
+      m.invoke(this).asInstanceOf[ValueType]
+    catch
+      case _: NoSuchMethodException =>
+        throw new NoSuchElementException(s"Bundle has no field '$name'")
+
   override def toString: String =
-    val body = fields.map { case (k, v) => s"$k=$v" }.mkString(", ")
-    s"Bundle($body)"
+    val methods = this.getClass.getMethods
+      .filter(m => m.getParameterCount == 0)
+    val entries =
+      methods
+        .flatMap { m =>
+          val v =
+            try m.invoke(this)
+            catch case _: Throwable => null
+          v match
+            case vt: ValueType => Some(s"${m.getName}=$vt")
+            case _             => None
+        }
+    s"Bundle(${entries.mkString(", ")})"
 
 sealed trait RefType[V <: ValueType]
 
@@ -47,7 +64,7 @@ class Reg[V <: ValueType](v: V) extends RefType[V] with Dynamic:
       case b: Bundle =>
         new FieldRef(
           name,
-          v.selectDynamic(name)
+          b.selectDynamic(name)
         )
       case _ =>
         throw new UnsupportedOperationException("Subfield selection is only supported on Reg[Bundle]")
@@ -100,6 +117,7 @@ object Main:
       val b = UInt(Width(wb))
 
     val mb = new MyBundle(2, 3)
+    println(mb)
     val regbundle = new Reg(new MyBundle(2, 3))
-    regbundle.a
+    println(regbundle.a)
 // regbundle.a
