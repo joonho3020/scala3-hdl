@@ -37,7 +37,7 @@ object Show:
     inline m match
       case p: Mirror.ProductOf[T] =>
         val elemShows : List[Show[?]] = summonAll[p.MirroredElemTypes]
-        val elemLabels: List[String]    = labelsOf[p.MirroredElemLabels]
+        val elemLabels: List[String]  = labelsOf[p.MirroredElemLabels]
         showProduct(p, elemShows, elemLabels, className)
       case s: Mirror.SumOf[T]     => ???
 
