@@ -21,18 +21,18 @@ final class UInt(val w: Width):
   override def toString(): String =
     s"UInt<$w>"
 
-type Id[A] = A
+// type Id[A] = A
 final case class Reg[A](under: A)
 
 // Build[F] knows how to make leaves for a given “view” F[_]
 trait Build[F[_]]:
   def uint(bits: Int): F[UInt]
 
-given Build[Id] with
-  def uint(bits: Int): Id[UInt] = UInt(Width(bits))
+// given Build[Id] with
+// def uint(bits: Int): Id[UInt] = UInt(Width(bits))
 
 given Build[Reg] with
-  def uint(bits: Int): Reg[UInt] = Reg( summon[Build[Id]].uint(bits) )
+  def uint(bits: Int): Reg[UInt] = Reg(UInt(Width(bits)))
 
 inline def mkReg[A](a: A): Reg[A] = Reg(a)
 
@@ -40,22 +40,22 @@ object Main:
   def main(args: Array[String]): Unit =
     println("Hello World")
 
+    final case class Params(flagL: Int, dataL: Int, flagR: Int, dataR: Int)
+
     final case class Inner[F[_]](
       flag: F[UInt],
       data: F[UInt]
     )
 
-    final case class Outer[F[_]](
-      left : Inner[F],
-      right: Inner[F]
-    )
-
-    final case class Params(flagL: Int, dataL: Int, flagR: Int, dataR: Int)
-
     object Inner:
       def apply[F[_]: Build](flagBits: Int, dataBits: Int): Inner[F] =
         Inner(flag = summon[Build[F]].uint(flagBits),
               data = summon[Build[F]].uint(dataBits))
+
+    final case class Outer[F[_]](
+      left : Inner[F],
+      right: Inner[F]
+    )
 
     object Outer:
       def apply[F[_]: Build](p: Params): Outer[F] =
@@ -67,16 +67,19 @@ object Main:
     val p = Params(1, 32, 1, 64)
 
     // Short, uniform constructors:
-    val v: Outer[Id]  = Outer[Id](p)
-    val r: Outer[Reg] = Outer[Reg](p)
+// val v: Outer[Id]  = Outer[Id](p)
+// println(s"v.left.flat ${v.left.flag}")
+// println(s"v.right.flat ${v.right.flag}")
 
-    println(s"v.left.flat ${v.left.flag}")
-    println(s"v.right.flat ${v.right.flag}")
+    val r: Outer[Reg] = Outer[Reg](p)
     println(s"r.right.data ${r.right.data}")
     println(s"r.right ${r.right}")
 
     val uint_reg = Reg(UInt(Width(2)))
     println(s"uint_reg ${uint_reg}")
+
+    val outer_reg_2 = Outer[Reg](Params(2, 3, 4, 5))
+    println(s"${outer_reg_2.right}")
 
 // NOTES
 // - Need to be able to derive the HKD typeclass for product types. This should be doable
