@@ -24,12 +24,6 @@ final class UInt(val w: Width):
 type Id[A] = A
 final case class Reg[A](under: A)
 
-trait HKD[BUNDLE[_[_]]]:
-  def mapK[F[_], G[_]](b: BUNDLE[F])(nat: [A] => F[A] => G[A]): BUNDLE[G]
-
-object HKD:
-  inline def apply[BUNDLE[_[_]]](using h: HKD[BUNDLE]): HKD[BUNDLE] = h
-
 // Build[F] knows how to make leaves for a given “view” F[_]
 trait Build[F[_]]:
   def uint(bits: Int): F[UInt]
@@ -56,21 +50,6 @@ object Main:
       right: Inner[F]
     )
 
-    given hkdInner: HKD[Inner] with
-      def mapK[F[_], G[_]](b: Inner[F])(nat: [A] => F[A] => G[A]): Inner[G] =
-        Inner(
-          flag = nat(b.flag),
-          data = nat(b.data)
-        )
-
-    given hkdOuter(using HKD[Inner]): HKD[Outer] with
-      def mapK[F[_], G[_]](b: Outer[F])(nat: [A] => F[A] => G[A]): Outer[G] =
-        Outer(
-          left  = HKD[Inner].mapK(b.left)(nat),
-          right = HKD[Inner].mapK(b.right)(nat)
-        )
-
-
     final case class Params(flagL: Int, dataL: Int, flagR: Int, dataR: Int)
 
     object Inner:
@@ -85,18 +64,6 @@ object Main:
           right = Inner[F](p.flagR,  p.dataR)
         )
 
-// val v: Outer[Id] = Outer(
-// left  = Inner(flag = UInt(Width(1)),  data = UInt(Width(32))),
-// right = Inner(flag = UInt(Width(1)),  data = UInt(Width(64)))
-// )
-
-// val r = HKD[Outer].mapK(v)([A] => (a: A) => mkReg(a))
-// val r_left_data = r.left.data
-// println(s"r_left_data ${r_left_data}")
-
-// val r_left = r.left
-// println(s"r_left ${r_left}")
-
     val p = Params(1, 32, 1, 64)
 
     // Short, uniform constructors:
@@ -107,6 +74,9 @@ object Main:
     println(s"v.right.flat ${v.right.flag}")
     println(s"r.right.data ${r.right.data}")
     println(s"r.right ${r.right}")
+
+    val uint_reg = Reg(UInt(Width(2)))
+    println(s"uint_reg ${uint_reg}")
 
 // NOTES
 // - Need to be able to derive the HKD typeclass for product types. This should be doable
