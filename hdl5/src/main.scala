@@ -17,12 +17,13 @@ object Width:
 
 import Width.Width
 
-final class UInt(val w: Width):
+class UInt(val w: Width):
   override def toString(): String =
     s"UInt<$w>"
 
 // type Id[A] = A
 final case class Reg[A](under: A)
+final case class RegLit[A](under: A, lit: Int)
 
 // Build[F] knows how to make leaves for a given “view” F[_]
 trait Build[F[_]]:
@@ -34,13 +35,12 @@ trait Build[F[_]]:
 given Build[Reg] with
   def uint(bits: Int): Reg[UInt] = Reg(UInt(Width(bits)))
 
-inline def mkReg[A](a: A): Reg[A] = Reg(a)
-
 object Main:
   def main(args: Array[String]): Unit =
     println("Hello World")
 
     final case class Params(flagL: Int, dataL: Int, flagR: Int, dataR: Int)
+    final case class Lits(flagL: Int, dataL: Int, flagR: Int, dataR: Int)
 
     final case class Inner[F[_]](
       flag: F[UInt],
@@ -52,6 +52,14 @@ object Main:
         Inner(flag = summon[Build[F]].uint(flagBits),
               data = summon[Build[F]].uint(dataBits))
 
+      def apply[F[_]: Build](
+        flagBits: Int, dataBits: Int
+      )(
+        flagVal: Int, dataVal: Int
+      ): Inner[F] =
+        Inner(flag = summon[Build[F]].uintlit(flagBits, flagVal),
+              data = summon[Build[F]].uintlit(dataBits, dataVal))
+
     final case class Outer[F[_]](
       left : Inner[F],
       right: Inner[F]
@@ -62,6 +70,12 @@ object Main:
         Outer(
           left  = Inner[F](p.flagL,  p.dataL),
           right = Inner[F](p.flagR,  p.dataR)
+        )
+
+      def apply[F[_]: Build](p: Params)(v: Lits): Outer[F] =
+        Outer(
+          left  = Inner[F](p.flagL,  p.dataL)(v.flagL, v.dataL),
+          right = Inner[F](p.flagR,  p.dataR)(v.flagR, v.dataR)
         )
 
     val p = Params(1, 32, 1, 64)
@@ -80,6 +94,10 @@ object Main:
 
     val outer_reg_2 = Outer[Reg](Params(2, 3, 4, 5))
     println(s"${outer_reg_2.right}")
+
+    val inner_lit = Inner[Reg](2, 3)(1, 2)
+    println(s"inner_lit.data ${inner_lit.data}")
+// val outer_lit = Outer[Lit](Params(5, 6, 7, 8))(Lits(4, 5, 6, 7))
 
 // NOTES
 // - Need to be able to derive the HKD typeclass for product types. This should be doable
