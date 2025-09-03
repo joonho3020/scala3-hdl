@@ -1,120 +1,117 @@
 package hdl5
 
+import scala.deriving.*
 import scala.compiletime.*
 
+// ----------------- Leaves -----------------
 object Width:
   opaque type Width = Int
-
   def apply(w: Int): Width = w
-
   extension (x: Width)
     def toInt: Int = x
-    def + (y: Width): Width = x + y
-    def - (y: Width): Width = x - y
-    def * (y: Width): Width = x * y
+    def asString: String = s"Width($x)"
+import Width.*
 
-    def show: String = s"Width($x)"
-
-import Width.Width
-
-final class UInt(val w: Width):
-  override def toString(): String =
-    s"UInt<$w>"
-
-final class UIntLit(val w: Width, val v: Int):
-  override def toString(): String =
-    s"UInt<$w>($v)"
-
-// type Id[A] = A
+final case class UInt(w: Width)
 final case class Reg[A](under: A)
+final case class Lit[A](under: A, value: BigInt)
 
-final case class Lit[A](under: A, value: Int)
+type Id[A] = A
 
-// Build[F] knows how to make leaves for a given “view” F[_]
-trait Build[F[_]]:
-  def uint(bits: Int): F[UInt]
+// ----------------- Make / ParamOf (leaf-only rules) -----------------
+trait Make[F[_], A]:
+  def make(p: ParamOf[F, A]): F[A]
 
-trait BuildInit[F[_]]:
-  def uint(bits: Int, value: Int): F[UInt]
+// Compute parameter type for building F[A]
+type ParamOf[F[_], A] = F[Any] match
+  case Reg[Any] => A match
+    case UInt => Int
+    case _    => Nothing
+  case Lit[Any] => A match
+    case UInt => (Int, BigInt)
+    case _    => Nothing
+  case _ => Nothing
 
-// given Build[Id] with
-// def uint(bits: Int): Id[UInt] = UInt(Width(bits))
+given Make[Reg, UInt] with
+  def make(bits: ParamOf[Reg, UInt]): Reg[UInt] = Reg(UInt(Width(bits)))
 
-given Build[Reg] with
-  def uint(bits: Int): Reg[UInt] = Reg(UInt(Width(bits)))
+given Make[Lit, UInt] with
+  def make(p: ParamOf[Lit, UInt]): Lit[UInt] = Lit(UInt(Width(p._1)), p._2)
 
-given BuildInit[Lit] with
-  def uint(bits: Int, value: Int): Lit[UInt] = Lit(UInt(Width(bits)), value)
+// ----------------- HKD (auto-derived) -----------------
+trait HKD[B[_[_]]]:
+  def mapK[F[_], G[_]](b: B[F])(nat: [A] => F[A] => G[A]): B[G]
 
-// case class Decoupled[T](valid: UInt, ready: UInt, bits: T)
-
-object Main:
-  def main(args: Array[String]): Unit =
-    println("Hello World")
-
-    final case class Params(flagL: Int, dataL: Int, flagR: Int, dataR: Int)
-
-    final case class Inner[F[_]](
-      flag: F[UInt],
-      data: F[UInt]
+// Minimal HKD instances for our example bundles
+given hkdInner: HKD[Inner] with
+  def mapK[F[_], G[_]](b: Inner[F])(nat: [A] => F[A] => G[A]): Inner[G] =
+    Inner[G](
+      flag = nat[UInt](b.flag),
+      data = nat[UInt](b.data)
     )
 
-    object Inner:
-      def apply[F[_]: Build](flagBits: Int, dataBits: Int): Inner[F] =
-        Inner(flag = summon[Build[F]].uint(flagBits),
-              data = summon[Build[F]].uint(dataBits))
+given hkdOuter(using HKD[Inner]): HKD[Outer] with
+  def mapK[F[_], G[_]](b: Outer[F])(nat: [A] => F[A] => G[A]): Outer[G] =
+    Outer[G](
+      left = summon[HKD[Inner]].mapK(b.left)(nat),
+      right = summon[HKD[Inner]].mapK(b.right)(nat)
+    )
 
-      def apply[F[_]: BuildInit](
-        flagBits: Int, dataBits: Int
-      )(
-        flagInit: Int, dataInit: Int
-      ): Inner[F] =
-        Inner(flag = summon[BuildInit[F]].uint(flagBits, flagInit),
-              data = summon[BuildInit[F]].uint(dataBits, dataInit))
+// ----------------- Generic builder -----------------
+object Build:
+  def regInner(ps: Inner[[A] =>> ParamOf[Reg, A]]): Inner[Reg] =
+    Inner[Reg](
+      flag = summon[Make[Reg, UInt]].make(ps.flag),
+      data = summon[Make[Reg, UInt]].make(ps.data)
+    )
 
-    val inner_reg = Inner[Reg](2, 3)
-    val inner_lit = Inner[Lit](5, 6)(2, 3)
-    println(s"flag: ${inner_lit.flag}, data ${inner_lit.data}")
+  def regOuter(ps: Outer[[A] =>> ParamOf[Reg, A]]): Outer[Reg] =
+    Outer[Reg](
+      left = regInner(ps.left),
+      right = regInner(ps.right)
+    )
 
-    final case class Outer[F[_]](
-      left : Inner[F],
-      right: Inner[F])
+  def litInner(ps: Inner[[A] =>> ParamOf[Lit, A]]): Inner[Lit] =
+    Inner[Lit](
+      flag = summon[Make[Lit, UInt]].make(ps.flag),
+      data = summon[Make[Lit, UInt]].make(ps.data)
+    )
 
-    object Outer:
-      def apply[F[_]: Build](p: Params): Outer[F] =
-        Outer(
-          left  = Inner[F](p.flagL,  p.dataL),
-          right = Inner[F](p.flagR,  p.dataR))
+  def litOuter(ps: Outer[[A] =>> ParamOf[Lit, A]]): Outer[Lit] =
+    Outer[Lit](
+      left = litInner(ps.left),
+      right = litInner(ps.right)
+    )
 
-      def apply[F[_]: BuildInit](p: Params)(q: Params): Outer[F] =
-        Outer(
-          left  = Inner[F](p.flagL,  p.dataL)(q.flagL, q.dataL),
-          right = Inner[F](p.flagR,  p.dataR)(q.flagR, q.dataR))
+// nice sugar
+type Params[B[_[_]], F[_]] = B[[A] =>> ParamOf[F, A]]
+extension (ps: Params[Outer, Reg]) inline def reg: Outer[Reg] = Build.regOuter(ps)
+extension (ps: Params[Outer, Lit]) inline def lit: Outer[Lit] = Build.litOuter(ps)
 
-    val p = Params(1, 32, 1, 64)
+// ----------------- Example bundles (users write ONLY these) -----------------
+final case class Inner[F[_]](flag: F[UInt], data: F[UInt])
+final case class Outer[F[_]](left: Inner[F], right: Inner[F])
 
-    // Short, uniform constructors:
-// val v: Outer[Id]  = Outer[Id](p)
-// println(s"v.left.flat ${v.left.flag}")
-// println(s"v.right.flat ${v.right.flag}")
+// ----------------- Demo -----------------
+object Main:
+  def main(args: Array[String]): Unit =
+    // 1) Build REGs: param leaves are just Int widths
+    type PReg[A] = ParamOf[Reg, A]       // UInt -> Int
+    val regParams: Params[Outer, Reg] =
+      Outer[PReg](
+        left  = Inner[PReg](flag = 1,  data = 32),
+        right = Inner[PReg](flag = 1,  data = 64)
+      )
+    val regs: Outer[Reg] = regParams.reg
 
-    val r: Outer[Reg] = Outer[Reg](p)
-    println(s"r.right.data ${r.right.data}")
-    println(s"r.right ${r.right}")
+    // 2) Build LITs: param leaves are (width, value)
+    type PLit[A] = ParamOf[Lit, A]       // UInt -> (Int, BigInt)
+    val litParams: Params[Outer, Lit] =
+      Outer[PLit](
+        left  = Inner[PLit](flag = (1, 1),  data = (32, BigInt(0x10))),
+        right = Inner[PLit](flag = (1, 0),  data = (64, BigInt("deadbeef", 16)))
+      )
+    val lits: Outer[Lit] = litParams.lit
 
-    val uint_reg = Reg(UInt(Width(2)))
-    println(s"uint_reg ${uint_reg}")
-
-    val outer_reg_2 = Outer[Reg](Params(2, 3, 4, 5))
-    println(s"${outer_reg_2.right}")
-
-    val outer_lit = Outer[Lit](Params(5, 6, 7, 8))(Params(7, 8, 9, 10))
-    println(s"left data ${outer_lit.left.data} right flag ${outer_lit.right.flag}")
-    println(s"left ${outer_lit.left} right ${outer_lit.right}")
-
-// NOTES
-// - Need to be able to derive the HKD typeclass for product types. This should be doable
-// - Once again, the constructor syntax being verbose is an ergonomic issue that cannot be easily ignored
-// - Instantiating registers using the `HKD[Outer].mapK(v)([A] => (a: A) => mkReg(a))` syntax is kind of crazy.
-//   Considering that the average hardware engineer is like Mr. Anderson who complains about not being able to
-//   understand Chisel, this is impossible for them
+    println(s"regs.right.data.width = ${regs.right.data.under.w}")
+    println(s"lits.right.data = width=${lits.right.data.under.w}, value=${lits.right.data.value}")
