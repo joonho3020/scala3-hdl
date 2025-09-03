@@ -20,54 +20,98 @@ final class InjectPhase extends PluginPhase {
   override def transformPackageDef(tree: PackageDef)(using Context): Tree = {
     println(s"[bundle-lit] visiting ${tree.pid.show}")
 
-    // Resolve hdl.Bundle
     val bundleClass: ClassSymbol = requiredClass("hdl.Bundle")
+    val uintClass: ClassSymbol   = requiredClass("hdl.UInt")
+    val uintLitClass: ClassSymbol = requiredClass("hdl.UIntLit")
+    val signalClass: ClassSymbol = requiredClass("hdl.Signal")
 
-    // Collect classes in this package that are subclasses of Bundle
-    val bundleOwners = scala.collection.mutable.HashSet[ClassSymbol]()
+    // Collect classes in this package that are subclasses of Bundle and their field infos
+    val fieldsByOwner = scala.collection.mutable.HashMap.empty[ClassSymbol, List[(TermName, Type)]]
+
     tree.foreachSubTree {
-      case td: TypeDef if td.isClassDef =>
+      case td: TypeDef if td.isClassDef && !td.symbol.is(ModuleClass) =>
         val cls = td.symbol.asClass
         val isSubclass = cls.isSubClass(bundleClass)
         if isSubclass && cls != bundleClass then
-          bundleOwners += cls
+          val tmpl = td.rhs match
+            case t: Template => t
+            case _ => EmptyTree
+          val fields: List[(TermName, Type)] = tmpl match
+            case t: Template =>
+              t.body.collect {
+                case v: ValDef =>
+                  val name = v.name
+                  val vtpe  = v.symbol.info.widen
+                  (name, vtpe)
+              }.filter { case (_, tpe) =>
+                // Only keep fields that are Signals or Bundles
+                tpe <:< signalClass.typeRef || tpe <:< bundleClass.typeRef
+              }
+            case _ => Nil
+          fieldsByOwner.update(cls, fields)
       case _ =>
     }
 
-    println(s"bundleOwners ${bundleOwners}")
-
-    // Rewrite companion modules for those classes: inject trivial lit() if missing
+    // Rewrite companion modules for those classes: inject typed transparent inline lit(...) if missing
     val newStats = tree.stats.map {
       case td: TypeDef if td.isClassDef && td.symbol.is(ModuleClass) =>
         val modClass  = td.symbol.asClass
         val compClass = modClass.companionClass
-        println(s"compClass ${compClass} ${compClass.exists}")
         if compClass.exists then
           val ownerCls  = compClass.asClass
-          val isTarget  = bundleOwners.contains(ownerCls)
+          val isTarget  = ownerCls.isSubClass(bundleClass) && ownerCls != bundleClass
           val impl      = td.rhs.asInstanceOf[Template]
           val already   = impl.body.exists {
             case d: DefDef if d.name == termName("lit") => true
             case _ => false
           }
-          println(s"  already: ${already} isTarget ${isTarget}")
 
           if isTarget && !already then
+            val ownerFields: List[(TermName, Type)] = fieldsByOwner.getOrElse(ownerCls, Nil)
+
+            // Build method type: parameters per field, result Any (transparent inline will expose refined type)
+            val paramNames: List[TermName] = ownerFields.map(_._1)
+            val paramTypes: List[Type] = ownerFields.map { case (_, tpe) =>
+              if tpe <:< uintClass.typeRef then uintLitClass.typeRef
+              else if tpe <:< bundleClass.typeRef then bundleClass.typeRef
+              else tpe
+            }
+
             val mSym: TermSymbol = newSymbol(
               owner = modClass,
               name  = termName("lit"),
-              flags = Method,
-              info  = MethodType(Nil)(_ => Nil, _ => bundleClass.typeRef)
+              flags = Method | Inline | Transparent | Synthetic,
+              info  = MethodType(paramNames)(_ => paramTypes, _ => defn.AnyType)
             ).asTerm
-            val ctor  = Select(New(TypeTree(bundleClass.typeRef)), nme.CONSTRUCTOR)
-            val tuple2Type = defn.PairClass.typeRef.appliedTo(defn.StringType :: defn.AnyType :: Nil)
-            val seqOfTuple = defn.SeqType.appliedTo(tuple2Type)
-            val emptySeqArg = Typed(ref(defn.NilModule.termRef), TypeTree(seqOfTuple))
-            val rhs   = Apply(ctor, emptySeqArg :: Nil)
-            val defdef = DefDef(mSym, _ => rhs)
+
+            // Mark parameters as inline params
+            mSym.paramSymss.foreach { params =>
+              params.foreach { p => p.setFlag(InlineParam) }
+            }
+
+            val defdef = DefDef(mSym, { paramss =>
+              // paramss has a single list for our MethodType
+              val params = paramss.headOption.getOrElse(Nil).map(_.asInstanceOf[ValDef].symbol)
+
+              // hdl.Bundle.lit[Owner]( ("a", a), ("b", b), ... )
+              val bundleModule = requiredModule("hdl.Bundle")
+              val litSel = Select(ref(bundleModule.termRef), termName("lit"))
+              val typeApplied = TypeApply(litSel, List(TypeTree(ownerCls.typeRef)))
+
+              val pairs: List[Tree] = ownerFields.zipWithIndex.map { case ((name, _), idx) =>
+                val k = Literal(dotty.tools.dotc.core.Constants.Constant(name.toString))
+                val vRef = ref(params(idx))
+                // Force tuple element type to (String, Signal) to satisfy expected varargs
+                val tupleModule = requiredModule("scala.Tuple2")
+                val tupleApply = Select(ref(tupleModule.termRef), nme.apply)
+                val tupleTapp  = TypeApply(tupleApply, List(TypeTree(defn.StringType), TypeTree(signalClass.typeRef)))
+                Apply(tupleTapp, List(k, vRef))
+              }
+
+              Apply(typeApplied, pairs)
+            })
 
             val impl2  = cpy.Template(impl)(body = impl.body :+ defdef)
-            println(s"impl2 ${impl2} td.name ${td.name} td ${td} ${td.show}")
             cpy.TypeDef(td)(td.name, impl2)
           else td
         else td

@@ -70,7 +70,7 @@ object BundleMacros:
           Refinement(acc, name, tpe)
         }
 
-        val baseExpr: Expr[Bundle] = '{ new Bundle(${ Varargs(validatedPairs) }: _*) }
+        val baseExpr: Expr[Bundle] = '{ new Bundle(${ Varargs(validatedPairs) }*) }
 
         refinedTpe.asType match
           case '[t] => '{ $baseExpr.asInstanceOf[t] }
@@ -78,3 +78,30 @@ object BundleMacros:
         report.errorAndAbort("Invalid varargs for Bundle.lit")
 
     resultExpr
+
+  def bundleDynamicUnknownMethod(methodExpr: Expr[String])(using Quotes): Expr[Any] =
+    import quotes.reflect.*
+    methodExpr.value match
+      case Some(name) => report.errorAndAbort(s"Unknown method '$name' on Bundle companion. Only 'lit' is supported.")
+      case None       => report.errorAndAbort("Unknown method on Bundle companion.")
+
+  def deriveBundleCompanionConversion[M: Type](using Quotes): Expr[Any] =
+    import quotes.reflect.*
+    val mTpe = TypeRepr.of[M]
+    val mSym = mTpe.typeSymbol
+    if !mSym.is(Module) then
+      report.errorAndAbort(s"Expected a companion module type, got: ${mTpe.show}")
+    val compClass = mSym.companionClass
+    if !compClass.exists then
+      report.errorAndAbort(s"No companion class for module: ${mSym.name}")
+    val clsTpe = compClass.typeRef
+    if !(clsTpe <:< TypeRepr.of[Bundle]) then
+      report.errorAndAbort(s"Companion class ${compClass.name} is not a subclass of hdl.Bundle")
+
+    clsTpe.asType match
+      case '[b <: Bundle] =>
+        '{
+          new scala.Conversion[M, hdl.BundleCompanionDynamic[b]] {
+            def apply(m: M): hdl.BundleCompanionDynamic[b] = new hdl.BundleCompanionDynamic[b]
+          }
+        }
