@@ -46,6 +46,8 @@ given Build[Reg] with
 given BuildInit[Lit] with
   def uint(bits: Int, value: Int): Lit[UInt] = Lit(UInt(Width(bits)), value)
 
+// case class Decoupled[T](valid: UInt, ready: UInt, bits: T)
+
 object Main:
   def main(args: Array[String]): Unit =
     println("Hello World")
@@ -76,21 +78,18 @@ object Main:
 
     final case class Outer[F[_]](
       left : Inner[F],
-      right: Inner[F]
-    )
+      right: Inner[F])
 
     object Outer:
       def apply[F[_]: Build](p: Params): Outer[F] =
         Outer(
           left  = Inner[F](p.flagL,  p.dataL),
-          right = Inner[F](p.flagR,  p.dataR)
-        )
+          right = Inner[F](p.flagR,  p.dataR))
 
       def apply[F[_]: BuildInit](p: Params)(q: Params): Outer[F] =
         Outer(
           left  = Inner[F](p.flagL,  p.dataL)(q.flagL, q.dataL),
-          right = Inner[F](p.flagR,  p.dataR)(q.flagR, q.dataR)
-        )
+          right = Inner[F](p.flagR,  p.dataR)(q.flagR, q.dataR))
 
     val p = Params(1, 32, 1, 64)
 
