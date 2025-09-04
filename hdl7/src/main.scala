@@ -30,14 +30,18 @@ sealed class UInt(val w: Width) extends Data:
 sealed class UIntLit(override val w: Width)(val v: Int) extends UInt(w):
   override def toString(): String = s"UIntLit($v($w.W))"
 
-abstract class Bundle(elems: (String, Data)*) extends Selectable with Data:
-  private val fields = elems.toMap
+class Bundle(elems: (String, Data)*) extends Selectable with Data:
+  private lazy val fields: Map[String, Data] =
+    this.getClass.getMethods.iterator
+      .filter(m => m.getParameterCount == 0 && m.getDeclaringClass == this.getClass && classOf[Data].isAssignableFrom(m.getReturnType))
+      .map(m => m.getName -> m.invoke(this).asInstanceOf[Data])
+      .toMap
   def selectDynamic(name: String): Data = fields(name)
   override def toString: String =
     val body = fields.map { case (k, v) => s"$k=$v" }.mkString(", ")
     println(s"fields ${fields}")
     s"Bundle($body)"
-  override def cloneShape: Data = ???
+  override def cloneShape: Data = this
 // override def cloneShape: Data =
 // new Bundle {
 // private val fields = fields.map { case (n, d) => n -> d.cloneShape }
