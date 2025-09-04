@@ -54,3 +54,7 @@ object hdl4 extends ScalaModule {
 object hdl5 extends ScalaModule {
   def scalaVersion = SCALAVERSION
 }
+
+object hdl6 extends ScalaModule {
+  def scalaVersion = SCALAVERSION
+}
