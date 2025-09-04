@@ -43,10 +43,15 @@ object Main:
     println(s"mybundle ${mybundle}")
 
     println(s"schema of MyBundle ${BundleSchema.labelsOf[MyBundle]}")
-// type MySchema = Schema.Of[MyBundle]
-// println(s"MySchema ${Schema.Of[MyBundle]}")
+    // println(s"type of MyBundle ${BundleSchema.labelsOf[MyBundle]}")
 
     class NestedBundle(x: Int, y: Int, z: Int) extends Bundle:
       val width_outer = x + y + z
       val inner = new MyBundle(x, y)
       val outer = UInt(Width(width_outer))
+
+    val nbs = BundleSchema.derived[NestedBundle]
+    val nb_labels = BundleSchema.labelsOf[NestedBundle]
+    println(s"nb_labels ${nb_labels}")
+    // val nestedbundle: BundleSchema.Of[NestedBundle] = (inner = (a = UInt(Width(3)), b = UInt(Width(4))), outer = UInt(Width(5)))
+// println(s"schema of NestedBundle ${BundleSchema.Of[NestedBundle]}")

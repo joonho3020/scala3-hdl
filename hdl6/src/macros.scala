@@ -42,6 +42,16 @@ object BundleSchema:
   private def buildSchemaFor(using q: Quotes)(t: q.reflect.TypeRepr): (q.reflect.TypeRepr, Expr[Tuple]) =
     import q.reflect.*
 
+    // Helpers to classify field types
+    def isSubtypeOfSignal(tr: TypeRepr): Boolean =
+      tr.dealias.simplified <:< TypeRepr.of[Signal]
+
+    def isSubtypeOfBundle(tr: TypeRepr): Boolean =
+      tr.dealias.simplified <:< TypeRepr.of[Bundle]
+
+    def isTupleType(tr: TypeRepr): Boolean =
+      tr.dealias.simplified <:< TypeRepr.of[Tuple]
+
     // Named pair type: "K" :-> V  ==>  (:->)["K", V]
     def pairType(label: String, v: TypeRepr): TypeRepr =
       AppliedType(TypeRepr.of[:->], List(ConstantType(StringConstant(label)), v))
@@ -69,12 +79,16 @@ object BundleSchema:
           val fields = collectRefinements(r) // (name, type)
           if fields.isEmpty then (tr, '{ EmptyTuple }) // not actually a record
           else
-            val outs = fields.map { case (n, ft) =>
-              val (ot, _) = go(ft)       // recurse type-level
-              pairType(n, ot)
+            val included = fields.flatMap { case (n, ft) =>
+              val (ot, _) = go(ft)
+              val include = (isSubtypeOfSignal(ft) && !isSubtypeOfBundle(ft)) || isTupleType(ot)
+              if include then (n, ot) :: Nil else Nil
             }
-            val labels = mkTupleExpr(fields.map { case (n, _) => Expr(n) })
-            (mkTupleType(outs), labels)
+            if included.isEmpty then (tr, '{ EmptyTuple })
+            else
+              val outs = included.map { case (n, ot) => pairType(n, ot) }
+              val labels = mkTupleExpr(included.map { case (n, _) => Expr(n) })
+              (mkTupleType(outs), labels)
 
         // Class / case class / object type
         case at @ AppliedType(tycon, _) =>
@@ -95,15 +109,21 @@ object BundleSchema:
             cls.get.declaredFields.foreach(x => println(s"declaredFields ${x.typeMembers}")) 
 // val declaredSignals: List[Symbol] = cls.get.declaredFields.filter()
 
+            // Prefer case fields; else, collect directly-declared term fields (vals)
             val members: List[Symbol] =
               if caseFields.nonEmpty then caseFields
-              else cls.get.memberMethods.filter(isGoodField)
-                   .filter(m => m.owner == cls.get) // only directly-declared fields
+              else
+                val terms = cls.get.declaredFields
+                  .filter(s => !s.flags.is(Flags.Private | Flags.Protected | Flags.Synthetic))
+                  .filter(s => !s.isType)
+                  .filter(s => s.owner == cls.get)
+                // Deduplicate by name and keep declaration order
+                terms.groupBy(_.name).values.map(_.head).toList
 
             println(s"members ${members}")
             println(s" ${cls.get.memberMethods.filter(isGoodField)}")
 
-            val pairs =
+            val included: List[(String, TypeRepr)] =
               members.flatMap { m =>
                 val n  = m.name
                 // discard compiler-artifact names (e.g., "copy", "productArity", etc.)
@@ -113,11 +133,15 @@ object BundleSchema:
                     case MethodType(_, _, res) => res
                     case t                     => t
                   val (ot, _) = go(mt)
-                  pairType(n, ot) :: Nil
+                  val include = (isSubtypeOfSignal(mt) && !isSubtypeOfBundle(mt)) || isTupleType(ot)
+                  if include then (n, ot) :: Nil else Nil
               }
 
-            if pairs.isEmpty then (tr0, '{ EmptyTuple })
-            else (mkTupleType(pairs), mkTupleExpr(members.map(m => Expr(m.name))))
+            if included.isEmpty then (tr0, '{ EmptyTuple })
+            else
+              val pairs = included.map { case (n, ot) => pairType(n, ot) }
+              val labels = mkTupleExpr(included.map { case (n, _) => Expr(n) })
+              (mkTupleType(pairs), labels)
 
     // Collect (name, type) from a Refinement chain
     def collectRefinements(r: Refinement): List[(String, TypeRepr)] =
