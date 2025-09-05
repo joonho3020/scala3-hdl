@@ -1,6 +1,7 @@
 .metals
 .vscode
-mill
-out
+.idea
 .bsp
 **/.DS_Store
+mill
+out

@@ -83,3 +83,7 @@ object Main:
       val inner = new MyBundle(x, y)
       val outer = UInt(Width(width_outer))
 
+// Understanding prior work is important when you want to improve upon it.
+// This version is a Chisel like implementation to understand how it works under the hood.
+// Basically Reg and Wire are just functions that set bindings to the bundle leaves.
+// The return type of Reg(MyBundle) is still a MyBundle!
