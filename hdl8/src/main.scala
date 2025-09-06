@@ -53,10 +53,35 @@ import scala.deriving.*
 
 trait Bundle
 
-trait Reg[V]:
-  def get(v: V): V
+case class MyBundle(a: Int, b: Boolean) extends Bundle
 
-object Reg:
+trait Reg[T](x: T) extends Selectable:
+  type Fields
+  private val regs: Map[String, Reg[?]]
+  inline def selectDynamic(name: String): Reg[?]
+  def getValue: T
+
+given Reg[Int](x: Int):
+  type Fields = ()
+  private val regs: Map[String, Reg[?]] = Map()
+  inline def selectDynamic(name: String): Reg[?] =
+    sys.error(s"Leaf bundle does not have subfield access to ${name}")
+  def getValue: Int = x
+
+given Reg[MyBundle](x: MyBundle):
+  type Fields = (
+    a: Reg[Int],
+    b: Reg[Boolean]
+  )
+  private val regs = Map(
+    "a" -> new Reg[Int](x.a),
+    "b" -> new Reg[Boolean](x.b)
+  )
+  inline def selectDynamic(name: String): Reg[?] =
+    regs.getOrElse(
+      name,
+      sys.error(s"Invalid field name ${name}"))
+  def getValue: MyBundle = x
 
 ///////////////////////
 
@@ -64,10 +89,9 @@ object Reg:
 def example(): Unit =
   import hdl8.*
 
-  case class MyBundle(a: Int, b: Boolean) extends Bundle
 
-  object MyBundleReg:
-    val a = Reg[Int](_.a)
-    val b = Reg[Boolean](_.b)
+// object MyBundleReg:
+// val a = Reg[Int](_.a)
+// val b = Reg[Boolean](_.b)
 
   val mybundle = MyBundle(42, true)

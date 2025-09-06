@@ -15,7 +15,7 @@ object Person extends Selectable:
     "age" -> new Lens[Person, Int] { def get(s: Person) = s.age; def set(s: Person, a: Int) = s.copy(age = a); },
     "isAlive" -> new Lens[Person, Boolean] { def get(s: Person) = s.isAlive; def set(s: Person, a: Boolean) = s.copy(isAlive = a); }
   )
-  inline def selectDynamic(name: String): Lens[Person, ?] =
+  def selectDynamic(name: String): Lens[Person, ?] =
     lenses.getOrElse(
       name,
       sys.error(s"Invalid field name [$name]"))
@@ -30,6 +30,10 @@ object Person extends Selectable:
 @main
 def example(): Unit =
   val person = Person("Alice", 42, true)
+
+  val name_lens: Lens[Person, String] = Person.name
+  println(s"name_lens ${name_lens}")
+  // val x = Person.character // Shouldn't compile as the field is missing
 
   val name = Person.name.get(person)
   val age = Person.age.get(person)
