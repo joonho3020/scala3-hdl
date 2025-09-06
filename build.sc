@@ -69,3 +69,15 @@ object hdl8 extends ScalaModule {
 object playground3 extends ScalaModule {
   def scalaVersion = SCALAVERSION
 }
+object playground4 extends ScalaModule {
+  def scalaVersion = SCALAVERSION
+  def mvnDeps = Seq(
+    mvn"io.github.kitlangton::quotidian:0.0.18"
+  )
+  // override def scalacOptions = Task {
+  //   super.scalacOptions() ++ Seq(
+  //     "-Xprint:typer,inlining", // show trees after typer and after inlining (macro expansion happens here)
+  //     "-Xprint-types"           // optional: include types in the output
+  //   )
+  // }
+}
