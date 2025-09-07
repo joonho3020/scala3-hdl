@@ -229,10 +229,56 @@ package hdl8
 //   r.set(MyBundle(1, false, Inner(99, true)))
 
 
-
 import scala.deriving.*
 import scala.compiletime.*
 import scala.NamedTuple
 import scala.util.NotGiven
 
-trait Bundle
+sealed class Width(val value: Int):
+  override def toString: String = s"${value}"
+
+object Width:
+  def apply(x: Int): Width = new Width(x)
+
+sealed trait ValueType
+
+sealed class UInt(val w: Width) extends ValueType:
+  def apply(w: Width): UInt = new UInt(w)
+  override def toString(): String = s"UInt($w.W)"
+
+sealed class UIntLit(val v: Int) extends ValueType:
+  def apply(v: Int): UIntLit = new UIntLit(v)
+  override def toString(): String = s"UInLitt($v)"
+
+trait Bundle extends ValueType
+
+@main def demo(): Unit =
+  class InnerBundle(wa: Int, wb: Int) extends Bundle {
+    val a = UInt(Width(wa))
+    val b = UInt(Width(wb))
+  }
+  class MyBundle(wa: Int, wb: Int, wx: Int, wy: Int) extends Bundle {
+    val x = UInt(Width(wx))
+    val y = UInt(Width(wy))
+    val i = new InnerBundle(wa, wb)
+  }
+  val mybundle_reg = Reg[MyBundle](new MyBundle(2, 3, 4, 5))
+
+  // // What I want
+  // val x: Reg[UInt] = mybundle_reg.x
+  // val i: Reg[InnerBundle] = mybundle_reg.i
+  // val a: Reg[UInt] = mybundle_reg.i.a
+
+  // val mybundle_lit = Literal[MyBundle]((
+  //     x = UIntLit(3),
+  //     y = UIntLit(2),
+  //     i = (
+  //       a = UIntLit(4),
+  //       b = UIntLit(5)
+  //     )
+  //   ))
+  // val xl: UIntLit = mybundle_lit.x
+  // val yl: UIntLit = mybundle_lit.y
+  // val al: UIntLit = mybundle_lit.i.a
+
+
