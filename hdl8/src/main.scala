@@ -252,19 +252,71 @@ sealed class UIntLit(val v: Int) extends ValueType:
 
 trait Bundle extends ValueType
 
-@main def demo(): Unit =
-  class InnerBundle(wa: Int, wb: Int) extends Bundle {
-    val a = UInt(Width(wa))
-    val b = UInt(Width(wb))
-  }
-  class MyBundle(wa: Int, wb: Int, wx: Int, wy: Int) extends Bundle {
-    val x = UInt(Width(wx))
-    val y = UInt(Width(wy))
-    val i = new InnerBundle(wa, wb)
-  }
-  val mybundle_reg = Reg[MyBundle](new MyBundle(2, 3, 4, 5))
+trait FieldsOf[T]:
+  type Labels <: Tuple
+  type Elems <: Tuple
+  type Out = NamedTuple.NamedTuple[Labels, Elems]
 
+  def get(t: T, name: String): ValueType
+
+object FieldsOf:
+  given FieldsOf[UInt] with
+    type Labels = EmptyTuple
+    type Elems = EmptyTuple
+
+    def get(t: UInt, name: String): ValueType =
+      throw new NoSuchElementException(s"UInt does not have  a subfield $name")
+
+  given FieldsOf[UIntLit] with
+    type Labels = EmptyTuple
+    type Elems = EmptyTuple
+
+    def get(t: UIntLit, name: String): ValueType =
+      throw new NoSuchElementException(s"UInt does not have  a subfield $name")
+
+  inline def derived[T](using m: Mirror.ProductOf[T]): FieldsOf[T] =
+    new FieldsOf[T]:
+      type Labels = m.MirroredElemLabels
+      type Elems = m.MirroredElemTypes
+
+      private val labels: Array[String] =
+        constValueTuple[Labels].toArray.asInstanceOf[Array[String]]
+
+      def get(t: T, name: String): ValueType =
+        val p = t.asInstanceOf[Product]
+        val idx = labels.indexOf(name)
+        if idx < 0 then
+          throw new NoSuchElementException(s"${p.getClass.getName} has no field $name")
+        p.productElement(idx).asInstanceOf[ValueType]
+
+type MapElems[E <: Tuple, F[_]] <: Tuple = E match
+  case EmptyTuple => EmptyTuple
+  case (h *: t)   => F[h & ValueType] *: MapElems[t, F]
+
+final class Reg[T](val t: T) extends Selectable:
+  type Fields =
+    NamedTuple.NamedTuple[
+      FieldsOf[T]#Labels,
+      MapElems[FieldsOf[T]#Elems, [x] =>> Reg[x]]
+    ]
+
+  inline def selectDynamic(name: String): Reg[?] =
+    val f = summonInline[FieldsOf[T]]
+    val child = f.get(t, name)
+    new Reg(child)
+
+@main def demo(): Unit =
   // // What I want
+  // class InnerBundle(wa: Int, wb: Int) extends Bundle {
+  //   val a = UInt(Width(wa))
+  //   val b = UInt(Width(wb))
+  // }
+  // class MyBundle(wa: Int, wb: Int, wx: Int, wy: Int) extends Bundle {
+  //   val x = UInt(Width(wx))
+  //   val y = UInt(Width(wy))
+  //   val i = new InnerBundle(wa, wb)
+  // }
+  // val mybundle_reg = Reg[MyBundle](new MyBundle(2, 3, 4, 5))
   // val x: Reg[UInt] = mybundle_reg.x
   // val i: Reg[InnerBundle] = mybundle_reg.i
   // val a: Reg[UInt] = mybundle_reg.i.a
@@ -281,4 +333,10 @@ trait Bundle extends ValueType
   // val yl: UIntLit = mybundle_lit.y
   // val al: UIntLit = mybundle_lit.i.a
 
+  println("Hello World")
 
+  final case class InnerBundle(a: UInt, b: UInt) extends Bundle
+  final case class MyBundle(x: UInt, y: UInt, i: InnerBundle) extends Bundle
+  val mb = MyBundle(UInt(Width(2)), UInt(Width(3)), InnerBundle(UInt(Width(4)), UInt(Width(5))))
+  val reg = Reg(mb)
+  reg.x
