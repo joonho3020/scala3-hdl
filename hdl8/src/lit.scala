@@ -29,3 +29,7 @@ final class Lit[T](private val payload: Any) extends Selectable:
     }
   transparent inline def get: HostTypeOf[T] =
     payload.asInstanceOf[HostTypeOf[T]]
+
+object Lit:
+  inline def apply[T <: ValueType](inline v: HostTypeOf[T]): Lit[T] =
+    new Lit[T](v)

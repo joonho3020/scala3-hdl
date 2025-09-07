@@ -321,19 +321,6 @@ final class Reg[T](val t: T) extends Selectable:
   // val reg_i_b: Reg[UIntLit] = reg.i.b // Type mismatch doesn't compile
   println(s"reg_x: ${reg_x} reg_y: ${reg_y} reg_i: ${reg_i} reg_i_a ${reg_i_a} reg_i_b ${reg_i_b}")
 
-
-  // val lit = Lit.fromMap[MyBundle](Map(
-  //   "x" -> UIntLit(3),
-  //   "y" -> UIntLit(2),
-  //   "i" -> Map("a" -> UIntLit(4), "b" -> UIntLit(5))
-  // ))
-  // val xl: UIntLit = lit.x
-  // val yl: UIntLit = lit.y
-  // val al: UIntLit = lit.i.a
-  // val il: Lit[InnerBundle] = lit.i
-  // // val il: Lit[MyBundle]   = lit.i // Type mismatch doesn't compile
-  // println(s"xl: ${xl} yl: ${yl} al: ${al} il: ${il}")
-
   val ulit = Lit[UInt](3)
   println(s"ulit.get: ${ulit.get}")
 
@@ -373,3 +360,8 @@ final class Reg[T](val t: T) extends Selectable:
 
   val mylit_i_a: Lit[UInt] = mylit.i.a
   println(s"mylit_i_a.get ${mylit_i_a.get} ${mylit.i.a.get} ${mylit_i.a.get}")
+
+  // val mylit_2 = Lit[MyBundle]((
+  //   y = 3,
+  //   x = 2,
+  //   i = (a = 4, b = 5))) // Doesn't compile because we mixed up the order of named tuples
