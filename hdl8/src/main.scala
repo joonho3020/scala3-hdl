@@ -252,58 +252,31 @@ sealed class UIntLit(val v: Int) extends ValueType:
 
 trait Bundle extends ValueType
 
-trait FieldsOf[T]:
-  type Labels <: Tuple
-  type Elems <: Tuple
-  type Out = NamedTuple.NamedTuple[Labels, Elems]
-
-  def get(t: T, name: String): ValueType
-
-object FieldsOf:
-  given FieldsOf[UInt] with
-    type Labels = EmptyTuple
-    type Elems = EmptyTuple
-
-    def get(t: UInt, name: String): ValueType =
-      throw new NoSuchElementException(s"UInt does not have  a subfield $name")
-
-  given FieldsOf[UIntLit] with
-    type Labels = EmptyTuple
-    type Elems = EmptyTuple
-
-    def get(t: UIntLit, name: String): ValueType =
-      throw new NoSuchElementException(s"UInt does not have  a subfield $name")
-
-  inline def derived[T](using m: Mirror.ProductOf[T]): FieldsOf[T] =
-    new FieldsOf[T]:
-      type Labels = m.MirroredElemLabels
-      type Elems = m.MirroredElemTypes
-
-      private val labels: Array[String] =
-        constValueTuple[Labels].toArray.asInstanceOf[Array[String]]
-
-      def get(t: T, name: String): ValueType =
-        val p = t.asInstanceOf[Product]
-        val idx = labels.indexOf(name)
-        if idx < 0 then
-          throw new NoSuchElementException(s"${p.getClass.getName} has no field $name")
-        p.productElement(idx).asInstanceOf[ValueType]
-
-type MapElems[E <: Tuple, F[_]] <: Tuple = E match
-  case EmptyTuple => EmptyTuple
-  case (h *: t)   => F[h & ValueType] *: MapElems[t, F]
+type NTOf[T] <: NamedTuple.AnyNamedTuple = T match
+  case UInt | UIntLit => NamedTuple.NamedTuple[EmptyTuple, EmptyTuple]
+  case _              => NamedTuple.From[T]
 
 final class Reg[T](val t: T) extends Selectable:
-  type Fields =
-    NamedTuple.NamedTuple[
-      FieldsOf[T]#Labels,
-      MapElems[FieldsOf[T]#Elems, [x] =>> Reg[x]]
-    ]
+  type Fields = NamedTuple.Map[
+    NamedTuple.From[T],
+    [X] =>> Reg[X & ValueType]]
 
   inline def selectDynamic(name: String): Reg[?] =
-    val f = summonInline[FieldsOf[T]]
-    val child = f.get(t, name)
-    new Reg(child)
+    summonFrom {
+      case m: Mirror.ProductOf[T] =>
+        val labels = constValueTuple[m.MirroredElemLabels].toArray
+        val idx = labels.indexOf(name)
+        println(s"labels: ${labels} name: ${name} idx: ${idx}")
+        if idx < 0 then
+          throw new NoSuchElementException(s"${t.getClass.getName} has no field '$name'")
+        val child = t.asInstanceOf[Product].productElement(idx).asInstanceOf[ValueType]
+        new Reg(child)
+      case _ =>
+        throw new NoSuchElementException(s"${t.getClass.getName} has no field '$name'")
+    }
+  override def toString(): String =
+    s"Reg(${t})"
+
 
 @main def demo(): Unit =
   // // What I want
@@ -338,5 +311,16 @@ final class Reg[T](val t: T) extends Selectable:
   final case class InnerBundle(a: UInt, b: UInt) extends Bundle
   final case class MyBundle(x: UInt, y: UInt, i: InnerBundle) extends Bundle
   val mb = MyBundle(UInt(Width(2)), UInt(Width(3)), InnerBundle(UInt(Width(4)), UInt(Width(5))))
+
   val reg = Reg(mb)
-  reg.x
+  val reg_x: Reg[UInt] = reg.x
+  val reg_y: Reg[UInt] = reg.y
+  // val reg_y: Reg[UIntLit] = reg.y // Type mismatch, doesn't compile
+  val reg_i: Reg[InnerBundle] = reg.i
+  // val reg_i: Reg[UIntLit] = reg.i // Type mismatch doesn't compile
+  val reg_i_a: Reg[UInt] = reg_i.a
+  // val reg_i_a: Reg[UIntLit] = reg_i.a // Type mismatch doesn't compile
+
+  val reg_i_b: Reg[UInt] = reg.i.b
+  // val reg_i_b: Reg[UIntLit] = reg.i.b // Type mismatch doesn't compile
+  println(s"reg_x: ${reg_x} reg_y: ${reg_y} reg_i: ${reg_i} reg_i_a ${reg_i_a} reg_i_b ${reg_i_b}")
