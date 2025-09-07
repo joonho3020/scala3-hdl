@@ -100,6 +100,8 @@ import scala.compiletime.*
 import scala.NamedTuple
 import scala.util.NotGiven
 
+trait Bundle
+
 trait Ref[T] extends Selectable:
   type Fields
   def selectDynamic(name: String): Ref[?] =
@@ -125,20 +127,37 @@ final class ProductRef[T](
   val fromValue: T => Unit
 ) extends Ref[T]:
   type Fields = NamedTuple.Map[NamedTuple.From[T], Ref]
-  override inline def selectDynamic(name: String): Ref[?] =
+  override def selectDynamic(name: String): Ref[?] =
     fieldsMap.getOrElse(name, sys.error(s"Invalid field name: $name"))
+  transparent inline def at[K <: String](using k: ValueOf[K]): Ref[Types.FieldTypeByName[T, K]] =
+    fieldsMap.getOrElse(k.value, sys.error(s"Invalid field name: ${k.value}")).asInstanceOf[Ref[Types.FieldTypeByName[T, K]]]
   def get: T = toValue()
   def set(t: T): Unit = fromValue(t)
 
+object Types:
+  type ElemTypeByLabel[Labels <: Tuple, Types <: Tuple, K <: String] = (Labels, Types) match
+    case (K *: _, h *: _) => h
+    case (_ *: lt, _ *: tt) => ElemTypeByLabel[lt, tt, K]
+    case (EmptyTuple, EmptyTuple) => Nothing
+
+  type FieldTypeByName[T, K <: String] = ElemTypeByLabel[
+    Mirror.ProductOf[T]#MirroredElemLabels,
+    Mirror.ProductOf[T]#MirroredElemTypes,
+    K
+  ]
+
 trait MakeRef[T]:
-  def apply(init: T): Ref[T]
+  type Out <: Ref[T]
+  def apply(init: T): Out
 
 object MakeRef:
   // Leaves: Int, Boolean, etc.
-  inline given leaf[T](using ev: NotGiven[Mirror.ProductOf[T]], ml: MakeLeaf[T]): MakeRef[T] with
-    def apply(init: T): Ref[T] =
-      println(s"MakeRef leaf ${init}")
-      ml.apply(init)
+  inline given leaf[T](using ev: NotGiven[Mirror.ProductOf[T]], ml: MakeLeaf[T]): MakeRef[T] =
+    new MakeRef[T]:
+      type Out = Ref[T]
+      def apply(init: T): Out =
+        println(s"MakeRef leaf ${init}")
+        ml.apply(init)
 
   // Products (case classes)
   inline given product[T <: Bundle](using p: Mirror.ProductOf[T]): MakeRef[T] =
@@ -147,7 +166,8 @@ object MakeRef:
     println(s"labelsCT ${labelsCT}")
     val elemMakersCT: List[MakeRef[Any]] = summonAllElems[p.MirroredElemTypes]
     new MakeRef[T]:
-      def apply(init: T): Ref[T] =
+      type Out = ProductRef[T]
+      def apply(init: T): Out =
         val childRefs: List[Ref[?]] =
           elemMakersCT.zipWithIndex.map { case (mk, i) =>
             val prod = init.asInstanceOf[Product]
@@ -177,10 +197,15 @@ object MakeRef:
       case _: EmptyTuple => Nil
       case _: (h *: t)   => summonInline[MakeRef[h]].asInstanceOf[MakeRef[Any]] :: summonAllElems[t]
 
-object HDL:
-  def reg[T](init: T)(using mk: MakeRef[T]): Ref[T] = mk(init)
+// object MakeLeafRef:
+// Leaves: Int, Boolean, etc.
+// inline given leaf[T](using ev: NotGiven[Mirror.ProductOf[T]], ml: MakeLeaf[T]): MakeProductRef[T] with
+// def apply(init: T): Ref[T] =
+// println(s"MakeProductRef leaf ${init}")
+// ml.apply(init)
 
-trait Bundle
+object HDL:
+  def reg[T](init: T)(using mk: MakeRef[T]): mk.Out = mk(init)
 
 case class Inner(x: Int, y: Boolean) extends Bundle
 case class MyBundle(a: Int, b: Boolean, inner: Inner) extends Bundle
@@ -192,6 +217,7 @@ case class MyBundle(a: Int, b: Boolean, inner: Inner) extends Bundle
   // t.x
 
   val r = reg[MyBundle](MyBundle(3, true, Inner(2, false)))
+  r.a
 // r.a.set(42)
 // r.b.set(true)
 // r.inner.x.set(7)
