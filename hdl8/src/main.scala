@@ -266,8 +266,6 @@ final class Reg[T](val t: T) extends Selectable:
         val labels = constValueTuple[m.MirroredElemLabels].toArray
         val idx = labels.indexOf(name)
         println(s"labels: ${labels} name: ${name} idx: ${idx}")
-        if idx < 0 then
-          throw new NoSuchElementException(s"${t.getClass.getName} has no field '$name'")
         val child = t.asInstanceOf[Product].productElement(idx).asInstanceOf[ValueType]
         new Reg(child)
       case _ =>
@@ -336,13 +334,42 @@ final class Reg[T](val t: T) extends Selectable:
   // // val il: Lit[MyBundle]   = lit.i // Type mismatch doesn't compile
   // println(s"xl: ${xl} yl: ${yl} al: ${al} il: ${il}")
 
-  val ulit = Lit.of[UInt](3)
+  val ulit = Lit[UInt](3)
   println(s"ulit.get: ${ulit.get}")
-  // val lit = Lit.of[MyBundle](
-  //   (x = 3, y = 2, i = (a = 4, b = 5))
-  // )
 
-  // val xl: Lit[UInt]        = lit.x
-  // val yl: Lit[UInt]        = lit.y
-  // val il: Lit[InnerBundle] = lit.i
-  // val al: Lit[UInt]        = lit.i.a
+  val inner_bundle_host_type: HostTypeOf[InnerBundle] = (
+    a = 3,
+    b = 2,
+  )
+  // val inner_bundle_host_type: HostTypeOf[InnerBundle] = (
+  //   a = 3,
+  //   b = 2,
+  //   c = 4
+  // ) // compile fails, type mismatch
+
+  println(s"inner_bundle_host_type ${inner_bundle_host_type}")
+
+
+  val ilit = Lit[InnerBundle]((a = 3, b = 4))
+
+  val ilit_a: Lit[UInt] = ilit.a
+
+  // val ilit_a: Lit[Bool] = ilit.a // Type mismatch doesn't compile
+
+  println(s"ilit.a ${ilit.a.get} ilit_a.get ${ilit_a.get}")
+
+  val mylit = Lit[MyBundle]((
+    x = 2,
+    y = 3,
+    i = (a = 4, b = 5)))
+
+  val mylit_x: Lit[UInt] = mylit.x
+  println(s"mylit_x.get ${mylit_x.get} mylit.x.get ${mylit.x.get}")
+
+  val mylit_i: Lit[InnerBundle] = mylit.i
+// val mylit_i: Lit[MyBundle] = mylit.i // Type mismatch doesn't compile
+// val mylit_i: Lit[UInt] = mylit.i // Type mismatch doesn't compile
+  println(s"mylit_i.get ${mylit_i.get} mylit.i.get ${mylit.i.get}")
+
+  val mylit_i_a: Lit[UInt] = mylit.i.a
+  println(s"mylit_i_a.get ${mylit_i_a.get} ${mylit.i.a.get} ${mylit_i.a.get}")
