@@ -233,6 +233,7 @@ import scala.deriving.*
 import scala.compiletime.*
 import scala.NamedTuple
 import scala.util.NotGiven
+import scala.quoted.*
 
 sealed class Width(val value: Int):
   override def toString: String = s"${value}"
@@ -246,15 +247,13 @@ sealed class UInt(val w: Width) extends ValueType:
   def apply(w: Width): UInt = new UInt(w)
   override def toString(): String = s"UInt($w.W)"
 
-sealed class UIntLit(val v: Int) extends ValueType:
-  def apply(v: Int): UIntLit = new UIntLit(v)
-  override def toString(): String = s"UInLitt($v)"
+sealed class Bool extends ValueType
 
 trait Bundle extends ValueType
 
 type NTOf[T] <: NamedTuple.AnyNamedTuple = T match
-  case UInt | UIntLit => NamedTuple.NamedTuple[EmptyTuple, EmptyTuple]
-  case _              => NamedTuple.From[T]
+  case UInt | Bool => NamedTuple.NamedTuple[EmptyTuple, EmptyTuple]
+  case _           => NamedTuple.From[T]
 
 final class Reg[T](val t: T) extends Selectable:
   type Fields = NamedTuple.Map[
@@ -277,7 +276,6 @@ final class Reg[T](val t: T) extends Selectable:
   override def toString(): String =
     s"Reg(${t})"
 
-
 @main def demo(): Unit =
   // // What I want
   // class InnerBundle(wa: Int, wb: Int) extends Bundle {
@@ -294,7 +292,7 @@ final class Reg[T](val t: T) extends Selectable:
   // val i: Reg[InnerBundle] = mybundle_reg.i
   // val a: Reg[UInt] = mybundle_reg.i.a
 
-  // val mybundle_lit = Literal[MyBundle]((
+  // val mybundle_lit = Lit[MyBundle]((
   //     x = UIntLit(3),
   //     y = UIntLit(2),
   //     i = (
@@ -324,3 +322,27 @@ final class Reg[T](val t: T) extends Selectable:
   val reg_i_b: Reg[UInt] = reg.i.b
   // val reg_i_b: Reg[UIntLit] = reg.i.b // Type mismatch doesn't compile
   println(s"reg_x: ${reg_x} reg_y: ${reg_y} reg_i: ${reg_i} reg_i_a ${reg_i_a} reg_i_b ${reg_i_b}")
+
+
+  // val lit = Lit.fromMap[MyBundle](Map(
+  //   "x" -> UIntLit(3),
+  //   "y" -> UIntLit(2),
+  //   "i" -> Map("a" -> UIntLit(4), "b" -> UIntLit(5))
+  // ))
+  // val xl: UIntLit = lit.x
+  // val yl: UIntLit = lit.y
+  // val al: UIntLit = lit.i.a
+  // val il: Lit[InnerBundle] = lit.i
+  // // val il: Lit[MyBundle]   = lit.i // Type mismatch doesn't compile
+  // println(s"xl: ${xl} yl: ${yl} al: ${al} il: ${il}")
+
+  val ulit = Lit.of[UInt](3)
+  println(s"ulit.get: ${ulit.get}")
+  // val lit = Lit.of[MyBundle](
+  //   (x = 3, y = 2, i = (a = 4, b = 5))
+  // )
+
+  // val xl: Lit[UInt]        = lit.x
+  // val yl: Lit[UInt]        = lit.y
+  // val il: Lit[InnerBundle] = lit.i
+  // val al: Lit[UInt]        = lit.i.a
