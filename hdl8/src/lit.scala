@@ -25,11 +25,15 @@ final class Lit[T](private val payload: Any) extends Selectable:
         val subpayload = payload.asInstanceOf[Product].productElement(idx)
         new Lit[Any](subpayload)
       case _ =>
-        throw new NoSuchElementException(s"${summonInline[ValueOf[String]]}") // never reached, just keep total
+        throw new NoSuchElementException(s"${summonInline[ValueOf[String]]}")
     }
   transparent inline def get: HostTypeOf[T] =
     payload.asInstanceOf[HostTypeOf[T]]
 
 object Lit:
+  // This is required to make sure that the order of the names in the input
+  // named tuple matches that of T <: Bundle
+  // Technically, we need to add an assertion in selectDynamic of Lit,
+  // but lets now worry about this for now...
   inline def apply[T <: ValueType](inline v: HostTypeOf[T]): Lit[T] =
     new Lit[T](v)
