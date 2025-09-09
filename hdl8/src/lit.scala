@@ -9,11 +9,11 @@ import scala.quoted.*
 type HostTypeOf[T] = T match
   case UInt => Int
   case Bool => Boolean
-  case _    => NamedTuple.Map[NTOf[T], [X] =>> HostTypeOf[X & ValueType]]
+  case _    => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & ValueType]]
 
 final class Lit[T](private val payload: Any) extends Selectable:
   type Fields = NamedTuple.Map[
-    NTOf[T],
+    NamedTuple.From[T],
     [X] =>> Lit[X & ValueType]
   ]
 
