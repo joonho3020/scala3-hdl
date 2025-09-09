@@ -22,36 +22,28 @@ sealed class Bool extends ValueType
 
 trait Bundle extends ValueType
 
-type MapElems[E <: Tuple, F[_]] <: Tuple = E match
-  case EmptyTuple => EmptyTuple
-  case h *: t     => F[h & ValueType] *: MapElems[t, F]
+type NTOf[T] <: NamedTuple.AnyNamedTuple = T match
+  case UInt | Bool => NamedTuple.NamedTuple[EmptyTuple, EmptyTuple]
+  case _           => NamedTuple.From[T]
 
-final class Reg[T](val t: T)(using s: ShapeOf[T]) extends Selectable:
-  val shape = s
-  type Fields = NamedTuple.NamedTuple[
-    shape.Labels,
-    MapElems[shape.Elems, [X] =>> Reg[X]]
-  ]
-// type Fields = NamedTuple.Map[
-// NamedTuple.From[T],
-// [X] =>> Reg[X & ValueType]]
-
-  // inline def selectDynamic(name: String): Reg[?] =
-  //   // val s = summonInline[ShapeOf[T]]
-  //   new Reg(shape.getValueType(t, name))
-
-  // provide child Reg[X] by also providing ShapeOf[X]
-  private inline def mkChild[X <: ValueType](x: X): Reg[X] =
-    new Reg[X](x)(using scala.compiletime.summonInline[ShapeOf[X]])
+final class Reg[T](val t: T) extends Selectable:
+  type Fields = NamedTuple.Map[
+    NamedTuple.From[T],
+    [X] =>> Reg[X & ValueType]]
 
   inline def selectDynamic(name: String): Reg[?] =
-    mkChild(shape.getValueType(t, name))
-
+    summonFrom {
+      case m: Mirror.ProductOf[T] =>
+        val labels = constValueTuple[m.MirroredElemLabels].toArray
+        val idx = labels.indexOf(name)
+        println(s"labels: ${labels} name: ${name} idx: ${idx}")
+        val child = t.asInstanceOf[Product].productElement(idx).asInstanceOf[ValueType]
+        new Reg(child)
+      case _ =>
+        throw new NoSuchElementException(s"${t.getClass.getName} has no field '$name'")
+    }
   override def toString(): String =
     s"Reg(${t})"
-
-object Reg:
-  def apply[T <: ValueType](t: T)(using ShapeOf[T]): Reg[T] = new Reg[T](t)
 
 @main def demo(): Unit =
   // // What I want
@@ -82,10 +74,6 @@ object Reg:
   // val al: UIntLit = mybundle_lit.i.a
 
   println("Hello World")
-
-
-  val reg_uint = Reg(UInt(Width(4)))
-  println(s"reg_uint ${reg_uint}")
 
   final case class InnerBundle(a: UInt, b: UInt) extends Bundle
   final case class MyBundle(x: UInt, y: UInt, i: InnerBundle) extends Bundle
@@ -137,8 +125,8 @@ object Reg:
   println(s"mylit_x.get ${mylit_x.get} mylit.x.get ${mylit.x.get}")
 
   val mylit_i: Lit[InnerBundle] = mylit.i
-  // val mylit_i: Lit[MyBundle] = mylit.i // Type mismatch doesn't compile
-  // val mylit_i: Lit[UInt] = mylit.i // Type mismatch doesn't compile
+// val mylit_i: Lit[MyBundle] = mylit.i // Type mismatch doesn't compile
+// val mylit_i: Lit[UInt] = mylit.i // Type mismatch doesn't compile
   println(s"mylit_i.get ${mylit_i.get} mylit.i.get ${mylit.i.get}")
 
   val mylit_i_a: Lit[UInt] = mylit.i.a

@@ -9,20 +9,24 @@ import scala.quoted.*
 type HostTypeOf[T] = T match
   case UInt => Int
   case Bool => Boolean
-  case _    => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & ValueType]]
+  case _    => NamedTuple.Map[NTOf[T], [X] =>> HostTypeOf[X & ValueType]]
 
 final class Lit[T](private val payload: Any) extends Selectable:
   type Fields = NamedTuple.Map[
-    NamedTuple.From[T],
+    NTOf[T],
     [X] =>> Lit[X & ValueType]
   ]
 
   inline def selectDynamic(name: String): Lit[?] =
-    val s   = summonInline[ShapeOf[T]]
-    val idx = s.labels.indexOf(name)
-    val sub = payload.asInstanceOf[Product].productElement(idx)
-    new Lit[Any](sub.asInstanceOf)
-
+    summonFrom {
+      case m: Mirror.ProductOf[T] =>
+        val labels = constValueTuple[m.MirroredElemLabels].toArray
+        val idx = labels.indexOf(name)
+        val subpayload = payload.asInstanceOf[Product].productElement(idx)
+        new Lit[Any](subpayload)
+      case _ =>
+        throw new NoSuchElementException(s"${summonInline[ValueOf[String]]}")
+    }
   transparent inline def get: HostTypeOf[T] =
     payload.asInstanceOf[HostTypeOf[T]]
 
