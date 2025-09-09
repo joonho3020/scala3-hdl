@@ -15,12 +15,24 @@ object Width:
 sealed trait ValueType
 
 sealed class UInt(val w: Width) extends ValueType:
-  def apply(w: Width): UInt = new UInt(w)
   override def toString(): String = s"UInt($w.W)"
 
-sealed class Bool extends ValueType
+object UInt:
+  def apply(w: Width): UInt = new UInt(w)
+
+sealed class Bool extends ValueType:
+  override def toString(): String = s"Bool()"
+
+object Bool:
+  def apply(): Bool = new Bool
 
 trait Bundle extends ValueType
+
+final class Vec[T <: ValueType](val elem: T, val len: Int) extends ValueType:
+  override def toString(): String = s"Vec($elem, $len)"
+
+object Vec:
+  def apply[T <: ValueType](elem: T, len: Int): Vec[T] = new Vec(elem, len)
 
 final class Reg[T](val t: T) extends Selectable:
   type Fields = NamedTuple.Map[
@@ -40,6 +52,18 @@ final class Reg[T](val t: T) extends Selectable:
     }
   override def toString(): String =
     s"Reg(${t})"
+
+object Reg:
+  def apply[T <: ValueType](t: T): Reg[T] = new Reg(t)
+
+object RegVecOps:
+  extension [A <: ValueType](rv: Reg[Vec[A]])
+    def apply(index: Int): Reg[A] =
+      new Reg(rv.t.elem)
+
+    def apply(start: Int, end: Int): Reg[Vec[A]] =
+      val sliceLen = (end - start) + 1
+      new Reg(Vec(rv.t.elem, sliceLen))
 
 @main def demo(): Unit =
   // // What I want
@@ -132,3 +156,47 @@ final class Reg[T](val t: T) extends Selectable:
   //   y = 3,
   //   x = 2,
   //   i = (a = 4, b = 5))) // Doesn't compile because we mixed up the order of named tuples
+
+
+
+
+  import RegVecOps.*
+  import LitVecOps.*
+
+  final case class InnerVecBundle(a: UInt, b: Vec[UInt]) extends Bundle
+  final case class MyVecBundle(i: Vec[InnerVecBundle], c: Bool) extends Bundle
+  val mvb = MyVecBundle(
+    Vec(
+      InnerVecBundle(
+        UInt(Width(2)),
+        Vec(UInt(Width(3)), 2)
+      ),
+      3
+    ),
+    Bool()
+  )
+  val reg_mvb: Reg[MyVecBundle] = Reg(mvb)
+  println(s"reg_mvg ${reg_mvb}")
+
+  val reg_mvb_0: Reg[InnerVecBundle] = reg_mvb.i(0)
+  println(s"reg_mvg_0 ${reg_mvb_0}")
+
+  val reg_mvb_12: Reg[Vec[InnerVecBundle]] = reg_mvb.i(1, 2)
+  println(s"reg_mvg_12 ${reg_mvb_12}")
+
+  val reg_uintbool = Reg(Vec(Bool(), 10))
+  val reg_uintbool_2: Reg[Bool] = reg_uintbool(2)
+  println(s"reg_uintbool_2 ${reg_uintbool_2}")
+
+  val mvb_lit = Lit[MyVecBundle]((
+    i = Seq.fill(3)((a = 3, b = Seq(1, 2))),
+    c = true
+  ))
+  val mvb_lit_i0_a: Lit[UInt] = mvb_lit.i(0).a
+  println(s"mvb_lit_i0_a ${mvb_lit_i0_a.get}")
+
+  val mvb_lit_i1_b: Lit[Vec[UInt]] = mvb_lit.i(1).b
+  println(s"mvb_lit_i1_b ${mvb_lit_i1_b.get}")
+
+  val mvb_lit_i1_b0: Lit[UInt] = mvb_lit.i(1).b(0)
+  println(s"mvb_lit_i1_b0 ${mvb_lit_i1_b0.get}")
