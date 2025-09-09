@@ -22,10 +22,6 @@ sealed class Bool extends ValueType
 
 trait Bundle extends ValueType
 
-type NTOf[T] <: NamedTuple.AnyNamedTuple = T match
-  case UInt | Bool => NamedTuple.NamedTuple[EmptyTuple, EmptyTuple]
-  case _           => NamedTuple.From[T]
-
 final class Reg[T](val t: T) extends Selectable:
   type Fields = NamedTuple.Map[
     NamedTuple.From[T],
