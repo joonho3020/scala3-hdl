@@ -20,6 +20,9 @@ trait Aggregate extends ValueType
   final case class AggExample(a: IntValue, b: IntValue) extends Aggregate
   val agg = AggExample(new IntValue(2), new IntValue(3))
 
+  val wrap_int = Wrapper(IntValue(5))
+  println(s"wrap_int ${wrap_int}")
+
   val wrap = Wrapper(agg)
   val wrap_a: Wrapper[IntValue] = wrap.a
 
