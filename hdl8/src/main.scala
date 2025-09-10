@@ -94,6 +94,9 @@ package hdl8
 
 
 
+  //////////////////////////////////////////
+  // Vector test
+  //////////////////////////////////////////
 
   import RegVecOps.*
   import LitVecOps.*
@@ -135,3 +138,30 @@ package hdl8
 
   val mvb_lit_i1_b0: Lit[UInt] = mvb_lit.i(1).b(0)
   println(s"mvb_lit_i1_b0 ${mvb_lit_i1_b0.get}")
+
+
+  ///////////////////////////////////
+  // Directionality test
+  ///////////////////////////////////
+
+  case class MyDirBundle(a: UInt & Input, b: Bool & Output) extends Bundle
+
+  val my_dir = MyDirBundle(UInt(Width(3)).in, Bool().out)
+
+  val my_dir_reg = Reg(my_dir)
+
+  val my_dir_reg_a: Reg[UInt & Input] = my_dir_reg.a
+  // val my_dir_reg_a: Reg[UInt & Output] = my_dir_reg.a // Compile fails, type error
+  println(s"my_dir_reg_a ${my_dir_reg_a}")
+
+// val my_dir_lit = Lit(my_dir)
+
+// val flipped = flip(my)
+// val fa: UInt & Output = flipped.a.value
+// val fb: Bool & Input = flipped.b.value
+
+  // case class MyDirBundle(a: UInt & Input, b: Bool & Output)
+
+  // val my_dir_bundle = MyDirBundle(
+  //   a = UInt(Width(3)) & Input,
+  //   b = Bool & Output)
