@@ -1,7 +1,6 @@
 import mill._, scalalib._
 
 val SCALAVERSION = "3.7.0"
-val SCALAC = "-source:3.7"
 
 object hdlplugins extends ScalaModule {
   def scalaVersion = SCALAVERSION
@@ -66,7 +65,6 @@ object hdl7 extends ScalaModule {
 
 object hdl8 extends ScalaModule {
   def scalaVersion = SCALAVERSION
-  def scalacOptions = Seq(SCALAC)
 }
 object playground3 extends ScalaModule {
   def scalaVersion = SCALAVERSION
