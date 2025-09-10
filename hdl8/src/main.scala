@@ -139,45 +139,68 @@ package hdl8
   val mvb_lit_i1_b0: Lit[UInt] = mvb_lit.i(1).b(0)
   println(s"mvb_lit_i1_b0 ${mvb_lit_i1_b0.get}")
 
-// case class ParamBundle(x: Int, y: Int)(
-// a: UInt = UInt(Width(x)),
-// b: UInt = UInt(Width(y))
-// )
-// final class ParamBundle(val x: Int, val y: Int) extends Bundle {
-// val a: UInt = UInt(Width(x))
-// val b: UInt = UInt(Width(y))
-// }
-
-// val parambundle = new ParamBundle(2, 3)
-// println(s"parambundle ${parambundle}")
-
-// val reg_parambundle = Reg(new ParamBundle(5, 6))
-// val reg_parambundle_a = reg_parambundle.a
-
   ///////////////////////////////////
   // Directionality test
   ///////////////////////////////////
 
-// case class MyDirBundle(a: UInt & Input, b: Bool & Output) extends Bundle
+  // Test basic direction creation
+  val uint_input: Input[UInt] = UInt(Width(3)).in
+  // val uint_input: Output[UInt] = UInt(Width(3)).in // Type mismatch, compile error
+  val bool_output = Bool().out
+  println(s"uint_input: ${uint_input} bool_output: ${bool_output}")
 
-// val my_dir = MyDirBundle(UInt(Width(3)).in, Bool().out)
+  // Test flip operation
+  val flipped_uint = flip(uint_input)
+  val flipped_bool = flip(bool_output)
+  println(s"flipped_uint: ${flipped_uint} flipped_bool: ${flipped_bool}")
 
-// val my_dir_reg = Reg(my_dir)
+  // Test with regular bundles (no directionality for now)
+  case class MyDirBundle(a: UInt, b: Bool) extends Bundle
 
-// val my_dir_reg_a: Reg[UInt & Input] = my_dir_reg.a
-  // val my_dir_reg_a: Reg[UInt & Output] = my_dir_reg.a // Compile fails, type error
-// println(s"my_dir_reg_a ${my_dir_reg_a}")
+  val my_dir = MyDirBundle(UInt(Width(3)), Bool())
 
-  // val my_dir_lit = Lit(my_dir)
-// val my_dir_lit = Lit[MyDirBundle]((a = 3, b = true))
+  val my_dir_reg = Reg(my_dir)
 
+  val my_dir_reg_a: Reg[UInt] = my_dir_reg.a
+  println(s"my_dir_reg_a ${my_dir_reg_a}")
 
-// val flipped = flip(my)
-// val fa: UInt & Output = flipped.a.value
-// val fb: Bool & Input = flipped.b.value
+  // Test directional values with Reg
+  val uint_input_reg = Reg(uint_input)
+  val bool_output_reg = Reg(bool_output)
+  println(s"uint_input_reg: ${uint_input_reg} bool_output_reg: ${bool_output_reg}")
 
-  // case class MyDirBundle(a: UInt & Input, b: Bool & Output)
+  // Test directional values with Lit
+  val uint_input_lit = Lit[Input[UInt]](3)
+  val bool_output_lit = Lit[Output[Bool]](true)
+  println(s"uint_input_lit.get: ${uint_input_lit.get} bool_output_lit.get: ${bool_output_lit.get}")
 
-  // val my_dir_bundle = MyDirBundle(
-  //   a = UInt(Width(3)) & Input,
-  //   b = Bool & Output)
+  case class DirectionalBundle(a: Input[UInt], b: Output[Bool]) extends Bundle
+
+  val dir_bundle = DirectionalBundle(new Input(UInt(Width(4))), new Output(Bool()))
+  val dir_bundle_reg = Reg(dir_bundle)
+  println(s"dir_bundle: ${dir_bundle}")
+  println(s"dir_bundle_reg: ${dir_bundle_reg}")
+  println(s"dir_bundle_reg.a: ${dir_bundle_reg.a}")
+
+  val input_lit = Lit[Input[UInt]](42)
+  val output_lit = Lit[Output[Bool]](false)
+  println(s"input_lit.get: ${input_lit.get}")
+  println(s"output_lit.get: ${output_lit.get}")
+
+  // Example 5: Nested directional bundles
+  case class AdvancedInnerDirBundle(a: Input[UInt], b: Output[Bool]) extends Bundle
+  case class AdvancedOuterDirBundle(x: Output[UInt], i: AdvancedInnerDirBundle) extends Bundle
+
+  val nested_dir_bundle = AdvancedOuterDirBundle(
+    new Output(UInt(Width(6))),
+    AdvancedInnerDirBundle(new Input(UInt(Width(3))), new Output(Bool()))
+  )
+
+  val nested_dir_bundle_lit = Lit[AdvancedOuterDirBundle](
+    x = 3,
+    i = (
+      a = 6,
+      b = true
+    ))
+
+  println(s"${nested_dir_bundle_lit.get} ${nested_dir_bundle_lit.x.get} ${nested_dir_bundle_lit.i.b.get}") 

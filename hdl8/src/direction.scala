@@ -5,11 +5,15 @@ import scala.compiletime.*
 import scala.NamedTuple
 import scala.util.NotGiven
 
-
-sealed trait Direction
-sealed trait Input extends Direction
-sealed trait Output extends Direction
-
+// Extension methods for creating directional types
 extension [T <: ValueType](t: T)
-  inline def in: T & Input = t.asInstanceOf[T & Input]
-  inline def out: T & Output = t.asInstanceOf[T & Output]
+  def in: Input[T] = new Input(t)
+  def out: Output[T] = new Output(t)
+
+// Flip operation for runtime values
+def flip[T <: ValueType](dv: DirectionalValue[T, ?]): DirectionalValue[T, ?] = dv match
+  case iv: Input[T] => new Output(iv.value)
+  case ov: Output[T] => new Input(ov.value)
+
+// Flip operation for bundles (simplified - would need more sophisticated implementation for full functionality)
+def flipBundle[T <: Bundle](bundle: T): T = bundle

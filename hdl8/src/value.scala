@@ -29,6 +29,22 @@ object Bool:
 
 trait Bundle extends ValueType
 
+// Direction types
+sealed trait Direction
+
+sealed trait InputDir extends Direction
+sealed trait OutputDir extends Direction
+
+// Directional value types
+sealed trait DirectionalValue[T <: ValueType, D <: Direction] extends ValueType:
+  val value: T
+
+final class Input[T <: ValueType](val value: T) extends DirectionalValue[T, InputDir]:
+  override def toString(): String = s"${value}.in"
+
+final class Output[T <: ValueType](val value: T) extends DirectionalValue[T, OutputDir]:
+  override def toString(): String = s"${value}.out"
+
 final class Vec[T <: ValueType](val elem: T, val len: Int) extends ValueType:
   override def toString(): String = s"Vec($elem, $len)"
 
