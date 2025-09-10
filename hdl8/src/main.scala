@@ -154,7 +154,7 @@ package hdl8
   // val my_dir_reg_a: Reg[UInt & Output] = my_dir_reg.a // Compile fails, type error
   println(s"my_dir_reg_a ${my_dir_reg_a}")
 
-// val my_dir_lit = Lit(my_dir)
+  val my_dir_lit = Lit(my_dir)
 
 // val flipped = flip(my)
 // val fa: UInt & Output = flipped.a.value

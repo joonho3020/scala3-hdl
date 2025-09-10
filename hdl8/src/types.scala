@@ -36,11 +36,21 @@ object RegVecOps:
       val sliceLen = (end - start) + 1
       new Reg(Vec(rv.t.elem, sliceLen))
 
-type HostTypeOf[T] = T match
-  case UInt    => Int
-  case Bool    => Boolean
-  case Vec[t]  => Seq[HostTypeOf[t & ValueType]]
-  case _       => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & ValueType]]
+// type Undir[T] = T match
+// case (t & Input)      => Undir[t]
+// case (Input & t)      => Undir[t]
+// case (t & Output)     => Undir[t]
+// case (Output & t)     => Undir[t]
+// case (t & Direction)  => Undir[t]
+// case (Direction & t)  => Undir[t]
+// case (a & b)          => Undir[a] & Undir[b]
+// case t                => t
+
+// type HostTypeOf[T] = T match
+//   case UInt    => Int
+//   case Bool    => Boolean
+//   case Vec[t]  => Seq[HostTypeOf[t & ValueType]]
+//   case _       => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & ValueType]]
 
 final class Lit[T](private val payload: Any) extends Selectable:
   type Fields = NamedTuple.Map[
