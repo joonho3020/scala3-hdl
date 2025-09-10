@@ -135,3 +135,29 @@ package hdl8
 
   val mvb_lit_i1_b0: Lit[UInt] = mvb_lit.i(1).b(0)
   println(s"mvb_lit_i1_b0 ${mvb_lit_i1_b0.get}")
+
+  // A "Bundle" as a case class
+  final case class InnerDir(
+    a: Dir[UInt, Input],
+    b: Dir[Bool, Output]
+  )
+
+  final case class OuterDir(
+    x: Dir[UInt, Output],
+    i: InnerDir,
+    v: Vec[Dir[UInt, Input]]
+  )
+
+  type InnerFlipped = FlipAll[Inner] // a:-1, b:+1
+  type OuterFlipped = FlipAll[Outer] // x:+1, i flipped, v’s element flipped
+
+  val in  = DirT(UInt(8),  1)
+  val out = DirT(UInt(8), -1)
+
+  val o = Outer(
+    x = out,
+    i = Inner(a = in, b = DirT(Bool(), -1)),
+    v = Vec(DirT(UInt(4), 1), len = 3)
+  )
+
+  val f = flip(o) // type: Oute
