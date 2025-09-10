@@ -144,8 +144,8 @@ package hdl8
   ///////////////////////////////////
 
   // Test basic direction creation
-  val uint_input: Input[UInt] = UInt(Width(3)).in
-  // val uint_input: Output[UInt] = UInt(Width(3)).in // Type mismatch, compile error
+  val uint_input: InputValue[UInt] = UInt(Width(3)).in
+  // val uint_input: OutputValue[UInt] = UInt(Width(3)).in // Type mismatch, compile error
   val bool_output = Bool().out
   println(s"uint_input: ${uint_input} bool_output: ${bool_output}")
 
@@ -170,30 +170,34 @@ package hdl8
   println(s"uint_input_reg: ${uint_input_reg} bool_output_reg: ${bool_output_reg}")
 
   // Test directional values with Lit
-  val uint_input_lit = Lit[Input[UInt]](3)
-  val bool_output_lit = Lit[Output[Bool]](true)
+  val uint_input_lit = Lit[InputValue[UInt]](3)
+  val bool_output_lit = Lit[OutputValue[Bool]](true)
   println(s"uint_input_lit.get: ${uint_input_lit.get} bool_output_lit.get: ${bool_output_lit.get}")
 
-  case class DirectionalBundle(a: Input[UInt], b: Output[Bool]) extends Bundle
+  case class DirectionalBundle(a: InputValue[UInt], b: OutputValue[Bool]) extends Bundle
 
-  val dir_bundle = DirectionalBundle(new Input(UInt(Width(4))), new Output(Bool()))
+  val dir_bundle = DirectionalBundle(new InputValue(UInt(Width(4))), new OutputValue(Bool()))
   val dir_bundle_reg = Reg(dir_bundle)
+
   println(s"dir_bundle: ${dir_bundle}")
   println(s"dir_bundle_reg: ${dir_bundle_reg}")
   println(s"dir_bundle_reg.a: ${dir_bundle_reg.a}")
 
-  val input_lit = Lit[Input[UInt]](42)
-  val output_lit = Lit[Output[Bool]](false)
+  val dir_bundle_flip = flipBundle(dir_bundle)
+  println(s"dir_bundle_flip ${dir_bundle_flip} dir_bundle_flip.a ${dir_bundle_flip.a} dir_bundle_flip.b ${dir_bundle_flip.b}")
+
+  val input_lit = Lit[InputValue[UInt]](42)
+  val output_lit = Lit[OutputValue[Bool]](false)
   println(s"input_lit.get: ${input_lit.get}")
   println(s"output_lit.get: ${output_lit.get}")
 
   // Example 5: Nested directional bundles
-  case class AdvancedInnerDirBundle(a: Input[UInt], b: Output[Bool]) extends Bundle
-  case class AdvancedOuterDirBundle(x: Output[UInt], i: AdvancedInnerDirBundle) extends Bundle
+  case class AdvancedInnerDirBundle(a: InputValue[UInt], b: OutputValue[Bool]) extends Bundle
+  case class AdvancedOuterDirBundle(x: OutputValue[UInt], i: AdvancedInnerDirBundle) extends Bundle
 
   val nested_dir_bundle = AdvancedOuterDirBundle(
-    new Output(UInt(Width(6))),
-    AdvancedInnerDirBundle(new Input(UInt(Width(3))), new Output(Bool()))
+    new OutputValue(UInt(Width(6))),
+    AdvancedInnerDirBundle(new InputValue(UInt(Width(3))), new OutputValue(Bool()))
   )
 
   val nested_dir_bundle_lit = Lit[AdvancedOuterDirBundle](
@@ -204,3 +208,37 @@ package hdl8
     ))
 
   println(s"${nested_dir_bundle_lit.get} ${nested_dir_bundle_lit.x.get} ${nested_dir_bundle_lit.i.b.get}") 
+
+  final case class ComplexInnerBundle(
+    addr: InputValue[UInt],
+    data: OutputValue[UInt],
+    flags: Vec[OutputValue[Bool]]
+  ) extends Bundle
+  
+  final case class ComplexOuterBundle(
+    ctrl: InputValue[Bool],
+    inner: ComplexInnerBundle,
+    status: OutputValue[Bool]
+  ) extends Bundle
+  
+  val complex_bundle = ComplexOuterBundle(
+    new InputValue(Bool()),
+    ComplexInnerBundle(
+      new InputValue(UInt(Width(16))),
+      new OutputValue(UInt(Width(32))),
+      Vec(new OutputValue(Bool()), 8)
+    ),
+    new OutputValue(Bool())
+  )
+  
+  val complex_bundle_lit = Lit[ComplexOuterBundle](
+    ctrl = true,
+    inner = (
+      addr = 0x1000,
+      data = 0xDEADBEEF,
+      flags = Seq.fill(8)(true)
+    ),
+    status = false
+  )
+  val complex_bundle_flip = flipBundle(complex_bundle)
+  println(s"complex_bundle_flip ${complex_bundle_flip}")
