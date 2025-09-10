@@ -139,22 +139,38 @@ package hdl8
   val mvb_lit_i1_b0: Lit[UInt] = mvb_lit.i(1).b(0)
   println(s"mvb_lit_i1_b0 ${mvb_lit_i1_b0.get}")
 
+// case class ParamBundle(x: Int, y: Int)(
+// a: UInt = UInt(Width(x)),
+// b: UInt = UInt(Width(y))
+// )
+// final class ParamBundle(val x: Int, val y: Int) extends Bundle {
+// val a: UInt = UInt(Width(x))
+// val b: UInt = UInt(Width(y))
+// }
+
+// val parambundle = new ParamBundle(2, 3)
+// println(s"parambundle ${parambundle}")
+
+// val reg_parambundle = Reg(new ParamBundle(5, 6))
+// val reg_parambundle_a = reg_parambundle.a
 
   ///////////////////////////////////
   // Directionality test
   ///////////////////////////////////
 
-  case class MyDirBundle(a: UInt & Input, b: Bool & Output) extends Bundle
+// case class MyDirBundle(a: UInt & Input, b: Bool & Output) extends Bundle
 
-  val my_dir = MyDirBundle(UInt(Width(3)).in, Bool().out)
+// val my_dir = MyDirBundle(UInt(Width(3)).in, Bool().out)
 
-  val my_dir_reg = Reg(my_dir)
+// val my_dir_reg = Reg(my_dir)
 
-  val my_dir_reg_a: Reg[UInt & Input] = my_dir_reg.a
+// val my_dir_reg_a: Reg[UInt & Input] = my_dir_reg.a
   // val my_dir_reg_a: Reg[UInt & Output] = my_dir_reg.a // Compile fails, type error
-  println(s"my_dir_reg_a ${my_dir_reg_a}")
+// println(s"my_dir_reg_a ${my_dir_reg_a}")
 
-  val my_dir_lit = Lit(my_dir)
+  // val my_dir_lit = Lit(my_dir)
+// val my_dir_lit = Lit[MyDirBundle]((a = 3, b = true))
+
 
 // val flipped = flip(my)
 // val fa: UInt & Output = flipped.a.value
