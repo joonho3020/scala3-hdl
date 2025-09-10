@@ -50,7 +50,8 @@ type HostTypeOf[T] = T match
   case UInt      => Int
   case Bool      => Boolean
   case Vec[t]    => Seq[HostTypeOf[t & ValueType]]
-  case DirectionalValue[t, d] => HostTypeOf[t]  // Direction doesn't affect host type
+  case Input[t]  => HostTypeOf[t]
+  case Output[t] => HostTypeOf[t]
   case _         => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & ValueType]]
 
 final class Lit[T](private val payload: Any) extends Selectable:
