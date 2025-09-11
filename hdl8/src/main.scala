@@ -135,3 +135,26 @@ package hdl8
 
   val mvb_lit_i1_b0: Lit[UInt] = mvb_lit.i(1).b(0)
   println(s"mvb_lit_i1_b0 ${mvb_lit_i1_b0.get}")
+
+  final case class A(a: UInt, b: UInt) extends Bundle
+  final case class B(x: A, y: Bool) extends Bundle
+
+  val bundle_a = A(
+    a = Input(UInt(Width(3))),
+    b = UInt(Width(4)) // defaults to Output
+  )
+
+  println(s"bundle_a ${bundle_a}")
+
+  val bundle_b = B(
+    x = Flipped(bundle_a),
+    y = Output(Bool(()))
+  )
+  println(s"bundle_b ${bundle_b}")
+
+  val bundle_b_reg = Reg(bundle_b)
+  val bundle_b_reg_x_a: Reg[UInt] = bundle_b_reg.x.a
+  val bundle_b_reg_x_b: Reg[UInt] = bundle_b_reg.x.b
+  val bundle_b_reg_y: Reg[Bool] = bundle_b_reg.y
+  // val bundle_b_reg_x_a: Reg[Bool] = bundle_b_reg.x.a // Compile error, type mismatch
+  println(s"bundle_b_reg_x_a ${bundle_b_reg_x_a} bundle_b_reg_x_b ${bundle_b_reg_x_b} bundle_b_reg_y ${bundle_b_reg_y}")

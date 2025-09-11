@@ -7,6 +7,14 @@ import scala.NamedTuple
 import scala.util.NotGiven
 import scala.quoted.*
 
+enum Direction:
+  case In, Out
+
+object Direction:
+  inline def flip(d: Direction): Direction = d match
+    case Direction.In  => Direction.Out
+    case Direction.Out => Direction.In
+
 sealed class Width(val value: Int):
   override def toString: String = s"${value}"
 
@@ -15,17 +23,18 @@ object Width:
 
 sealed trait ValueType
 
-sealed class UInt(val w: Width) extends ValueType:
-  override def toString(): String = s"UInt($w.W)"
+sealed class UInt(val w: Width, val dir: Direction = Direction.Out) extends ValueType:
+  override def toString(): String = s"UInt($w.W, $dir)"
 
 object UInt:
   def apply(w: Width): UInt = new UInt(w)
 
-sealed class Bool extends ValueType:
-  override def toString(): String = s"Bool()"
+sealed class Bool(val dir: Direction = Direction.Out) extends ValueType:
+  override def toString(): String = s"Bool($dir)"
 
 object Bool:
   def apply(): Bool = new Bool
+  def apply(u: Unit): Bool = new Bool
 
 trait Bundle extends ValueType
 
@@ -35,3 +44,56 @@ final class Vec[T <: ValueType](val elem: T, val len: Int) extends ValueType:
 object Vec:
   def apply[T <: ValueType](elem: T, len: Int): Vec[T] = new Vec(elem, len)
   // TODO: Add foreach, map...
+
+trait DirLike[T <: ValueType]:
+  def setAll(t: T, dir: Direction): T
+  def flipAll(t: T): T
+
+object DirLike:
+  inline def summonAll[Elems <: Tuple]: List[DirLike[? <: ValueType]] =
+    inline erasedValue[Elems] match
+      case _: EmptyTuple => Nil
+      case _: (h *: t) =>
+        summonInline[DirLike[h & ValueType]] :: summonAll[t]
+
+  given DirLike[UInt] with
+    def setAll(t: UInt, dir: Direction): UInt = new UInt(t.w, dir)
+    def flipAll(t: UInt): UInt = new UInt(t.w, Direction.flip(t.dir))
+
+  given DirLike[Bool] with
+    def setAll(t: Bool, dir: Direction): Bool = new Bool(dir)
+    def flipAll(t: Bool): Bool = new Bool(Direction.flip(t.dir))
+
+  given [A <: ValueType](using a: DirLike[A]): DirLike[Vec[A]] with
+    def setAll(t: Vec[A], dir: Direction): Vec[A] = Vec(a.setAll(t.elem, dir), t.len)
+    def flipAll(t: Vec[A]): Vec[A] = Vec(a.flipAll(t.elem), t.len)
+
+  inline given [T <: Bundle](using m: Mirror.ProductOf[T]): DirLike[T] =
+    new DirLike[T]:
+      def setAll(t: T, dir: Direction): T =
+        val p = t.asInstanceOf[Product]
+        val typeclasses = DirLike.summonAll[m.MirroredElemTypes]
+        val arr = new Array[Any](p.productArity)
+        var i = 0
+        while i < arr.length do
+          val dl = typeclasses(i).asInstanceOf[DirLike[ValueType]]
+          val v = p.productElement(i).asInstanceOf[ValueType]
+          arr(i) = dl.setAll(v, dir)
+          i += 1
+        m.fromProduct(Tuple.fromArray(arr)).asInstanceOf[T]
+
+      def flipAll(t: T): T =
+        val p = t.asInstanceOf[Product]
+        val typeclasses = DirLike.summonAll[m.MirroredElemTypes]
+        val arr = new Array[Any](p.productArity)
+        var i = 0
+        while i < arr.length do
+          val dl = typeclasses(i).asInstanceOf[DirLike[ValueType]]
+          val v = p.productElement(i).asInstanceOf[ValueType]
+          arr(i) = dl.flipAll(v)
+          i += 1
+        m.fromProduct(Tuple.fromArray(arr)).asInstanceOf[T]
+
+inline def Input[T <: ValueType](t: T): T = summonInline[DirLike[T]].setAll(t, Direction.In)
+inline def Output[T <: ValueType](t: T): T = summonInline[DirLike[T]].setAll(t, Direction.Out)
+inline def Flipped[T <: ValueType](t: T): T = summonInline[DirLike[T]].flipAll(t)
