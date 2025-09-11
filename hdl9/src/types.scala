@@ -2,10 +2,10 @@ package hdl9
 
 import scala.deriving.*
 import scala.compiletime.*
-import scala.NamedTuple
 import scala.util.NotGiven
 import scala.quoted.*
 import scala.language.dynamics
+import scala.NamedTuple.*
 
 final class Reg[T](val t: T) extends Dynamic:
   type Fields = NamedTuple.Map[
@@ -41,11 +41,76 @@ object RegMacros:
       case None =>
         quotes.reflect.report.errorAndAbort("selectDynamic requires a literal field name")
 
-type HostTypeOf[T] = T match
-  case UInt    => Int
-  case Bool    => Boolean
-  case Vec[t]  => Seq[HostTypeOf[t & ValueType]]
-  case _       => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & ValueType]]
+// Derive host-side representation types for HDL ValueTypes, including structural bundles
+type HostTypeOf[T] = HostOf[T & ValueType]#Out
+
+trait HostOf[T <: ValueType]:
+  type Out
+
+object HostOf:
+  given HostOf[UInt] with
+    type Out = Int
+
+  given HostOf[Bool] with
+    type Out = Boolean
+
+  given [A <: ValueType](using ha: HostOf[A]): HostOf[Vec[A]] with
+    type Out = Seq[ha.Out]
+
+  inline given [T <: Bundle]: HostOf[T] = ${ HostOfMacros.hostOfBundleImpl[T] }
+
+object HostOfMacros:
+  def hostOfBundleImpl[T: Type](using Quotes): Expr[HostOf[T]] =
+    import quotes.reflect.*
+
+    val tpe = TypeRepr.of[T]
+    if !(tpe <:< TypeRepr.of[Bundle]) then
+      report.errorAndAbort(s"HostTypeOf can only be derived for Bundle (got: ${tpe.show})")
+
+    // Collect bundle fields: supports both classes with vals and structural Refinements
+    def classFields(sym: Symbol, tref: TypeRepr): List[(String, TypeRepr)] =
+      val syms = sym.fieldMembers ++ sym.caseFields ++ sym.methodMembers
+      syms
+        .distinctBy(_.name)
+        .flatMap { s =>
+          val mt = tref.memberType(s)
+          val ft = mt match
+            case mt: MethodType => mt.resType
+            case pt: PolyType   => pt.resType
+            case other          => other
+          if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
+        }
+
+    def refinementFields(tr: TypeRepr): List[(String, TypeRepr)] = tr match
+      case Refinement(parent, name, info) =>
+        val base = refinementFields(parent)
+        val infoTpe = info match
+          case mt: MethodType => mt.resType
+          case pt: PolyType   => pt.resType
+          case other          => other
+        if infoTpe <:< TypeRepr.of[ValueType] then base :+ (name -> infoTpe) else base
+      case _ => Nil
+
+    val fields: List[(String, TypeRepr)] =
+      if tpe.typeSymbol == Symbol.noSymbol then refinementFields(tpe)
+      else classFields(tpe.typeSymbol, tpe)
+
+    // Build labelled named-tuple type: ("a" ->> HostTypeOf[A]) *: ... *: EmptyTuple
+    def labelledCons(label: String, valueT: TypeRepr, tailT: TypeRepr): TypeRepr =
+      val lTpe = ConstantType(StringConstant(label))
+      (lTpe.asType, valueT.asType, tailT.asType) match
+        case ('[l], '[v], '[t]) =>
+          TypeRepr.of[(l ->> v) *: t]
+
+    val outTupleTpe: TypeRepr =
+      fields.foldRight(TypeRepr.of[EmptyTuple]) { case ((label, fT), tail) =>
+        val hostFieldT = fT.asType match
+          case '[ft] => TypeRepr.of[HostTypeOf[ft & ValueType]]
+        labelledCons(label, hostFieldT, tail)
+      }
+
+    outTupleTpe.asType match
+      case '[o] => '{ new HostOf[T] { type Out = o } }
 
 final class Lit[T](private val payload: HostTypeOf[T]) extends Dynamic:
   transparent inline def selectDynamic(inline name: String): Lit[? <: ValueType] =
@@ -60,12 +125,12 @@ object Lit:
 object LitVecOps:
   extension [A <: ValueType](lv: Lit[Vec[A]])
     def apply(index: Int): Lit[A] =
-      val seq = lv.get
+      val seq = lv.get.asInstanceOf[Seq[HostTypeOf[A]]]
       new Lit[A](seq(index))
 
     def apply(start: Int, end: Int): Lit[Vec[A]] =
-      val seq = lv.get
-      new Lit[Vec[A]](seq.slice(start, end + 1))
+      val seq = lv.get.asInstanceOf[Seq[HostTypeOf[A]]]
+      new Lit[Vec[A]](seq.slice(start, end + 1).asInstanceOf[HostTypeOf[Vec[A]]])
 
 object LitMacros:
   def selectDynamicImpl[T: Type](
