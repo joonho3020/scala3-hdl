@@ -88,3 +88,7 @@ object playground4 extends ScalaModule {
 object playground5 extends ScalaModule {
   def scalaVersion = SCALAVERSION
 }
+
+object playground7 extends ScalaModule {
+  def scalaVersion = SCALAVERSION
+}
