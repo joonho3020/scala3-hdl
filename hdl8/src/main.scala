@@ -136,6 +136,8 @@ package hdl8
   val mvb_lit_i1_b0: Lit[UInt] = mvb_lit.i(1).b(0)
   println(s"mvb_lit_i1_b0 ${mvb_lit_i1_b0.get}")
 
+  // Directionality
+
   final case class A(a: UInt, b: UInt) extends Bundle
   final case class B(x: A, y: Bool) extends Bundle
 
