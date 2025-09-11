@@ -70,7 +70,6 @@ object LitVecOps:
     def apply(start: Int, end: Int): Lit[Vec[A]] =
       val seq = lv.get
       new Lit[Vec[A]](seq.slice(start, end + 1))
-
 object Lit:
   // This is required to make sure that the order of the names in the input
   // named tuple matches that of T <: Bundle
@@ -78,3 +77,4 @@ object Lit:
   // but lets now worry about this for now...
   inline def apply[T <: ValueType](inline v: HostTypeOf[T]): Lit[T] =
     new Lit[T](v)
+
