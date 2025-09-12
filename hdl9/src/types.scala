@@ -259,22 +259,53 @@ object BundleMacros:
           if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
         }
 
-    def refinementFields(tr: TypeRepr): List[(String, TypeRepr)] = tr match
-      case Refinement(parent, name, info) =>
-        val base = refinementFields(parent)
-        val infoTpe = info match
-          case mt: MethodType => mt.resType
-          case pt: PolyType => pt.resType
-          case other => other
-        if infoTpe <:< TypeRepr.of[ValueType] then base :+ (name -> infoTpe) else base
-      case _ => Nil
+    val fields: List[(String, TypeRepr)] = classFields(tpe.typeSymbol, tpe)
 
-    val fields: List[(String, TypeRepr)] =
-      if tpe.typeSymbol == Symbol.noSymbol then refinementFields(tpe)
-      else classFields(tpe.typeSymbol, tpe)
+    def tupleOf(elems: List[TypeRepr]): TypeRepr =
+      elems.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>
+        (head.asType, tail.asType) match
+          case ('[h], '[t]) => TypeRepr.of[h *: (t & Tuple)]
+      }
 
-    val msg =
-      val pairs = fields.map { case (n, ft) => s"$n: ${ft.show}" }
-      s"${tpe.show} fields => ${pairs.mkString(", ")}"
+    val nameTypes: List[TypeRepr] = fields.map { case (n, _) => ConstantType(StringConstant(n)) }
+    val namesTupleTpe = tupleOf(nameTypes)
+
+    val msg: String = namesTupleTpe.asType match
+      case '[nt] => s"${Type.show[T]}: field-names type = ${Type.show[nt & Tuple]}"
 
     '{ println(${Expr(msg)}) }
+
+  inline def fieldNamesOf[T <: Bundle]: Tuple =
+    ${ fieldNamesOfImpl[T] }
+
+  private def fieldNamesOfImpl[T <: Bundle](using Quotes, Type[T]): Expr[Tuple] =
+    import quotes.reflect.*
+
+    val tpe = TypeRepr.of[T]
+    val cls = tpe.typeSymbol
+
+    def classFields(sym: Symbol, tref: TypeRepr): List[(String, TypeRepr)] =
+      val syms = sym.fieldMembers ++ sym.caseFields ++ sym.methodMembers
+      syms
+        .distinctBy(_.name)
+        .flatMap { s =>
+          val mt = tref.memberType(s)
+          val ft = mt match
+            case mt: MethodType => mt.resType
+            case pt: PolyType => pt.resType
+            case other => other
+          if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
+        }
+
+    val cls_fields: List[(String, TypeRepr)] = classFields(tpe.typeSymbol, tpe)
+    val fields = cls_fields.map(x => x._1)
+
+    if fields.isEmpty then
+      report.errorAndAbort(s"No public vals found in ${tpe.show} (check visibility or where you declare them)")
+
+    // turn names into literal expressions, which carry singleton string types
+    val nameLits: List[Expr[String]] = fields.map(f => Expr(f))
+
+    // fold into a tuple expression; because each head is a literal,
+    // the resulting type is precisely ("a","b",...) not just Tuple
+    nameLits.foldRight('{ EmptyTuple }: Expr[Tuple]) { (h, acc) => '{ $h *: $acc } }

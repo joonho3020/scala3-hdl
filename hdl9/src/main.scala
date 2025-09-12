@@ -10,7 +10,8 @@ package hdl9
     val b = UInt(Width(p.wb))
 
   class MyBundle(p: InnerBundleParam) extends Bundle:
-    val x = UInt(Width(p.wa + p.wb))
+    val wx = p.wa + p.wb
+    val x = UInt(Width(wx))
     val y = Bool()
     val i = new InnerBundle(p)
 
@@ -29,6 +30,13 @@ package hdl9
 
   BundleMacros.printBundleFields[MyBundle]
   BundleMacros.printBundleFields[InnerBundle]
+
+  // Inspect type-level computed tuple of names for bundles
+
+  val innerNames = BundleMacros.fieldNamesOf[InnerBundle]
+  val myNames = BundleMacros.fieldNamesOf[MyBundle]
+  println(s"innerNames type = ${innerNames}")
+  println(s"myNames type = ${myNames}")
 
   // val ulit = Lit[UInt](3)
   // println(s"ulit.get: ${ulit.get}")
