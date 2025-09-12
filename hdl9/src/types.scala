@@ -42,6 +42,22 @@ object RegMacros:
         quotes.reflect.report.errorAndAbort("selectDynamic requires a literal field name")
 
 
+final class Lit[T](private val payload: Any) extends Dynamic:
+  inline def selectDynamic(name: String): Lit[?] =
+    // NOTE: since selectables doesn't preserve the order,
+    // even if we manage to generate HostTypeOf[T] using macros,
+    // the order in which the fields are defined may change.
+    summonFrom {
+      case m: Mirror.ProductOf[T] =>
+        val labels = constValueTuple[m.MirroredElemLabels].toArray
+        val idx = labels.indexOf(name)
+        val subpayload = payload.asInstanceOf[Product].productElement(idx)
+        new Lit[Any](subpayload)
+      case _ =>
+        throw new NoSuchElementException(s"${summonInline[ValueOf[String]]}")
+    }
+  transparent inline def get: HostTypeOf[T] =
+    payload.asInstanceOf[HostTypeOf[T]]
 
 // Derive host-side representation types for HDL ValueTypes, including structural bundles
 type HostTypeOf[T] = HostOf[T]#Out
@@ -49,194 +65,85 @@ type HostTypeOf[T] = HostOf[T]#Out
 trait HostOf[T]:
   type Out
 
-// object HostOf:
-// given HostOf[UInt] with
-// type Out = Int
+object HostOf:
+  given HostOf[UInt] with
+    type Out = Int
 
-// given HostOf[Bool] with
-// type Out = Boolean
+  given HostOf[Bool] with
+    type Out = Boolean
 
-// given [A <: ValueType](using ha: HostOf[A]): HostOf[Vec[A]] with
-// type Out = Seq[ha.Out]
+  given [A <: ValueType](using ha: HostOf[A]): HostOf[Vec[A]] with
+    type Out = Seq[ha.Out]
 
-// inline given [T <: Bundle]: HostOf[T] = ${ HostOfMacros.hostOfBundleImpl[T] }
+  inline given [T <: Bundle]: HostOf[T] = ${ HostOfMacros.hostOfBundleImpl[T] }
 
-// object HostOfMacros:
-  // TODO: Implement macros that returns a NamedTuple for a given Bundle.
-  // Remember that bundles can be nested.
-  // Seems like we can use the following information to create macros for generating
-  // NamedTuples:
-  //
-  // Expansion
-  // Named tuples are in essence just a convenient syntax for regular tuples. In the internal representation, a named tuple type is represented at compile time as a pair of two tuples. One tuple contains the names as literal constant string types, the other contains the element types. The runtime representation of a named tuples consists of just the element values, whereas the names are forgotten. This is achieved by declaring NamedTuple in package scala as an opaque type as follows:
-  // 
-  //   opaque type NamedTuple[N <: Tuple, +V <: Tuple] >: V = V
-  // For instance, the Person type would be represented as the type
-  // 
-  // NamedTuple[("name", "age"), (String, Int)]
-  // NamedTuple is an opaque type alias of its second, value parameter. The first parameter is a string constant type which determines the name of the element. Since the type is just an alias of its value part, names are erased at runtime, and named tuples and regular tuples have the same representation.
-  // 
-  // A NamedTuple[N, V] type is publicly known to be a supertype (but not a subtype) of its value paramater V, which means that regular tuples can be assigned to named tuples but not vice versa.
-  // 
-  // The NamedTuple object contains a number of extension methods for named tuples hat mirror the same functions in Tuple. Examples are apply, head, tail, take, drop, ++, map, or zip. Similar to Tuple, the NamedTuple object also contains types such as Elem, Head, Concat that describe the results of these extension methods.
-  // 
-  // The translation of named tuples to instances of NamedTuple is fixed by the specification and therefore known to the programmer. This means that:
-  // 
-  // All tuple operations also work with named tuples “out of the box”.
-  // Macro libraries can rely on this expansion.
+// TODO: Implement macros that returns a NamedTuple for a given Bundle.
+// Remember that bundles can be nested.
+// Seems like we can use the following information to create macros for generating
+// NamedTuples:
 
-  // def hostOfBundleImpl[T <: ValueType: Type](using Quotes): Expr[HostOf[T]] =
-  //   import quotes.reflect.*
+// Expansion
+// Named tuples are in essence just a convenient syntax for regular tuples. In the internal representation, a named tuple type is represented at compile time as a pair of two tuples. One tuple contains the names as literal constant string types, the other contains the element types. The runtime representation of a named tuples consists of just the element values, whereas the names are forgotten. This is achieved by declaring NamedTuple in package scala as an opaque type as follows:
 
-  //   val tpe = TypeRepr.of[T]
-  //   if !(tpe <:< TypeRepr.of[Bundle]) then
-  //     report.errorAndAbort(s"HostOfMacros.hostOfBundleImpl can only be used for Bundle, got: ${tpe.show}")
+// opaque type NamedTuple[N <: Tuple, +V <: Tuple] >: V = V
+// For instance, the Person type would be represented as the type
 
-  //   def classFields(sym: Symbol, tref: TypeRepr): List[(String, TypeRepr)] =
-  //     val syms = sym.fieldMembers ++ sym.caseFields ++ sym.methodMembers
-  //     syms
-  //       .distinctBy(_.name)
-  //       .flatMap { s =>
-  //         val mt = tref.memberType(s)
-  //         val ft = mt match
-  //           case mt: MethodType => mt.resType
-  //           case pt: PolyType => pt.resType
-  //           case other => other
-  //         if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
-  //       }
+// NamedTuple[("name", "age"), (String, Int)]
+// NamedTuple is an opaque type alias of its second, value parameter. The first parameter is a string constant type which determines the name of the element. Since the type is just an alias of its value part, names are erased at runtime, and named tuples and regular tuples have the same representation.
 
-  //   def refinementFields(tr: TypeRepr): List[(String, TypeRepr)] = tr match
-  //     case Refinement(parent, name, info) =>
-  //       val base = refinementFields(parent)
-  //       val infoTpe = info match
-  //         case mt: MethodType => mt.resType
-  //         case pt: PolyType => pt.resType
-  //         case other => other
-  //       if infoTpe <:< TypeRepr.of[ValueType] then base :+ (name -> infoTpe) else base
-  //     case _ => Nil
+// A NamedTuple[N, V] type is publicly known to be a supertype (but not a subtype) of its value paramater V, which means that regular tuples can be assigned to named tuples but not vice versa.
 
-  //   val fields: List[(String, TypeRepr)] =
-  //     if tpe.typeSymbol == Symbol.noSymbol then refinementFields(tpe)
-  //     else classFields(tpe.typeSymbol, tpe)
+// The NamedTuple object contains a number of extension methods for named tuples hat mirror the same functions in Tuple. Examples are apply, head, tail, take, drop, ++, map, or zip. Similar to Tuple, the NamedTuple object also contains types such as Elem, Head, Concat that describe the results of these extension methods.
 
-  //   def tupleOf(elems: List[TypeRepr]): TypeRepr =
-  //     elems.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>
-  //       (head.asType, tail.asType) match
-  //         case ('[h], '[t]) => TypeRepr.of[h *: (t & Tuple)]
-  //     }
+// The translation of named tuples to instances of NamedTuple is fixed by the specification and therefore known to the programmer. This means that:
 
-  //   val nameTypes: List[TypeRepr] = fields.map { case (n, _) => ConstantType(StringConstant(n)) }
+// All tuple operations also work with named tuples “out of the box”.
+// Macro libraries can rely on this expansion.
+object HostOfMacros:
+  def hostOfBundleImpl[T <: ValueType: Type](using Quotes): Expr[HostOf[T]] =
+    import quotes.reflect.*
 
-  //   val valueTypes: List[TypeRepr] = fields.map { case (_, ft) =>
-  //     ft.asType match
-  //       case '[f] => TypeRepr.of[HostTypeOf[f & ValueType]]
-  //   }
+    val tpe = TypeRepr.of[T]
+    if !(tpe <:< TypeRepr.of[Bundle]) then
+      report.errorAndAbort(s"HostOfMacros.hostOfBundleImpl can only be used for Bundle, got: ${tpe.show}")
 
-  //   val namesTupleTpe = tupleOf(nameTypes)
-  //   val valuesTupleTpe = tupleOf(valueTypes)
+    def classFields(sym: Symbol, tref: TypeRepr): List[(String, TypeRepr)] =
+      val syms = sym.fieldMembers ++ sym.caseFields ++ sym.methodMembers
+      syms
+        .distinctBy(_.name)
+        .flatMap { s =>
+          val mt = tref.memberType(s)
+          val ft = mt match
+            case mt: MethodType => mt.resType
+            case pt: PolyType => pt.resType
+            case other => other
+          if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
+        }
 
-  //   val outTpe: TypeRepr = (namesTupleTpe.asType, valuesTupleTpe.asType) match
-  //     case ('[n], '[v]) => TypeRepr.of[scala.NamedTuple.NamedTuple[n & Tuple, v & Tuple]]
+    val fields: List[(String, TypeRepr)] = classFields(tpe.typeSymbol, tpe)
 
-  //   outTpe.asType match
-  //     case '[o] => '{ new HostOf[T] { type Out = o } }
+    def tupleOf(elems: List[TypeRepr]): TypeRepr =
+      elems.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>
+        (head.asType, tail.asType) match
+          case ('[h], '[t]) => TypeRepr.of[h *: (t & Tuple)]
+      }
 
-// def hostOfBundleImpl[T <: ValueType: Type](using Quotes): Expr[HostOf[T]] =
-// import quotes.reflect.*
+    val nameTypes: List[TypeRepr] = fields.map { case (n, _) => ConstantType(StringConstant(n)) }
 
-// val tpe = TypeRepr.of[T]
-// if !(tpe <:< TypeRepr.of[Bundle]) then
-// report.errorAndAbort(s"HostOfMacros.hostOfBundleImpl can only be used for Bundle, got: ${tpe.show}")
+    val valueTypes: List[TypeRepr] = fields.map { case (_, ft) =>
+      ft.asType match
+        case '[f] => TypeRepr.of[HostTypeOf[f & ValueType]]
+    }
 
-// val members = TypeRepr.of[A].dealias.classSymbol.get.declarations.filter { s =>
-// !(s.flags.is(Flags.Private) || s.flags.is(Flags.Protected)) && (s.isValDef || (s.isDefDef && !s.isClassConstructor && s.paramSymss.isEmpty))
-// }
-// println(s"members ${members}")
+    val namesTupleTpe = tupleOf(nameTypes)
+    val valuesTupleTpe = tupleOf(valueTypes)
 
+    val outTpe: TypeRepr = (namesTupleTpe.asType, valuesTupleTpe.asType) match
+      case ('[n], '[v]) => TypeRepr.of[scala.NamedTuple.NamedTuple[n & Tuple, v & Tuple]]
 
-// final class Lit[T](private val payload: HostTypeOf[T]) extends Dynamic:
-//   transparent inline def selectDynamic(inline name: String): Lit[? <: ValueType] =
-//     ${ LitMacros.selectDynamicImpl[T]('payload, 'name) }
-// 
-//   transparent inline def get: HostTypeOf[T] = payload
-// 
-// object Lit:
-//   inline def apply[T <: ValueType](inline v: HostTypeOf[T]): Lit[T] =
-//     new Lit[T](v)
-// 
-// object LitVecOps:
-//   extension [A <: ValueType](lv: Lit[Vec[A]])
-//     def apply(index: Int): Lit[A] =
-//       val seq = lv.get.asInstanceOf[Seq[HostTypeOf[A]]]
-//       new Lit[A](seq(index))
-// 
-//     def apply(start: Int, end: Int): Lit[Vec[A]] =
-//       val seq = lv.get.asInstanceOf[Seq[HostTypeOf[A]]]
-//       new Lit[Vec[A]](seq.slice(start, end + 1).asInstanceOf[HostTypeOf[Vec[A]]])
-// 
-// object LitMacros:
-//   def selectDynamicImpl[T: Type](
-//     payload: Expr[HostTypeOf[T]], nameExpr: Expr[String]
-//   )(using Quotes): Expr[Lit[? <: ValueType]] =
-//     import quotes.reflect.*
-//     nameExpr.value match
-//       case Some(fieldName) =>
-//         val tpe = TypeRepr.of[T]
-//         if !(tpe <:< TypeRepr.of[ValueType]) then
-//           report.errorAndAbort(s"Lit can only select from ValueType (got: ${tpe.show})")
-// 
-//         // For bundle-like types, ensure the field exists and is a ValueType
-//         if tpe <:< TypeRepr.of[Bundle] then
-//           // Determine ordered list of fields and their types for T
-//           def classFields(sym: Symbol, tref: TypeRepr): List[(String, TypeRepr)] =
-//             val syms = sym.fieldMembers ++ sym.caseFields ++ sym.methodMembers
-//             // Deduplicate by name keeping first occurrence, filter value-like members
-//             syms
-//               .distinctBy(_.name)
-//               .flatMap { s =>
-//                 val mt = tref.memberType(s)
-//                 val ft = mt match
-//                   case mt: MethodType => mt.resType
-//                   case pt: PolyType => pt.resType
-//                   case other => other
-//                 if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
-//               }
-// 
-//           def refinementFields(tr: TypeRepr): List[(String, TypeRepr)] = tr match
-//             case Refinement(parent, name, info) =>
-//               val base = refinementFields(parent)
-//               // Only keep ValueType-like fields
-//               val infoTpe = info match
-//                 case mt: MethodType => mt.resType
-//                 case pt: PolyType => pt.resType
-//                 case other => other
-//               if infoTpe <:< TypeRepr.of[ValueType] then base :+ (name -> infoTpe) else base
-//             case _ => Nil
-// 
-//           val fields: List[(String, TypeRepr)] =
-//             if tpe.typeSymbol == Symbol.noSymbol then refinementFields(tpe)
-//             else classFields(tpe.typeSymbol, tpe)
-// 
-//           val idx = fields.indexWhere(_._1 == fieldName)
-//           if idx < 0 then
-//             report.errorAndAbort(s"${tpe.show} has no field '$fieldName'")
-// 
-//           val fieldTpe = fields(idx)._2
-//           if !(fieldTpe <:< TypeRepr.of[ValueType]) then
-//             report.errorAndAbort(s"Field '$fieldName' type ${fieldTpe.show} is not a subtype of ValueType")
-// 
-//           val selectedHost =
-//             '{
-//               val p = $payload.asInstanceOf[Product]
-//               p.productElement(${Expr(idx)}).asInstanceOf[Any]
-//             }.asTerm
-// 
-//           fieldTpe.asType match
-//             case '[ft] => '{ new Lit[ft & ValueType](${selectedHost.asExpr}.asInstanceOf[HostTypeOf[ft & ValueType]]) }
-//         else
-//           report.errorAndAbort(s"Field selection only supported for Lit[T] where T <: Bundle (got: ${tpe.show})")
-//       case None =>
-//         report.errorAndAbort("selectDynamic requires a literal field name")
+    outTpe.asType match
+      case '[o] => '{ new HostOf[T] { type Out = o } }
+
 
 object BundleMacros:
   inline def printBundleFields[T <: Bundle]: Unit = ${ printBundleFieldsImpl[T] }
@@ -298,14 +205,11 @@ object BundleMacros:
         }
 
     val cls_fields: List[(String, TypeRepr)] = classFields(tpe.typeSymbol, tpe)
-    val fields = cls_fields.map(x => x._1)
+    val fields: List[String] = cls_fields.map(_._1)
 
-    if fields.isEmpty then
-      report.errorAndAbort(s"No public vals found in ${tpe.show} (check visibility or where you declare them)")
+    val nameLits: List[Expr[String]] = fields.map(Expr(_))
 
-    // turn names into literal expressions, which carry singleton string types
-    val nameLits: List[Expr[String]] = fields.map(f => Expr(f))
-
-    // fold into a tuple expression; because each head is a literal,
-    // the resulting type is precisely ("a","b",...) not just Tuple
+    val namesTupleExpr: Expr[Tuple] =
     nameLits.foldRight('{ EmptyTuple }: Expr[Tuple]) { (h, acc) => '{ $h *: $acc } }
+
+    namesTupleExpr

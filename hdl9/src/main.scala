@@ -31,15 +31,17 @@ package hdl9
   BundleMacros.printBundleFields[MyBundle]
   BundleMacros.printBundleFields[InnerBundle]
 
+  println(s"${BundleMacros.fieldNamesOf[MyBundle]}")
+
   // Inspect type-level computed tuple of names for bundles
 
-  val innerNames = BundleMacros.fieldNamesOf[InnerBundle]
-  val myNames = BundleMacros.fieldNamesOf[MyBundle]
-  println(s"innerNames type = ${innerNames}")
-  println(s"myNames type = ${myNames}")
+// val innerNames = BundleMacros.fieldNamesOf[InnerBundle]
+// val myNames = BundleMacros.fieldNamesOf[MyBundle]
+// println(s"innerNames type = ${innerNames}")
+// println(s"myNames type = ${myNames}")
 
-  // val ulit = Lit[UInt](3)
-  // println(s"ulit.get: ${ulit.get}")
+  val ulit = Lit[UInt](3)
+  println(s"ulit.get: ${ulit.get}")
 
   // val inner_bundle_host_type: HostTypeOf[InnerBundle] = (
   //   a = 3,
