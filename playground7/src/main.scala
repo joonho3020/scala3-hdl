@@ -1,5 +1,6 @@
 package playground7
 
+import scala.NamedTuple.*
 
 
 @main def main(): Unit = {
@@ -13,8 +14,10 @@ package playground7
   val person = new Person
 
   // Our macro derives the named tuple directly from the type's structure.
-  val namedTuple = structuralToNamedTuple(person)
+  val tuple = structuralToTuple(person)
 
-  println(s"Derived from Selectable: $namedTuple")
-  // Expected output: Derived from Selectable: ((name,Cassandra), (age,35))
+  println(s"Derived from Selectable: $tuple")
+  println(s"type of tuple ${typeOf(tuple)}")
+
+
 }

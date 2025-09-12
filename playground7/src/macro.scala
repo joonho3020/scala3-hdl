@@ -1,45 +1,49 @@
 package playground7
 
+import scala.quoted.*
+import scala.NamedTuple.*
 
 import scala.quoted.*
 
-inline def structuralToNamedTuple[A](value: A): Any = ${
-  structuralToNamedTupleImpl('value)
+inline def structuralToTuple[A <: AnyRef](value: A): Any = ${
+  structuralToTupleImpl('value)
 }
 
-private def structuralToNamedTupleImpl[A: Type](value: Expr[A])(using Quotes): Expr[Tuple] =
+private def structuralToTupleImpl[A <: AnyRef : Type](value: Expr[A])(using Quotes): Expr[Any] = {
   import quotes.reflect.*
 
-  val tpe = TypeRepr.of[A]
-  val members = tpe.dealias.classSymbol.get.declarations.filter { s =>
-      println(s"s ${s} ${s.privateWithin} ${s.protectedWithin} ${s.flags.is(Flags.Private)}")
-     !(s.flags.is(Flags.Private) || s.flags.is(Flags.Protected)) && (s.isValDef || (s.isDefDef && !s.isClassConstructor && s.paramSymss.isEmpty))
+  val members = TypeRepr.of[A].dealias.classSymbol.get.declarations.filter { s =>
+    !(s.flags.is(Flags.Private) || s.flags.is(Flags.Protected)) && (s.isValDef || (s.isDefDef && !s.isClassConstructor && s.paramSymss.isEmpty))
   }
 
-  println(s"members ${members}")
-
-  val kvs: List[Expr[(String, Any)]] = members.map { m =>
-    val name = Expr(m.name)
-    val rhs  = Select(value.asTerm, m).asExprOf[Any]
-    '{ ($name, $rhs) }
+  def buildTupleExpr(remainingMembers: List[Symbol]): Expr[Tuple] = {
+    remainingMembers match {
+      case Nil => '{ EmptyTuple }
+      case head :: tail =>
+        val memberNameExpr = Expr(head.name)
+        val restOfTupleExpr = buildTupleExpr(tail)
+        head.tree.asInstanceOf[ValOrDefDef].tpt.tpe.asType match {
+          case '[t] =>
+            val memberValueExpr = Select(value.asTerm, head).asExprOf[t]
+            val currentTupleElement = '{ ($memberNameExpr, $memberValueExpr) }
+            '{ $currentTupleElement *: $restOfTupleExpr }
+        }
+    }
   }
 
-  // Pattern 2: stage the *call* to another macro (makeTuple)
-  // Varargs(...) builds an Expr[Seq[(String, Any)]]; `*` spreads it in the generated code.
-  '{ makeTuple(${Varargs(kvs)}*) }
+  val finalTupleExpr = buildTupleExpr(members)
 
-inline def makeTuple(inline pairs: (String, Any)*): Tuple =
-  ${ makeTupleImpl('pairs) }
+  finalTupleExpr.asTerm.tpe.asType match {
+    case '[t] => finalTupleExpr.asExprOf[t]
+  }
+}
 
-private def makeTupleImpl(pairsExpr: Expr[Seq[(String, Any)]])(using Quotes): Expr[Tuple] =
-  pairsExpr match
-    // Exact arity known at compile time → build a heterogeneous Tuple
-    case Varargs(elems) =>
-      def loop(es: List[Expr[(String, Any)]]): Expr[Tuple] = es match
-        case Nil      => '{ EmptyTuple }
-        case h :: tail => '{ $h *: ${ loop(tail) } }
-      loop(elems.toList)
+// A more robust version of `typeOf`
+inline def typeOf(inline expr: Any): String = ${ typeOfImpl('expr) }
 
-    // Fallback when it isn't Varargs (e.g., a runtime Seq)
-    case _ =>
-      '{ scala.runtime.Tuples.fromArray(${pairsExpr}.toArray[Object]) }
+private def typeOfImpl(expr: Expr[Any])(using Quotes): Expr[String] = {
+  import quotes.reflect.*
+  // Inspect the type of the expression tree itself
+  val typeString = expr.asTerm.tpe.widen.dealias.show
+  Expr(typeString)
+}
