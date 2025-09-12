@@ -107,20 +107,31 @@ object HostOfMacros:
     if !(tpe <:< TypeRepr.of[Bundle]) then
       report.errorAndAbort(s"HostOfMacros.hostOfBundleImpl can only be used for Bundle, got: ${tpe.show}")
 
-    def classFields(sym: Symbol, tref: TypeRepr): List[(String, TypeRepr)] =
-      val syms = sym.fieldMembers ++ sym.caseFields ++ sym.methodMembers
-      syms
-        .distinctBy(_.name)
-        .flatMap { s =>
-          val mt = tref.memberType(s)
-          val ft = mt match
-            case mt: MethodType => mt.resType
-            case pt: PolyType => pt.resType
-            case other => other
-          if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
-        }
+    def declaredValueTypeFieldsInOrder(sym: Symbol, tref: TypeRepr): List[(String, TypeRepr)] =
+      sym.tree match
+        case cdef: ClassDef =>
+          cdef.body.collect { case v: ValDef =>
+            val mt = tref.memberType(v.symbol)
+            val ft = mt match
+              case mt: MethodType => mt.resType
+              case pt: PolyType => pt.resType
+              case other => other
+            if ft <:< TypeRepr.of[ValueType] then Some((v.name, ft)) else None
+          }.flatten
+        case _ =>
+          val syms = sym.fieldMembers ++ sym.caseFields
+          syms
+            .distinctBy(_.name)
+            .flatMap { s =>
+              val mt = tref.memberType(s)
+              val ft = mt match
+                case mt: MethodType => mt.resType
+                case pt: PolyType => pt.resType
+                case other => other
+              if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
+            }
 
-    val fields: List[(String, TypeRepr)] = classFields(tpe.typeSymbol, tpe)
+    val fields: List[(String, TypeRepr)] = declaredValueTypeFieldsInOrder(tpe.typeSymbol, tpe)
 
     def tupleOf(elems: List[TypeRepr]): TypeRepr =
       elems.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>
@@ -153,20 +164,31 @@ object BundleMacros:
 
     val tpe = TypeRepr.of[T]
 
-    def classFields(sym: Symbol, tref: TypeRepr): List[(String, TypeRepr)] =
-      val syms = sym.fieldMembers ++ sym.caseFields ++ sym.methodMembers
-      syms
-        .distinctBy(_.name)
-        .flatMap { s =>
-          val mt = tref.memberType(s)
-          val ft = mt match
-            case mt: MethodType => mt.resType
-            case pt: PolyType => pt.resType
-            case other => other
-          if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
-        }
+    def declaredValueTypeFieldsInOrder(sym: Symbol, tref: TypeRepr): List[(String, TypeRepr)] =
+      sym.tree match
+        case cdef: ClassDef =>
+          cdef.body.collect { case v: ValDef =>
+            val mt = tref.memberType(v.symbol)
+            val ft = mt match
+              case mt: MethodType => mt.resType
+              case pt: PolyType => pt.resType
+              case other => other
+            if ft <:< TypeRepr.of[ValueType] then Some((v.name, ft)) else None
+          }.flatten
+        case _ =>
+          val syms = sym.fieldMembers ++ sym.caseFields
+          syms
+            .distinctBy(_.name)
+            .flatMap { s =>
+              val mt = tref.memberType(s)
+              val ft = mt match
+                case mt: MethodType => mt.resType
+                case pt: PolyType => pt.resType
+                case other => other
+              if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
+            }
 
-    val fields: List[(String, TypeRepr)] = classFields(tpe.typeSymbol, tpe)
+    val fields: List[(String, TypeRepr)] = declaredValueTypeFieldsInOrder(tpe.typeSymbol, tpe)
 
     def tupleOf(elems: List[TypeRepr]): TypeRepr =
       elems.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>
@@ -191,20 +213,31 @@ object BundleMacros:
     val tpe = TypeRepr.of[T]
     val cls = tpe.typeSymbol
 
-    def classFields(sym: Symbol, tref: TypeRepr): List[(String, TypeRepr)] =
-      val syms = sym.fieldMembers ++ sym.caseFields ++ sym.methodMembers
-      syms
-        .distinctBy(_.name)
-        .flatMap { s =>
-          val mt = tref.memberType(s)
-          val ft = mt match
-            case mt: MethodType => mt.resType
-            case pt: PolyType => pt.resType
-            case other => other
-          if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
-        }
+    def declaredValueTypeFieldsInOrder(sym: Symbol, tref: TypeRepr): List[(String, TypeRepr)] =
+      sym.tree match
+        case cdef: ClassDef =>
+          cdef.body.collect { case v: ValDef =>
+            val mt = tref.memberType(v.symbol)
+            val ft = mt match
+              case mt: MethodType => mt.resType
+              case pt: PolyType => pt.resType
+              case other => other
+            if ft <:< TypeRepr.of[ValueType] then Some((v.name, ft)) else None
+          }.flatten
+        case _ =>
+          val syms = sym.fieldMembers ++ sym.caseFields
+          syms
+            .distinctBy(_.name)
+            .flatMap { s =>
+              val mt = tref.memberType(s)
+              val ft = mt match
+                case mt: MethodType => mt.resType
+                case pt: PolyType => pt.resType
+                case other => other
+              if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
+            }
 
-    val cls_fields: List[(String, TypeRepr)] = classFields(tpe.typeSymbol, tpe)
+    val cls_fields: List[(String, TypeRepr)] = declaredValueTypeFieldsInOrder(tpe.typeSymbol, tpe)
     val fields: List[String] = cls_fields.map(_._1)
 
     val nameLits: List[Expr[String]] = fields.map(Expr(_))

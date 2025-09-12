@@ -43,10 +43,10 @@ package hdl9
   val ulit = Lit[UInt](3)
   println(s"ulit.get: ${ulit.get}")
 
-  // val inner_bundle_host_type: HostTypeOf[InnerBundle] = (
-  //   a = 3,
-  //   b = 2,
-  // )
+  val inner_bundle_host_type: HostTypeOf[InnerBundle] = (
+    a = 3,
+    b = 2,
+  )
   // // val inner_bundle_host_type: HostTypeOf[InnerBundle] = (
   // //   a = 3,
   // //   b = 2,
