@@ -43,21 +43,57 @@ object RegMacros:
 
 
 final class Lit[T](private val payload: Any) extends Dynamic:
-  inline def selectDynamic(name: String): Lit[?] =
-    // NOTE: since selectables doesn't preserve the order,
-    // even if we manage to generate HostTypeOf[T] using macros,
-    // the order in which the fields are defined may change.
-    summonFrom {
-      case m: Mirror.ProductOf[T] =>
-        val labels = constValueTuple[m.MirroredElemLabels].toArray
-        val idx = labels.indexOf(name)
-        val subpayload = payload.asInstanceOf[Product].productElement(idx)
-        new Lit[Any](subpayload)
-      case _ =>
-        throw new NoSuchElementException(s"${summonInline[ValueOf[String]]}")
-    }
+  transparent inline def selectDynamic(inline name: String): Lit[? <: ValueType] =
+    ${ LitMacros.selectDynamicImpl[T]('payload, 'name) }
   transparent inline def get: HostTypeOf[T] =
     payload.asInstanceOf[HostTypeOf[T]]
+
+object LitMacros:
+  def selectDynamicImpl[T: Type](payload: Expr[Any], nameExpr: Expr[String])(using Quotes): Expr[Lit[? <: ValueType]] =
+    import quotes.reflect.*
+    val tpe = TypeRepr.of[T]
+    if !(tpe <:< TypeRepr.of[Bundle]) then
+      report.errorAndAbort(s"Lit.selectDynamic can only be used on Bundle, got: ${tpe.show}")
+
+    def declaredValueTypeFieldsInOrder(sym: Symbol, tref: TypeRepr): List[(String, TypeRepr)] =
+      sym.tree match
+        case cdef: ClassDef =>
+          cdef.body.collect { case v: ValDef =>
+            val mt = tref.memberType(v.symbol)
+            val ft = mt match
+              case mt: MethodType => mt.resType
+              case pt: PolyType => pt.resType
+              case other => other
+            if ft <:< TypeRepr.of[ValueType] then Some((v.name, ft)) else None
+          }.flatten
+        case _ =>
+          val syms = sym.fieldMembers ++ sym.caseFields ++ sym.methodMembers
+          val orderedDistinct = syms
+            .sortBy(_.pos.map(_.start).getOrElse(Int.MaxValue))
+            .distinctBy(_.name)
+          orderedDistinct.flatMap { s =>
+            val mt = tref.memberType(s)
+            val ft = mt match
+              case mt: MethodType => mt.resType
+              case pt: PolyType => pt.resType
+              case other => other
+            if ft <:< TypeRepr.of[ValueType] then Some((s.name, ft)) else None
+          }
+
+    val fields = declaredValueTypeFieldsInOrder(tpe.typeSymbol, tpe)
+
+    nameExpr.value match
+      case Some(fieldName) =>
+        val idx = fields.indexWhere(_._1 == fieldName)
+        if idx < 0 then
+          report.errorAndAbort(s"${Type.show[T]} has no field '$fieldName'")
+        val ft = fields(idx)._2
+        val idxExpr = Expr(idx)
+        val subpayload: Expr[Any] = '{ $payload.asInstanceOf[Product].productElement($idxExpr) }
+        ft.asType match
+          case '[f] => '{ new Lit[f & ValueType]($subpayload) }
+      case None =>
+        report.errorAndAbort("selectDynamic requires a literal field name")
 
 // Derive host-side representation types for HDL ValueTypes, including structural bundles
 type HostTypeOf[T] = HostOf[T]#Out
