@@ -77,7 +77,11 @@ package hdl9
   val mylit_i_a: Lit[UInt] = mylit.i.a
   println(s"mylit_i_a.get ${mylit_i_a.get} ${mylit.i.a.get} ${mylit_i.a.get}")
 
-  // val mylit_2 = Lit[MyBundle]((
-  //   y = 3,
-  //   x = 2,
-  //   i = (a = 4, b = 5))) // Doesn't compile because we mixed up the order of named tuples
+  // The problem of this approach is that now this compiles since we are accepting
+  // payloads of type `Any`.
+  // This is because we no longer can use `HostTypeOf[T]` because `NamedTuple.From`
+  // does not work with `Selectable`
+  val mylit_2 = Lit[MyBundle]((
+    y = 3,
+    x = 2,
+    i = (a = 4, b = 5))) // Doesn't compile because we mixed up the order of named tuples

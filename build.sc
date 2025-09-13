@@ -69,6 +69,9 @@ object hdl8 extends ScalaModule {
 object hdl9 extends ScalaModule {
   def scalaVersion = SCALAVERSION
 }
+object hdl10 extends ScalaModule {
+  def scalaVersion = SCALAVERSION
+}
 object playground3 extends ScalaModule {
   def scalaVersion = SCALAVERSION
 }
