@@ -1,7 +1,6 @@
 package hdl
 
 import scala.collection.mutable
-import scala.language.dynamics
 
 trait Module:
   def moduleName: String = getClass.getSimpleName.stripSuffix("$")
@@ -50,58 +49,42 @@ class ElabContext private[hdl] (
     ModuleIR(modName, ports.toSeq, statements.toSeq)
 
 final class Instance[M <: Module](val name: String, val module: M, val moduleIR: ModuleIR):
-  def io: InstanceIO[M] = new InstanceIO[M](name, module)
+  /** Access a module's IO port with full type safety and LSP support.
+   *
+   *  Usage:
+   *  {{{
+   *  val adder = Module(Adder(8))
+   *  val adderIO = adder(adder.module.io)  // InstancePort[AdderIO] with full type info
+   *  adderIO.a := x  // LSP autocompletion works!
+   *  }}}
+   *
+   *  Supports multiple IO ports:
+   *  {{{
+   *  class MyModule extends Module:
+   *    val inputs = IO(InputBundle(...))
+   *    val outputs = IO(OutputBundle(...))
+   *
+   *  val m = Module(MyModule())
+   *  m(m.module.inputs).field := ...   // InstancePort[InputBundle]
+   *  m(m.module.outputs).field := ...  // InstancePort[OutputBundle]
+   *  }}}
+   */
+// def apply[T <: ValueType](io: IO[T]): InstancePort[T] =
+// new InstancePort[T](name, io.t, io.name)
 
   override def toString(): String = s"Instance($name, ${module.moduleName})"
 
-final class InstanceIO[M <: Module](val instanceName: String, val module: M) extends Selectable with Dynamic:
-  private lazy val ioField: IO[?] =
-    val clazz = module.getClass
-    var result: IO[?] = null
-    for field <- clazz.getDeclaredFields if result == null do
-      field.setAccessible(true)
-      field.get(module) match
-        case io: IO[?] => result = io
-        case _ => ()
-    if result == null then
-      throw new NoSuchElementException(s"Module ${module.moduleName} has no IO field")
-    result
-
-  def selectDynamic(fieldName: String): InstancePort[?] =
-    val ioVal = ioField
-    val ioT = ioVal.t
-    ioT match
-      case p: Product =>
-        val labels = p.productElementNames.toArray
-        val idx = labels.indexOf(fieldName)
-        if idx >= 0 then
-          val child = p.productElement(idx).asInstanceOf[ValueType]
-          // Use the IO's name as prefix (e.g., "io") plus the field name
-          val portPath = if ioVal.name.isEmpty then fieldName else s"${ioVal.name}_$fieldName"
-          new InstancePort(instanceName, child, portPath)
-        else
-          throw new NoSuchElementException(s"IO has no field '$fieldName'")
-      case _ =>
-        throw new NoSuchElementException(s"IO is not a product type")
-
 object dsl:
-  def Wire[T <: ValueType](tpe: T)(using ctx: ElabContext): hdl.Wire[T] =
-    ctx.wire(tpe)
+  // Wire with auto-captured name from enclosing val
+  inline def Wire[T <: ValueType](tpe: T)(using ctx: ElabContext): hdl.Wire[T] =
+    NameMacros.wireWithName(tpe)
 
-  def Wire[T <: ValueType](tpe: T, name: String)(using ctx: ElabContext): hdl.Wire[T] =
-    ctx.wire(tpe, name)
+  // Reg with auto-captured name from enclosing val
+  inline def Reg[T <: ValueType](tpe: T)(using ctx: ElabContext): hdl.Reg[T] =
+    NameMacros.regWithName(tpe)
 
-  def Reg[T <: ValueType](tpe: T)(using ctx: ElabContext): hdl.Reg[T] =
-    ctx.reg(tpe)
-
-  def Reg[T <: ValueType](tpe: T, name: String)(using ctx: ElabContext): hdl.Reg[T] =
-    ctx.reg(tpe, name)
-
-  def Module[M <: hdl.Module](child: M)(using ctx: ElabContext): Instance[M] =
+  def Instance[M <: hdl.Module](child: M)(using ctx: ElabContext): Instance[M] =
     ctx.instantiate(child)
-
-  def Module[M <: hdl.Module](child: M, name: String)(using ctx: ElabContext): Instance[M] =
-    ctx.instantiate(child, name)
 
 class Elaborator:
   def elaborate(module: Module): ModuleIR =

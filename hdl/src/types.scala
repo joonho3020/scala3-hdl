@@ -155,33 +155,33 @@ object IOVecOps:
       val childName = if iov.name.isEmpty then s"(${start}, $end)" else s"${iov.name}(${start}, $end)"
       new IO(Vec(iov.t.elem, sliceLen), childName)
 
-final class InstancePort[T](val instanceName: String, val t: T, val portPath: String) extends Selectable with Connectable:
-  type Fields = NamedTuple.Map[
-    NamedTuple.From[T],
-    [X] =>> InstancePort[X & ValueType]]
+// final class InstancePort[T](val instanceName: String, val t: T, val portPath: String) extends Selectable with Connectable:
+// type Fields = NamedTuple.Map[
+// NamedTuple.From[T],
+// [X] =>> InstancePort[X & ValueType]]
 
-  def refName: String = s"${instanceName}_$portPath"
-  override def toExpr: ExprIR = ExprIR.SubField(ExprIR.Ref(instanceName), portPath)
+// def refName: String = s"${instanceName}_$portPath"
+// override def toExpr: ExprIR = ExprIR.SubField(ExprIR.Ref(instanceName), portPath)
 
-  inline def selectDynamic(fieldName: String): InstancePort[?] =
-    summonFrom {
-      case m: Mirror.ProductOf[T] =>
-        val labels = constValueTuple[m.MirroredElemLabels].toArray
-        val idx = labels.indexOf(fieldName)
-        val child = t.asInstanceOf[Product].productElement(idx).asInstanceOf[ValueType]
-        val childPath = if portPath.isEmpty then fieldName else s"${portPath}.$fieldName"
-        new InstancePort(instanceName, child, childPath)
-      case _ =>
-        throw new NoSuchElementException(s"${t.getClass.getName} has no field '$fieldName'")
-    }
-  override def toString(): String =
-    s"InstancePort($instanceName, $t, $portPath)"
+// inline def selectDynamic(fieldName: String): InstancePort[?] =
+// summonFrom {
+// case m: Mirror.ProductOf[T] =>
+// val labels = constValueTuple[m.MirroredElemLabels].toArray
+// val idx = labels.indexOf(fieldName)
+// val child = t.asInstanceOf[Product].productElement(idx).asInstanceOf[ValueType]
+// val childPath = if portPath.isEmpty then fieldName else s"${portPath}.$fieldName"
+// new InstancePort(instanceName, child, childPath)
+// case _ =>
+// throw new NoSuchElementException(s"${t.getClass.getName} has no field '$fieldName'")
+// }
+// override def toString(): String =
+// s"InstancePort($instanceName, $t, $portPath)"
 
-object InstancePortVecOps:
-  extension [A <: ValueType](ipv: InstancePort[Vec[A]])
-    def apply(index: Int): InstancePort[A] =
-      val childPath = if ipv.portPath.isEmpty then s"($index)" else s"${ipv.portPath}($index)"
-      new InstancePort(ipv.instanceName, ipv.t.elem, childPath)
+// object InstancePortVecOps:
+// extension [A <: ValueType](ipv: InstancePort[Vec[A]])
+// def apply(index: Int): InstancePort[A] =
+// val childPath = if ipv.portPath.isEmpty then s"($index)" else s"${ipv.portPath}($index)"
+// new InstancePort(ipv.instanceName, ipv.t.elem, childPath)
 
 object ConnectOps:
   extension (lhs: Connectable)

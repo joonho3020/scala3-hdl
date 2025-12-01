@@ -170,6 +170,7 @@ package hdl
   println("=" * 50)
 
   case class AdderIO(a: UInt, b: UInt, sum: UInt) extends Bundle
+
   class Adder(width: Int) extends Module:
     val io = IO(AdderIO(
       a = Input(UInt(Width(width))),
@@ -197,13 +198,14 @@ package hdl
   println("=" * 50)
 
   case class TopIO(x: UInt, y: UInt) extends Bundle
+
   class Top(width: Int) extends Module:
     val io = IO(TopIO(
       x = Input(UInt(Width(width))),
       y = Output(UInt(Width(width + 1)))
     ))
     def body(using ctx: ElabContext): Unit =
-      val adder = Module(Adder(width))
+      val adder = Instance(Adder(width))
       val x = io.x
       adder.io.a := x
       adder.io.b := Lit[UInt](BigInt("DEADBEAF", 16))
