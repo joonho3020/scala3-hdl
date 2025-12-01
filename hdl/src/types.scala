@@ -10,11 +10,15 @@ trait Connectable:
   def refName: String
   def toExpr: ExprIR = ExprIR.Ref(refName)
 
-final class Wire[T](val t: T, val name: String = "") extends Selectable with Connectable:
+trait TypedConnectable[T] extends Connectable:
+  def innerType: T
+
+final class Wire[T](val t: T, val name: String = "") extends Selectable with TypedConnectable[T]:
   type Fields = NamedTuple.Map[
     NamedTuple.From[T],
     [X] =>> Wire[X & ValueType]]
 
+  def innerType: T = t
   def refName: String = name
 
   inline def selectDynamic(fieldName: String): Wire[?] =
@@ -42,11 +46,12 @@ object WireVecOps:
       val childName = if wv.name.isEmpty then s"(${start}, $end)" else s"${wv.name}(${start}, $end)"
       new Wire(Vec(wv.t.elem, sliceLen), childName)
 
-final class Reg[T](val t: T, val name: String = "") extends Selectable with Connectable:
+final class Reg[T](val t: T, val name: String = "") extends Selectable with TypedConnectable[T]:
   type Fields = NamedTuple.Map[
     NamedTuple.From[T],
     [X] =>> Reg[X & ValueType]]
 
+  def innerType: T = t
   def refName: String = name
 
   inline def selectDynamic(fieldName: String): Reg[?] =
@@ -80,12 +85,15 @@ type HostTypeOf[T] = T match
   case Vec[t]  => Seq[HostTypeOf[t & ValueType]]
   case _       => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & ValueType]]
 
-final class Lit[T](private val payload: Any) extends Selectable with Connectable:
+final class Lit[T](private val payload: Any) extends Selectable with TypedConnectable[T]:
   type Fields = NamedTuple.Map[
     NamedTuple.From[T],
     [X] =>> Lit[X & ValueType]
   ]
 
+  // Note: We can't expose innerType for Lit since we don't store the type parameter
+  // For Lit, we'll need to use a different approach
+  def innerType: T = throw new UnsupportedOperationException("Lit does not store type information at runtime")
   def refName: String = ""
   override def toExpr: ExprIR =
     payload match
@@ -120,11 +128,12 @@ object Lit:
   inline def apply[T <: ValueType](inline v: HostTypeOf[T]): Lit[T] =
     new Lit[T](v)
 
-final class IO[T](val t: T, private var _name: String = "") extends Selectable with Connectable:
+final class IO[T](val t: T, private var _name: String = "") extends Selectable with TypedConnectable[T]:
   type Fields = NamedTuple.Map[
     NamedTuple.From[T],
     [X] =>> IO[X & ValueType]]
 
+  def innerType: T = t
   def name: String = _name
   private[hdl] def setName(n: String): Unit = _name = n
   def refName: String = _name
@@ -158,17 +167,15 @@ object IOVecOps:
       val childName = if iov.name.isEmpty then s"(${start}, $end)" else s"${iov.name}(${start}, $end)"
       new IO(Vec(iov.t.elem, sliceLen), childName)
 
+trait TypeCompatible[LEFT, RIGHT]
+
+object TypeCompatible:
+  given [T]: TypeCompatible[T, T] = new TypeCompatible[T, T] {}
+
 object ConnectOps:
-  extension (lhs: Connectable)
-    def :=(rhs: Connectable)(using ctx: ElabContext): Unit =
-// println(s"${lhs} (Connectable) := ${rhs} (Connectable)")
+  extension [L <: ValueType](lhs: TypedConnectable[L])
+    def :=[R <: ValueType](rhs: TypedConnectable[R])(using ctx: ElabContext, ev: TypeCompatible[L, R]): Unit =
       ctx.emit(StmtIR.Connect(lhs.toExpr, rhs.toExpr))
 
-    def :=(rhs: ExprIR)(using ctx: ElabContext): Unit =
-// println(s"${lhs} (Connectable) := ${rhs} (ExprIR)")
-      ctx.emit(StmtIR.Connect(lhs.toExpr, rhs))
-
-  extension (lhs: ExprIR)
-    def :=(rhs: Connectable)(using ctx: ElabContext): Unit =
-// println(s"${lhs} (ExprIR) := ${rhs} (Connectable)")
-      ctx.emit(StmtIR.Connect(lhs, rhs.toExpr))
+    def :=[R <: ValueType](rhs: Lit[R])(using ctx: ElabContext, ev: TypeCompatible[L, R]): Unit =
+      ctx.emit(StmtIR.Connect(lhs.toExpr, rhs.toExpr))

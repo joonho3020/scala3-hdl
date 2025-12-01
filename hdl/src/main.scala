@@ -231,6 +231,13 @@ package hdl
       val dataReg: Reg[UInt] = nestedReg.ctrl.data
       val statusReg: Reg[UInt] = nestedReg.status
 
+      // These connections would fail compilation with clear type errors:
+      // dataWire.valid := Lit[UInt](3)
+      //   Error: No given instance of type hdl.TypeCompatible[hdl.Bool, hdl.UInt]
+      // nestedReg.ctrl.data := dataWire.valid
+      //   Error: No given instance of type hdl.TypeCompatible[hdl.UInt, hdl.Bool]
+
+      // Type-safe connections - all checked at compile time!
       dataWire.valid := Lit[Bool](true)
       dataWire.data := io.a
       nestedReg.ctrl.valid := dataWire.valid
