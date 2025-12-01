@@ -39,26 +39,8 @@ class ElabContext private[hdl] (
     emit(StmtIR.RegDecl(n, valueTypeToIR(tpe)))
     new Reg(tpe, n)
 
-  def instantiate[M <: Module](child: M, name: String = ""): Instance[M] =
-    val childIR = elaborator.elaborate(child)
-    val n = if name.nonEmpty then name else freshName(child.moduleName)
-    emit(StmtIR.Instance(n, child.moduleName))
-    new Instance[M](n, child, childIR)
-
   private[hdl] def build(): ModuleIR =
     ModuleIR(modName, ports.toSeq, statements.toSeq)
-
-/** Base class for module instances.
- *  The macro-generated instances extend this with typed IO accessors.
- */
-class Instance[M <: Module](val name: String, val module: M, val moduleIR: ModuleIR):
-  /** Fallback method to access any IO port with full type safety.
-   *  Use this for modules with multiple IO ports or non-standard IO names.
-   */
-  def apply[T <: ValueType](io: IO[T]): InstancePort[T] =
-    new InstancePort[T](name, io.t, io.name)
-
-  override def toString(): String = s"Instance($name, ${module.moduleName})"
 
 object dsl:
   // Wire with auto-captured name from enclosing val
@@ -68,19 +50,6 @@ object dsl:
   // Reg with auto-captured name from enclosing val
   inline def Reg[T <: ValueType](tpe: T)(using ctx: ElabContext): hdl.Reg[T] =
     NameMacros.regWithName(tpe)
-
-  /** Create a module instance with typed IO accessors.
-   *  The macro inspects the module to find IO[T] fields and generates
-   *  properly typed InstancePort[T] accessors.
-   *
-   *  Usage:
-   *  {{{
-   *  val adder = Instance(Adder(8))
-   *  adder.io.a := x  // LSP autocompletion works! io is InstancePort[AdderIO]
-   *  }}}
-   */
-  transparent inline def Instance[M <: hdl.Module](child: M)(using ctx: ElabContext): hdl.Instance[M] =
-    InstanceMacros.createInstance(child)
 
 class Elaborator:
   def elaborate(module: Module): ModuleIR =

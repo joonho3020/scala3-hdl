@@ -194,28 +194,64 @@ package hdl
   ir.body.foreach(s => println(s"  $s"))
 
   println("\n" + "=" * 50)
-  println("Nested Module Test")
+  println("Bundle Wire and Reg Test")
   println("=" * 50)
 
-  case class TopIO(x: UInt, y: UInt) extends Bundle
+  // Test creating wires and registers with bundle types
+  case class DataBundle(valid: Bool, data: UInt) extends Bundle
+  case class NestedBundle(ctrl: DataBundle, status: UInt) extends Bundle
 
-  class Top(width: Int) extends Module:
-    val io = IO(TopIO(
-      x = Input(UInt(Width(width))),
-      y = Output(UInt(Width(width + 1)))
+  class BundleTest extends Module:
+    val io = IO(AdderIO(
+      a = Input(UInt(Width(8))),
+      b = Input(UInt(Width(8))),
+      sum = Output(UInt(Width(9)))
     ))
+
     def body(using ctx: ElabContext): Unit =
-      val adder = Instance(Adder(width))
-      val x = io.x
-      adder.io.a := x
-      adder.io.b := Lit[UInt](BigInt("DEADBEAF", 16))
-      io.y := adder.io.sum
+      val dataWire = Wire(DataBundle(
+        valid = Bool(),
+        data = UInt(Width(8))
+      ))
 
-  val top = Top(8)
-  val topIR = elaborator.elaborate(top)
+      val validWire: Wire[Bool] = dataWire.valid
+      val dataFieldWire: Wire[UInt] = dataWire.data
 
-  println(s"Module: ${topIR.name}")
+      // Create a register with a nested bundle type
+      val nestedReg = Reg(NestedBundle(
+        ctrl = DataBundle(
+          valid = Bool(),
+          data = UInt(Width(16))
+        ),
+        status = UInt(Width(4))
+      ))
+
+      val ctrlReg: Reg[DataBundle] = nestedReg.ctrl
+      val validReg: Reg[Bool] = nestedReg.ctrl.valid
+      val dataReg: Reg[UInt] = nestedReg.ctrl.data
+      val statusReg: Reg[UInt] = nestedReg.status
+
+      dataWire.valid := Lit[Bool](true)
+      dataWire.data := io.a
+      nestedReg.ctrl.valid := dataWire.valid
+      nestedReg.ctrl.data := dataWire.data
+      nestedReg.status := io.b
+      io.sum := nestedReg.status
+
+      println(s"Created wire with bundle: $dataWire")
+      println(s"  - valid field: $validWire")
+      println(s"  - data field: $dataFieldWire")
+      println(s"Created register with nested bundle: $nestedReg")
+      println(s"  - ctrl field: $ctrlReg")
+      println(s"  - ctrl.valid field: $validReg")
+      println(s"  - ctrl.data field: $dataReg")
+      println(s"  - status field: $statusReg")
+
+  val bundleTest = BundleTest()
+  val bundleIR = elaborator.elaborate(bundleTest)
+
+  println(s"\nModule: ${bundleIR.name}")
   println(s"Ports:")
-  topIR.ports.foreach(p => println(s"  ${p.dir} ${p.name}: ${p.tpe}"))
+  bundleIR.ports.foreach(p => println(s"  ${p.dir} ${p.name}: ${p.tpe}"))
   println(s"Body:")
-  topIR.body.foreach(s => println(s"  $s"))
+  bundleIR.body.foreach(s => println(s"  $s"))
