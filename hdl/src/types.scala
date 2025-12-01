@@ -1,4 +1,4 @@
-package hdl10
+package hdl
 
 import scala.deriving.*
 import scala.compiletime.*

@@ -1,106 +1,162 @@
 package hdl
 
-import scala.compiletime.{erasedValue, constValue, summonInline}
-import scala.deriving.*
-import scala.compiletime.ops.int.*
-import scala.annotation.targetName
-import scala.compiletime.erasedValue
-import scala.quoted.*
-import scala.language.dynamics
-import scala.Conversion
+@main def demo(): Unit =
+  // // What I want
+  // class InnerBundle(wa: Int, wb: Int) extends Bundle {
+  //   val a = UInt(Width(wa))
+  //   val b = UInt(Width(wb))
+  // }
+  // class MyBundle(wa: Int, wb: Int, wx: Int, wy: Int) extends Bundle {
+  //   val x = UInt(Width(wx))
+  //   val y = UInt(Width(wy))
+  //   val i = new InnerBundle(wa, wb)
+  // }
+  // val mybundle_reg = Reg[MyBundle](new MyBundle(2, 3, 4, 5))
+  // val x: Reg[UInt] = mybundle_reg.x
+  // val i: Reg[InnerBundle] = mybundle_reg.i
+  // val a: Reg[UInt] = mybundle_reg.i.a
 
-sealed class Width(val value: Int):
-  override def toString: String = s"${value}"
+  // val mybundle_lit = Lit[MyBundle]((
+  //     x = UIntLit(3),
+  //     y = UIntLit(2),
+  //     i = (
+  //       a = UIntLit(4),
+  //       b = UIntLit(5)
+  //     )
+  //   ))
+  // val xl: UIntLit = mybundle_lit.x
+  // val yl: UIntLit = mybundle_lit.y
+  // val al: UIntLit = mybundle_lit.i.a
 
-object Width:
-  def apply(x: Int): Width = new Width(x)
+  println("Hello World")
 
-sealed trait Signal
+  final case class InnerBundle(a: UInt, b: UInt) extends Bundle
+  final case class MyBundle(x: UInt, y: UInt, i: InnerBundle) extends Bundle
+  val mb = MyBundle(UInt(Width(2)), UInt(Width(3)), InnerBundle(UInt(Width(4)), UInt(Width(5))))
 
-sealed class UInt(val w: Width) extends Signal:
-  def apply(w: Width): UInt = new UInt(w)
-  override def toString(): String = s"UInt($w.W)"
+  val reg = Reg(mb)
+  val reg_x: Reg[UInt] = reg.x
+  val reg_y: Reg[UInt] = reg.y
+  // val reg_y: Reg[UIntLit] = reg.y // Type mismatch, doesn't compile
+  val reg_i: Reg[InnerBundle] = reg.i
+  // val reg_i: Reg[UIntLit] = reg.i // Type mismatch doesn't compile
+  val reg_i_a: Reg[UInt] = reg_i.a
+  // val reg_i_a: Reg[UIntLit] = reg_i.a // Type mismatch doesn't compile
 
-sealed class UIntLit(override val w: Width)(val v: Int) extends UInt(w):
-  override def toString(): String = s"UIntLit($v($w.W))"
+  val reg_i_b: Reg[UInt] = reg.i.b
+  // val reg_i_b: Reg[UIntLit] = reg.i.b // Type mismatch doesn't compile
+  println(s"reg_x: ${reg_x} reg_y: ${reg_y} reg_i: ${reg_i} reg_i_a ${reg_i_a} reg_i_b ${reg_i_b}")
 
-class Bundle(elems: (String, Any)*) extends Selectable with Signal:
-  private val fields = elems.toMap
-  def selectDynamic(name: String): Any = fields(name)
-  override def toString: String =
-    val body = fields.map { case (k, v) => s"$k=$v" }.mkString(", ")
-    s"Bundle($body)"
+  val ulit = Lit[UInt](3)
+  println(s"ulit.get: ${ulit.get}")
 
-object Bundle:
-  transparent inline def lit[B <: Bundle](inline elems: (String, Signal)*): Any =
-    ${ BundleMacros.bundleLitImpl[B]('elems) }
+  val inner_bundle_host_type: HostTypeOf[InnerBundle] = (
+    a = 3,
+    b = 2,
+  )
+  // val inner_bundle_host_type: HostTypeOf[InnerBundle] = (
+  //   a = 3,
+  //   b = 2,
+  //   c = 4
+  // ) // compile fails, type mismatch
 
-final class BundleCompanionDynamic[B <: Bundle] extends Dynamic:
-  inline def applyDynamicNamed(inline name: String)(inline args: (String, Any)*): Any =
-    inline name match
-      case "lit" =>
-        // Filter only Signal-typed values at call site; cast to Signal as needed
-        val pairs = args.asInstanceOf[Seq[(String, Signal)]]
-        Bundle.lit[B](pairs*)
-      case _ => ${ BundleMacros.bundleDynamicUnknownMethod('name) }
+  println(s"inner_bundle_host_type ${inner_bundle_host_type}")
 
-object BundleAutoDerive:
-  inline given companionToDynamic[M]: Conversion[M, BundleCompanionDynamic[? <: Bundle]] =
-    ${ BundleMacros.deriveBundleCompanionConversion[M] }
 
-object Main:
-  def main(args: Array[String]): Unit =
-    println("Hello World")
+  val ilit = Lit[InnerBundle]((a = 3, b = 4))
 
-    println(s"${UInt(Width(3))}")
-    println(s"${UIntLit(Width(3))(4)}")
+  val ilit_a: Lit[UInt] = ilit.a
 
-    class MyBundle(x: Int, y: Int) extends Bundle:
-      val a = UInt(Width(x))
-      val b = UInt(Width(y))
+  // val ilit_a: Lit[Bool] = ilit.a // Type mismatch doesn't compile
 
-    object MyBundle:
-      transparent inline def lit(inline a: UIntLit, inline b: UIntLit): Any =
-        Bundle.lit[MyBundle]("a" -> a, "b" -> b)
+  println(s"ilit.a ${ilit.a.get} ilit_a.get ${ilit_a.get}")
 
-    val my_bundle = new MyBundle(2, 3)
+  val mylit = Lit[MyBundle]((
+    x = 2,
+    y = 3,
+    i = (a = 4, b = 5)))
 
-    println(s"${my_bundle}")
-    println(s"${my_bundle.a}")
-    println(s"${my_bundle.b}")
+  val mylit_x: Lit[UInt] = mylit.x
+  println(s"mylit_x.get ${mylit_x.get} mylit.x.get ${mylit.x.get}")
 
-// val my_bundle_lit = MyBundle.lit
-    class NestedBundle(x: Int, y: Int, z: Int) extends Bundle:
-      val width_outer = x + y + z
-      val inner = new MyBundle(x, y)
-      val outer = UInt(Width(width_outer))
+  val mylit_i: Lit[InnerBundle] = mylit.i
+// val mylit_i: Lit[MyBundle] = mylit.i // Type mismatch doesn't compile
+// val mylit_i: Lit[UInt] = mylit.i // Type mismatch doesn't compile
+  println(s"mylit_i.get ${mylit_i.get} mylit.i.get ${mylit.i.get}")
 
-    object NestedBundle:
-      transparent inline def lit(inline inner: Bundle, inline outer: UIntLit): Any =
-        Bundle.lit[NestedBundle]("inner" -> inner, "outer" -> outer)
+  val mylit_i_a: Lit[UInt] = mylit.i.a
+  println(s"mylit_i_a.get ${mylit_i_a.get} ${mylit.i.a.get} ${mylit_i.a.get}")
 
-    val nested_bundle = new NestedBundle(2, 3, 4)
-    println(s"${nested_bundle.outer}")
-    println(s"${nested_bundle.inner.a}")
-    println(s"${nested_bundle.inner.b}")
+  // val mylit_2 = Lit[MyBundle]((
+  //   y = 3,
+  //   x = 2,
+  //   i = (a = 4, b = 5))) // Doesn't compile because we mixed up the order of named tuples
 
-    val width1 = 20
-    val width2 = 30
 
-// val my_bundle_lit = MyBundle.lit(
-// a = UIntLit(Width(width1))(3),
-// b = UIntLit(Width(width2))(4)
-// )
-// println(s"${my_bundle_lit} ${my_bundle_lit.a} ${my_bundle_lit.b}")
 
-    val nested_bundle_lit = NestedBundle.lit(
-      inner = MyBundle.lit(a = UIntLit(Width(1))(3), b = UIntLit(Width(2))(4)),
-      outer = UIntLit(Width(9))(6)
-    )
-    println(s"${nested_bundle_lit} ${nested_bundle_lit.inner.a} ${nested_bundle_lit.outer}")
 
-// Compile error
-// val nested_bundle_lit_2 = NestedBundle.lit(
-// inner = MyBundle.lit(a = UInt(Width(1)), b = UIntLit(Width(2))(4)),
-// outer = UInt(Width(9))
-// )
+  import RegVecOps.*
+  import LitVecOps.*
+
+  final case class InnerVecBundle(a: UInt, b: Vec[UInt]) extends Bundle
+  final case class MyVecBundle(i: Vec[InnerVecBundle], c: Bool) extends Bundle
+  val mvb = MyVecBundle(
+    Vec(
+      InnerVecBundle(
+        UInt(Width(2)),
+        Vec(UInt(Width(3)), 2)
+      ),
+      3
+    ),
+    Bool()
+  )
+  val reg_mvb: Reg[MyVecBundle] = Reg(mvb)
+  println(s"reg_mvg ${reg_mvb}")
+
+  val reg_mvb_0: Reg[InnerVecBundle] = reg_mvb.i(0)
+  println(s"reg_mvg_0 ${reg_mvb_0}")
+
+  val reg_mvb_12: Reg[Vec[InnerVecBundle]] = reg_mvb.i(1, 2)
+  println(s"reg_mvg_12 ${reg_mvb_12}")
+
+  val reg_uintbool = Reg(Vec(Bool(), 10))
+  val reg_uintbool_2: Reg[Bool] = reg_uintbool(2)
+  println(s"reg_uintbool_2 ${reg_uintbool_2}")
+
+  val mvb_lit = Lit[MyVecBundle]((
+    i = Seq.fill(3)((a = 3, b = Seq(1, 2))),
+    c = true
+  ))
+  val mvb_lit_i0_a: Lit[UInt] = mvb_lit.i(0).a
+  println(s"mvb_lit_i0_a ${mvb_lit_i0_a.get}")
+
+  val mvb_lit_i1_b: Lit[Vec[UInt]] = mvb_lit.i(1).b
+  println(s"mvb_lit_i1_b ${mvb_lit_i1_b.get}")
+
+  val mvb_lit_i1_b0: Lit[UInt] = mvb_lit.i(1).b(0)
+  println(s"mvb_lit_i1_b0 ${mvb_lit_i1_b0.get}")
+
+  // Directionality
+
+  final case class A(a: UInt, b: UInt) extends Bundle
+  final case class B(x: A, y: Bool) extends Bundle
+
+  val bundle_a = A(
+    a = Input(UInt(Width(3))),
+    b = UInt(Width(4)) // defaults to Output
+  )
+
+  println(s"bundle_a ${bundle_a}")
+
+  val bundle_b = B(
+    x = Flipped(bundle_a),
+    y = Output(Bool(()))
+  )
+  println(s"bundle_b ${bundle_b}")
+
+  val bundle_b_reg = Reg(bundle_b)
+  val bundle_b_reg_x_a: Reg[UInt] = bundle_b_reg.x.a
+  val bundle_b_reg_x_b: Reg[UInt] = bundle_b_reg.x.b
+  val bundle_b_reg_y: Reg[Bool] = bundle_b_reg.y
+  // val bundle_b_reg_x_a: Reg[Bool] = bundle_b_reg.x.a // Compile error, type mismatch
+  println(s"bundle_b_reg_x_a ${bundle_b_reg_x_a} bundle_b_reg_x_b ${bundle_b_reg_x_b} bundle_b_reg_y ${bundle_b_reg_y}")
