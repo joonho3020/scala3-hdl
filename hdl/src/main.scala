@@ -214,6 +214,11 @@ package hdl
         data = UInt(Width(8))
       ))
 
+      val dataWire_2 = Wire(DataBundle(
+        valid = Bool(),
+        data = UInt(Width(8))
+      ))
+
       val validWire: Wire[Bool] = dataWire.valid
       val dataFieldWire: Wire[UInt] = dataWire.data
 
@@ -231,19 +236,14 @@ package hdl
       val dataReg: Reg[UInt] = nestedReg.ctrl.data
       val statusReg: Reg[UInt] = nestedReg.status
 
-      // These connections would fail compilation with clear type errors:
-      // dataWire.valid := Lit[UInt](3)
-      //   Error: No given instance of type hdl.TypeCompatible[hdl.Bool, hdl.UInt]
-      // nestedReg.ctrl.data := dataWire.valid
-      //   Error: No given instance of type hdl.TypeCompatible[hdl.UInt, hdl.Bool]
-
-      // Type-safe connections - all checked at compile time!
       dataWire.valid := Lit[Bool](true)
       dataWire.data := io.a
       nestedReg.ctrl.valid := dataWire.valid
       nestedReg.ctrl.data := dataWire.data
       nestedReg.status := io.b
       io.sum := nestedReg.status
+
+      dataWire := dataWire_2
 
       println(s"Created wire with bundle: $dataWire")
       println(s"  - valid field: $validWire")
