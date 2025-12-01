@@ -160,3 +160,80 @@ package hdl
   val bundle_b_reg_y: Reg[Bool] = bundle_b_reg.y
   // val bundle_b_reg_x_a: Reg[Bool] = bundle_b_reg.x.a // Compile error, type mismatch
   println(s"bundle_b_reg_x_a ${bundle_b_reg_x_a} bundle_b_reg_x_b ${bundle_b_reg_x_b} bundle_b_reg_y ${bundle_b_reg_y}")
+
+@main def elaborateTest(): Unit =
+  case class AdderIO(a: UInt, b: UInt, sum: UInt) extends Bundle
+  class Adder(width: Int) extends Module:
+    val io = IO(AdderIO(
+      a = Input(UInt(Width(width))),
+      b = Input(UInt(Width(width))),
+      sum = Output(UInt(Width(width + 1)))
+    ), "io")
+    def body(using ctx: ElabContext): Unit =
+      val temp = ctx.wire(UInt(Width(width + 1)), "temp")
+      ctx.connect(temp, io.a)
+      ctx.connect(io.sum, temp)
+
+  /*
+   * Goal of what we want the API to look like
+  class Adder(width: Int) extends Module:
+    val io = IO(AdderIO(
+      a = Input(UInt(Width(width))),
+      b = Input(UInt(Width(width))),
+      sum = Output(UInt(Width(width + 1)))
+    ))
+    def body(using ctx: ElabContext): Unit =
+      val temp = Wire(UInt(Width(width + 1)))
+      temp := io.a
+      io.sum := temp
+   */
+
+  val elaborator = Elaborator()
+  val adder = Adder(8)
+  val ir = elaborator.elaborate(adder)
+
+  println(s"Module: ${ir.name}")
+  println(s"Ports:")
+  ir.ports.foreach(p => println(s"  ${p.dir} ${p.name}: ${p.tpe}"))
+  println(s"Body:")
+  ir.body.foreach(s => println(s"  $s"))
+
+  println("\n" + "=" * 50)
+  println("Nested Module Test")
+  println("=" * 50)
+
+  case class TopIO(x: UInt, y: UInt) extends Bundle
+  class Top(width: Int) extends Module:
+    val io = IO(TopIO(
+      x = Input(UInt(Width(width))),
+      y = Output(UInt(Width(width + 1)))
+    ), "io")  // Explicit name
+    def body(using ctx: ElabContext): Unit =
+      val adderInst = ctx.instantiate(Adder(width))
+      // Using io.x and io.y directly now that they have proper names
+      ctx.connect(adderInst.io("io_a"), io.x)
+      ctx.connect(adderInst.io("io_b"), ExprIR.Lit(1, width))
+      ctx.connect(io.y, adderInst.io("io_sum"))
+
+  /*
+   * Goal of what we want the API to look like
+  class Top(width: Int) extends Module:
+    val io = IO(TopIO(
+      x = Input(UInt(Width(width))),
+      y = Output(UInt(Width(width + 1)))
+    ))
+    def body(using ctx: ElabContext): Unit =
+      val adder = Module(new Adder(width))
+      adder.io.a := io.x
+      adder.io.b := Lit[UInt](1)
+      io.y := adder.io.sum
+   */
+
+  val top = Top(8)
+  val topIR = elaborator.elaborate(top)
+
+  println(s"Module: ${topIR.name}")
+  println(s"Ports:")
+  topIR.ports.foreach(p => println(s"  ${p.dir} ${p.name}: ${p.tpe}"))
+  println(s"Body:")
+  topIR.body.foreach(s => println(s"  $s"))

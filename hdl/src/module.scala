@@ -5,8 +5,6 @@ import scala.collection.mutable
 trait Module:
   def moduleName: String = getClass.getSimpleName.stripSuffix("$")
 
-  def io: Bundle
-
   def body(using ctx: ElabContext): Unit
 
 class ElabContext private[hdl] (
@@ -31,18 +29,42 @@ class ElabContext private[hdl] (
   def addPort(port: PortIR): Unit =
     ports += port
 
-  def wire(tpe: TypeIR, name: String = ""): ExprIR =
+  def wire[T <: ValueType](tpe: T, name: String = ""): Wire[T] =
     val n = if name.nonEmpty then name else freshName("wire")
-    emit(StmtIR.WireDecl(n, tpe))
-    ExprIR.Ref(n)
+    emit(StmtIR.WireDecl(n, valueTypeToIR(tpe)))
+    new Wire(tpe, n)
 
-  def reg(tpe: TypeIR, name: String = ""): ExprIR =
+  def reg[T <: ValueType](tpe: T, name: String = ""): Reg[T] =
     val n = if name.nonEmpty then name else freshName("reg")
-    emit(StmtIR.RegDecl(n, tpe))
-    ExprIR.Ref(n)
+    emit(StmtIR.RegDecl(n, valueTypeToIR(tpe)))
+    new Reg(tpe, n)
 
   def connect(lhs: ExprIR, rhs: ExprIR): Unit =
     emit(StmtIR.Connect(lhs, rhs))
+
+  def connect[L <: ValueType, R <: ValueType](lhs: Wire[L], rhs: Wire[R]): Unit =
+    emit(StmtIR.Connect(ExprIR.Ref(lhs.name), ExprIR.Ref(rhs.name)))
+
+  def connect[L <: ValueType, R <: ValueType](lhs: Wire[L], rhs: IO[R]): Unit =
+    emit(StmtIR.Connect(ExprIR.Ref(lhs.name), ExprIR.Ref(rhs.name)))
+
+  def connect[L <: ValueType, R <: ValueType](lhs: IO[L], rhs: Wire[R]): Unit =
+    emit(StmtIR.Connect(ExprIR.Ref(lhs.name), ExprIR.Ref(rhs.name)))
+
+  def connect[L <: ValueType, R <: ValueType](lhs: IO[L], rhs: IO[R]): Unit =
+    emit(StmtIR.Connect(ExprIR.Ref(lhs.name), ExprIR.Ref(rhs.name)))
+
+  def connect[L <: ValueType, R <: ValueType](lhs: Reg[L], rhs: Wire[R]): Unit =
+    emit(StmtIR.Connect(ExprIR.Ref(lhs.name), ExprIR.Ref(rhs.name)))
+
+  def connect[L <: ValueType, R <: ValueType](lhs: Wire[L], rhs: Reg[R]): Unit =
+    emit(StmtIR.Connect(ExprIR.Ref(lhs.name), ExprIR.Ref(rhs.name)))
+
+  def connect[L <: ValueType](lhs: IO[L], rhs: ExprIR): Unit =
+    emit(StmtIR.Connect(ExprIR.Ref(lhs.name), rhs))
+
+  def connect[R <: ValueType](lhs: ExprIR, rhs: IO[R]): Unit =
+    emit(StmtIR.Connect(lhs, ExprIR.Ref(rhs.name)))
 
   def instantiate(child: Module, name: String = ""): InstanceHandle =
     val childIR = elaborator.elaborate(child)
@@ -60,32 +82,39 @@ case class InstanceHandle(name: String, moduleIR: ModuleIR):
 class Elaborator:
   def elaborate(module: Module): ModuleIR =
     val ctx = new ElabContext(module.moduleName, this)
-    registerPorts(ctx, module.io)
+    discoverAndRegisterPorts(ctx, module)
     module.body(using ctx)
     ctx.build()
 
-  private def registerPorts(ctx: ElabContext, io: Bundle): Unit =
-    val tpeIR = valueTypeToIR(io.asInstanceOf[ValueType])
-    tpeIR match
-      case TypeIR.BundleIR(_, fields) =>
-        fields.foreach { (name, fieldTpe) =>
-          val dir = extractDirection(io, name)
-          ctx.addPort(PortIR(name, fieldTpe, dir))
-        }
-      case _ =>
-        ctx.addPort(PortIR("io", tpeIR, Direction.Out))
+  private def discoverAndRegisterPorts(ctx: ElabContext, module: Module): Unit =
+    // Find all IO[_] fields via reflection
+    val clazz = module.getClass
+    for field <- clazz.getDeclaredFields do
+      field.setAccessible(true)
+      field.get(module) match
+        case io: IO[?] =>
+          val portName = if io.name.nonEmpty then io.name else field.getName
+          registerIO(ctx, portName, io.t.asInstanceOf[ValueType])
+        case _ => ()
 
-  private def extractDirection(io: Bundle, fieldName: String): Direction =
-    val p = io.asInstanceOf[Product]
-    val idx = p.productElementNames.indexOf(fieldName)
-    if idx >= 0 then
-      p.productElement(idx) match
-        case u: UInt => u.dir
-        case b: Bool => b.dir
-        case _ => Direction.Out
-    else Direction.Out
+  private def registerIO(ctx: ElabContext, baseName: String, v: ValueType): Unit =
+    v match
+      case b: Bundle =>
+        // Flatten bundle fields into individual ports
+        val p = b.asInstanceOf[Product]
+        for i <- 0 until p.productArity do
+          val fieldName = p.productElementName(i)
+          val fieldValue = p.productElement(i).asInstanceOf[ValueType]
+          val fullName = s"${baseName}_$fieldName"
+          registerIO(ctx, fullName, fieldValue)
+      case u: UInt =>
+        ctx.addPort(PortIR(baseName, TypeIR.UIntIR(u.w.value), u.dir))
+      case b: Bool =>
+        ctx.addPort(PortIR(baseName, TypeIR.BoolIR(), b.dir))
+      case vec: Vec[?] =>
+        ctx.addPort(PortIR(baseName, valueTypeToIR(vec), Direction.Out))
 
-private def valueTypeToIR(v: ValueType): TypeIR = v match
+def valueTypeToIR(v: ValueType): TypeIR = v match
   case u: UInt => TypeIR.UIntIR(u.w.value)
   case b: Bool => TypeIR.BoolIR()
   case vec: Vec[?] => TypeIR.VecIR(valueTypeToIR(vec.elem), vec.len)
