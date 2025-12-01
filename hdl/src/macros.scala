@@ -29,6 +29,18 @@ object NameMacros:
     val name = findEnclosingValName()
     '{ $ctx.reg($tpe, ${Expr(name)}) }
 
+  inline def moduleWithName[M <: Module](mod: M)(using ctx: ElabContext): M =
+    ${ moduleWithNameImpl('mod, 'ctx) }
+
+  private def moduleWithNameImpl[M <: Module: Type](
+    mod: Expr[M],
+    ctx: Expr[ElabContext]
+  )(using Quotes): Expr[M] =
+    import quotes.reflect.*
+
+    val name = findEnclosingValName()
+    '{ $ctx.instantiate($mod, ${Expr(name)}) }
+
   // Helper to find the enclosing val's name
   private def findEnclosingValName()(using Quotes): String =
     import quotes.reflect.*

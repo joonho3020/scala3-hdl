@@ -155,7 +155,7 @@ package hdl
 
 @main def elaborateTest(): Unit =
   import ConnectOps.*
-  import dsl.*
+  import builder.*
 
   println("=" * 50)
   println("New API Test")
@@ -256,3 +256,38 @@ package hdl
   bundleIR.ports.foreach(p => println(s"  ${p.dir} ${p.name}: ${p.tpe}"))
   println(s"Body:")
   bundleIR.body.foreach(s => println(s"  $s"))
+
+  println("\n" + "=" * 50)
+  println("Submodule Instantiation Test")
+  println("=" * 50)
+
+  class NestedModule(width: Int) extends Module:
+    val io = IO(AdderIO(
+      a = Input(UInt(Width(width))),
+      b = Input(UInt(Width(width))),
+      sum = Output(UInt(Width(width + 1)))
+    ))
+
+    def body(using ctx: ElabContext): Unit =
+      val ma = Module(new Adder(width + 1))
+      val mb = Module(new Adder(width))
+      val ra = Reg(UInt(Width(width)))
+      ra := io.a
+      ma.io.a := io.a
+      ma.io.b := io.b
+      mb.io.a := io.b
+      mb.io.b := ra
+      io.sum := ma.io.sum
+
+  val modulesBefore = elaborator.modules.toSet
+  val nested = NestedModule(4)
+  val nestedIR = elaborator.elaborate(nested)
+
+  println(s"\nModule: ${nestedIR.name}")
+  println(s"Ports:")
+  nestedIR.ports.foreach(p => println(s"  ${p.dir} ${p.name}: ${p.tpe}"))
+  println(s"Body:")
+  nestedIR.body.foreach(s => println(s"  $s"))
+  val childModules = elaborator.modules.filter(m => !modulesBefore.contains(m)).filter(_.name != nestedIR.name).distinct
+  println("Child Modules:")
+  childModules.foreach(m => println(s"  ${m.name}"))
