@@ -1,34 +1,7 @@
 package hdl
 
 @main def demo(): Unit =
-  // // What I want
-  // class InnerBundle(wa: Int, wb: Int) extends Bundle {
-  //   val a = UInt(Width(wa))
-  //   val b = UInt(Width(wb))
-  // }
-  // class MyBundle(wa: Int, wb: Int, wx: Int, wy: Int) extends Bundle {
-  //   val x = UInt(Width(wx))
-  //   val y = UInt(Width(wy))
-  //   val i = new InnerBundle(wa, wb)
-  // }
-  // val mybundle_reg = Reg[MyBundle](new MyBundle(2, 3, 4, 5))
-  // val x: Reg[UInt] = mybundle_reg.x
-  // val i: Reg[InnerBundle] = mybundle_reg.i
-  // val a: Reg[UInt] = mybundle_reg.i.a
-
-  // val mybundle_lit = Lit[MyBundle]((
-  //     x = UIntLit(3),
-  //     y = UIntLit(2),
-  //     i = (
-  //       a = UIntLit(4),
-  //       b = UIntLit(5)
-  //     )
-  //   ))
-  // val xl: UIntLit = mybundle_lit.x
-  // val yl: UIntLit = mybundle_lit.y
-  // val al: UIntLit = mybundle_lit.i.a
-
-  println("Hello World")
+  import scala.compiletime.testing.{typeCheckErrors, typeChecks}
 
   final case class InnerBundle(a: UInt, b: UInt) extends Bundle
   final case class MyBundle(x: UInt, y: UInt, i: InnerBundle) extends Bundle
@@ -37,15 +10,15 @@ package hdl
   val reg = Reg(mb)
   val reg_x: Reg[UInt] = reg.x
   val reg_y: Reg[UInt] = reg.y
-  // val reg_y: Reg[UIntLit] = reg.y // Type mismatch, doesn't compile
   val reg_i: Reg[InnerBundle] = reg.i
-  // val reg_i: Reg[UIntLit] = reg.i // Type mismatch doesn't compile
   val reg_i_a: Reg[UInt] = reg_i.a
-  // val reg_i_a: Reg[UIntLit] = reg_i.a // Type mismatch doesn't compile
-
   val reg_i_b: Reg[UInt] = reg.i.b
-  // val reg_i_b: Reg[UIntLit] = reg.i.b // Type mismatch doesn't compile
   println(s"reg_x: ${reg_x} reg_y: ${reg_y} reg_i: ${reg_i} reg_i_a ${reg_i_a} reg_i_b ${reg_i_b}")
+
+  inline def invalidRegType1 = "val reg_y: hdl.Reg[hdl.UInt] = null.asInstanceOf[hdl.Reg[hdl.Bool]]"
+  inline def invalidRegType2 = "val reg_i: hdl.Reg[hdl.UInt] = null.asInstanceOf[hdl.Reg[hdl.Bool]]"
+  assert(typeCheckErrors(invalidRegType1).nonEmpty, "Reg type mismatch should fail")
+  assert(typeCheckErrors(invalidRegType2).nonEmpty, "Reg type mismatch should fail")
 
   val ulit = Lit[UInt](3)
   println(s"ulit.get: ${ulit.get}")
@@ -54,22 +27,26 @@ package hdl
     a = 3,
     b = 2,
   )
-  // val inner_bundle_host_type: HostTypeOf[InnerBundle] = (
-  //   a = 3,
-  //   b = 2,
-  //   c = 4
-  // ) // compile fails, type mismatch
-
   println(s"inner_bundle_host_type ${inner_bundle_host_type}")
 
+  inline def invalidHostType = """
+    import hdl.*
+    final case class InnerBundle(a: UInt, b: UInt) extends Bundle
+    val inner_bundle_host_type: HostTypeOf[InnerBundle] = (a = 3, b = 2, c = 4)
+  """
+  assert(typeCheckErrors(invalidHostType).nonEmpty, "Extra field in HostTypeOf should fail")
 
   val ilit = Lit[InnerBundle]((a = 3, b = 4))
-
   val ilit_a: Lit[UInt] = ilit.a
-
-  // val ilit_a: Lit[Bool] = ilit.a // Type mismatch doesn't compile
-
   println(s"ilit.a ${ilit.a.get} ilit_a.get ${ilit_a.get}")
+
+  inline def invalidLitFieldType = """
+    import hdl.*
+    final case class InnerBundle(a: UInt, b: UInt) extends Bundle
+    val ilit = Lit[InnerBundle]((a = 3, b = 4))
+    val ilit_a: Lit[Bool] = ilit.a
+  """
+  assert(typeCheckErrors(invalidLitFieldType).nonEmpty, "Lit field type mismatch should fail")
 
   val mylit = Lit[MyBundle]((
     x = 2,
@@ -80,20 +57,35 @@ package hdl
   println(s"mylit_x.get ${mylit_x.get} mylit.x.get ${mylit.x.get}")
 
   val mylit_i: Lit[InnerBundle] = mylit.i
-// val mylit_i: Lit[MyBundle] = mylit.i // Type mismatch doesn't compile
-// val mylit_i: Lit[UInt] = mylit.i // Type mismatch doesn't compile
   println(s"mylit_i.get ${mylit_i.get} mylit.i.get ${mylit.i.get}")
+
+  inline def invalidNestedLitType1 = """
+    import hdl.*
+    final case class InnerBundle(a: UInt, b: UInt) extends Bundle
+    final case class MyBundle(x: UInt, y: UInt, i: InnerBundle) extends Bundle
+    val mylit = Lit[MyBundle]((x = 2, y = 3, i = (a = 4, b = 5)))
+    val mylit_i: Lit[MyBundle] = mylit.i
+  """
+  inline def invalidNestedLitType2 = """
+    import hdl.*
+    final case class InnerBundle(a: UInt, b: UInt) extends Bundle
+    final case class MyBundle(x: UInt, y: UInt, i: InnerBundle) extends Bundle
+    val mylit = Lit[MyBundle]((x = 2, y = 3, i = (a = 4, b = 5)))
+    val mylit_i: Lit[UInt] = mylit.i
+  """
+  assert(typeCheckErrors(invalidNestedLitType1).nonEmpty, "Nested Lit type mismatch should fail")
+  assert(typeCheckErrors(invalidNestedLitType2).nonEmpty, "Nested Lit type mismatch should fail")
 
   val mylit_i_a: Lit[UInt] = mylit.i.a
   println(s"mylit_i_a.get ${mylit_i_a.get} ${mylit.i.a.get} ${mylit_i.a.get}")
 
-  // val mylit_2 = Lit[MyBundle]((
-  //   y = 3,
-  //   x = 2,
-  //   i = (a = 4, b = 5))) // Doesn't compile because we mixed up the order of named tuples
-
-
-
+  inline def invalidTupleOrder = """
+    import hdl.*
+    final case class InnerBundle(a: UInt, b: UInt) extends Bundle
+    final case class MyBundle(x: UInt, y: UInt, i: InnerBundle) extends Bundle
+    val mylit_2 = Lit[MyBundle]((y = 3, x = 2, i = (a = 4, b = 5)))
+  """
+  assert(typeCheckErrors(invalidTupleOrder).nonEmpty, "Wrong named tuple order should fail")
 
   import RegVecOps.*
   import LitVecOps.*
@@ -244,6 +236,8 @@ package hdl
       io.sum := nestedReg.status
 
       dataWire := dataWire_2
+
+      dataWire := Lit[DataBundle]((valid = false, data = 3))
 
       println(s"Created wire with bundle: $dataWire")
       println(s"  - valid field: $validWire")

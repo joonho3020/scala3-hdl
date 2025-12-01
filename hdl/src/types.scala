@@ -96,10 +96,11 @@ final class Lit[T](private val payload: Any) extends Selectable with TypedConnec
   def innerType: T = throw new UnsupportedOperationException("Lit does not store type information at runtime")
   def refName: String = ""
   override def toExpr: ExprIR =
-    payload match
-      case b: Boolean => ExprIR.Lit(if b then BigInt(1) else BigInt(0))
-      case bi: BigInt => ExprIR.Lit(bi)
-      case other => ExprIR.Lit(BigInt(other.toString))
+    ExprIR.Lit(payload)
+// payload match
+// case b: Boolean => ExprIR.Lit(if b then BigInt(1) else BigInt(0))
+// case bi: BigInt => ExprIR.Lit(bi)
+// case other => ExprIR.Lit(BigInt(other.toString))
 
   inline def selectDynamic(name: String): Lit[?] =
     summonFrom {

@@ -43,11 +43,9 @@ class ElabContext private[hdl] (
     ModuleIR(modName, ports.toSeq, statements.toSeq)
 
 object dsl:
-  // Wire with auto-captured name from enclosing val
   inline def Wire[T <: ValueType](tpe: T)(using ctx: ElabContext): hdl.Wire[T] =
     NameMacros.wireWithName(tpe)
 
-  // Reg with auto-captured name from enclosing val
   inline def Reg[T <: ValueType](tpe: T)(using ctx: ElabContext): hdl.Reg[T] =
     NameMacros.regWithName(tpe)
 
