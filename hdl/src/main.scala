@@ -162,20 +162,14 @@ package hdl
   println(s"bundle_b_reg_x_a ${bundle_b_reg_x_a} bundle_b_reg_x_b ${bundle_b_reg_x_b} bundle_b_reg_y ${bundle_b_reg_y}")
 
 @main def elaborateTest(): Unit =
-  case class AdderIO(a: UInt, b: UInt, sum: UInt) extends Bundle
-  class Adder(width: Int) extends Module:
-    val io = IO(AdderIO(
-      a = Input(UInt(Width(width))),
-      b = Input(UInt(Width(width))),
-      sum = Output(UInt(Width(width + 1)))
-    ), "io")
-    def body(using ctx: ElabContext): Unit =
-      val temp = ctx.wire(UInt(Width(width + 1)), "temp")
-      ctx.connect(temp, io.a)
-      ctx.connect(io.sum, temp)
+  import ConnectOps.*
+  import dsl.*
 
-  /*
-   * Goal of what we want the API to look like
+  println("=" * 50)
+  println("New API Test")
+  println("=" * 50)
+
+  case class AdderIO(a: UInt, b: UInt, sum: UInt) extends Bundle
   class Adder(width: Int) extends Module:
     val io = IO(AdderIO(
       a = Input(UInt(Width(width))),
@@ -184,9 +178,9 @@ package hdl
     ))
     def body(using ctx: ElabContext): Unit =
       val temp = Wire(UInt(Width(width + 1)))
-      temp := io.a
+      val a = io.a
+      temp := a
       io.sum := temp
-   */
 
   val elaborator = Elaborator()
   val adder = Adder(8)
@@ -207,27 +201,13 @@ package hdl
     val io = IO(TopIO(
       x = Input(UInt(Width(width))),
       y = Output(UInt(Width(width + 1)))
-    ), "io")  // Explicit name
-    def body(using ctx: ElabContext): Unit =
-      val adderInst = ctx.instantiate(Adder(width))
-      // Using io.x and io.y directly now that they have proper names
-      ctx.connect(adderInst.io("io_a"), io.x)
-      ctx.connect(adderInst.io("io_b"), ExprIR.Lit(1, width))
-      ctx.connect(io.y, adderInst.io("io_sum"))
-
-  /*
-   * Goal of what we want the API to look like
-  class Top(width: Int) extends Module:
-    val io = IO(TopIO(
-      x = Input(UInt(Width(width))),
-      y = Output(UInt(Width(width + 1)))
     ))
     def body(using ctx: ElabContext): Unit =
-      val adder = Module(new Adder(width))
-      adder.io.a := io.x
-      adder.io.b := Lit[UInt](1)
+      val adder = Module(Adder(width))
+      val x = io.x
+      adder.io.a := x
+      adder.io.b := Lit[UInt](BigInt("DEADBEAF", 16))
       io.y := adder.io.sum
-   */
 
   val top = Top(8)
   val topIR = elaborator.elaborate(top)

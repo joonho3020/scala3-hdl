@@ -12,7 +12,7 @@ sealed trait ExprIR
 
 object ExprIR:
   case class Ref(name: String) extends ExprIR
-  case class Lit(value: BigInt, width: Int) extends ExprIR
+  case class Lit(value: BigInt) extends ExprIR
   case class SubField(target: ExprIR, field: String) extends ExprIR
   case class SubIndex(target: ExprIR, index: Int) extends ExprIR
   case class Mux(sel: ExprIR, tval: ExprIR, fval: ExprIR) extends ExprIR
