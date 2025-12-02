@@ -16,6 +16,7 @@ mill hdl.runMain hdl.compileTimeTypeTests
 things to test:
 
 - check that all instances of a module with different params are all elaborated
+- bundle directions
 
 
 

@@ -317,9 +317,7 @@ package hdl
     ))
     def body(using ctx: ElabContext): Unit =
       val children = (0 until fanout).map(i => Module(new Leaf(level * 10 + i)))
-      children.foreach(c => c.io.in := io.in)
-      val sum = children.map(c => c.io.out).reduce(_ + _)
-      io.out := sum
+      io.out := children.map(c => c.io.out).reduce(_ + _)
 
   class Deep(levels: Int, fanout: Int) extends Module:
     val io = IO(LinkIO(

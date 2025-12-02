@@ -14,7 +14,9 @@ trait TypedConnectable[T] extends Connectable:
   def innerType: T
   override def toExpr: ExprIR = ExprIR.Ref(refName)
 
-final class Wire[T](val t: T, val name: String = "") extends Selectable with TypedConnectable[T]:
+trait Node[T <: ValueType] extends TypedConnectable[T]
+
+final class Wire[T <: ValueType](val t: T, val name: String = "") extends Selectable with Node[T]:
   type Fields = NamedTuple.Map[
     NamedTuple.From[T],
     [X] =>> Wire[X & ValueType]]
@@ -47,7 +49,7 @@ object WireVecOps:
       val childName = if wv.name.isEmpty then s"(${start}, $end)" else s"${wv.name}(${start}, $end)"
       new Wire(Vec(wv.t.elem, sliceLen), childName)
 
-final class Reg[T](val t: T, val name: String = "") extends Selectable with TypedConnectable[T]:
+final class Reg[T <: ValueType](val t: T, val name: String = "") extends Selectable with Node[T]:
   type Fields = NamedTuple.Map[
     NamedTuple.From[T],
     [X] =>> Reg[X & ValueType]]
@@ -126,7 +128,7 @@ object Lit:
   inline def apply[T <: ValueType](inline v: HostTypeOf[T]): Lit[T] =
     new Lit[T](v)
 
-final class IO[T](val t: T, private var _name: String = "") extends Selectable with TypedConnectable[T]:
+final class IO[T <: ValueType](val t: T, private var _name: String = "") extends Selectable with Node[T]:
   type Fields = NamedTuple.Map[
     NamedTuple.From[T],
     [X] =>> IO[X & ValueType]]
@@ -170,23 +172,25 @@ trait TypeCompatible[LEFT, RIGHT]
 object TypeCompatible:
   given [T]: TypeCompatible[T, T] = new TypeCompatible[T, T] {}
 
-final class Node[T](val w: Width, val expr: ExprIR) extends TypedConnectable[T]:
-  def innerType: UInt = UInt(w)
+final class OpNode[T <: ValueType](val t: T, val expr: ExprIR) extends Node[T]:
+  def innerType: T = t
   def refName: String = ""
   override def toExpr: ExprIR = expr
 
 object Operations:
-  private def widthOf[T <: ValueType](tc: TypedConnectable[T]): Int =
-    tc.innerType match
-      case u: UInt => u.w.value
-      case b: Bool => 1
+  private def widthOf(tc: Node[UInt]): Int =
+    tc.innerType.w.value
 
-  extension [T <: ValueType](lhs: TypedConnectable[T])
-    infix def +(rhs: TypedConnectable[T]): TypedConnectable[T] =
+  extension (lhs: Node[UInt])
+    infix def +(rhs: Node[UInt]): Node[UInt] =
       val lw = widthOf(lhs)
       val rw = widthOf(rhs)
       val outW = Width(math.max(lw, rw) + 1)
-      Node[T](outW, ExprIR.PrimOp("add", Seq(lhs.toExpr, rhs.toExpr)))
+      OpNode(UInt(outW), ExprIR.PrimOp("add", Seq(lhs.toExpr, rhs.toExpr)))
+
+  extension (xs: Seq[Node[UInt]])
+    def sumAll: Node[UInt] =
+      xs.reduce(_ + _)
 
 object ConnectOps:
   extension [L <: ValueType](lhs: TypedConnectable[L])

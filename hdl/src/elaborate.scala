@@ -112,13 +112,11 @@ class Elaborator:
     elaborated.values.asScala.map(_.join()).toSeq
 
   private def discoverAndRegisterPorts(ctx: ElabContext, module: Module): Unit =
-    // Find all IO[_] fields via reflection and set their names
     val clazz = module.getClass
     for field <- clazz.getDeclaredFields do
       field.setAccessible(true)
       field.get(module) match
         case io: IO[?] =>
-          // Set the IO's name from the field name if not already set
           if io.name.isEmpty then
             io.setName(field.getName)
           registerIO(ctx, io.name, io.t.asInstanceOf[ValueType])
@@ -127,20 +125,12 @@ class Elaborator:
 
   private def registerIO(ctx: ElabContext, baseName: String, v: ValueType): Unit =
     v match
-      case b: Bundle =>
-        // Flatten bundle fields into individual ports
-        val p = b.asInstanceOf[Product]
-        for i <- 0 until p.productArity do
-          val fieldName = p.productElementName(i)
-          val fieldValue = p.productElement(i).asInstanceOf[ValueType]
-          val fullName = s"${baseName}_$fieldName"
-          registerIO(ctx, fullName, fieldValue)
       case u: UInt =>
         ctx.addPort(PortIR(baseName, TypeIR.UIntIR(u.w.value), u.dir))
       case b: Bool =>
         ctx.addPort(PortIR(baseName, TypeIR.BoolIR(), b.dir))
-      case vec: Vec[?] =>
-        ctx.addPort(PortIR(baseName, valueTypeToIR(vec), Direction.Out))
+      case other =>
+        ctx.addPort(PortIR(baseName, valueTypeToIR(other), Direction.Out))
 
 def valueTypeToIR(v: ValueType): TypeIR = v match
   case u: UInt => TypeIR.UIntIR(u.w.value)
