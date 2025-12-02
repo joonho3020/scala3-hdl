@@ -29,18 +29,17 @@ class ElabContext private[hdl] (
   def addPort(port: PortIR): Unit =
     ports += port
 
-  def wire[T <: ValueType](tpe: T, name: String = ""): Wire[T] =
+  def wire[T <: ValueType](tpe: T, name: String = ""): Node[T] =
     val n = if name.nonEmpty then name else freshName("wire")
     emit(StmtIR.WireDecl(n, valueTypeToIR(tpe)))
-    new Wire(tpe, n)
+    new RefNode(n, tpe, NodeKind.Wire)
 
-  def reg[T <: ValueType](tpe: T, name: String = ""): Reg[T] =
+  def reg[T <: ValueType](tpe: T, name: String = ""): Node[T] =
     val n = if name.nonEmpty then name else freshName("reg")
     emit(StmtIR.RegDecl(n, valueTypeToIR(tpe)))
-    new Reg(tpe, n)
+    new RefNode(n, tpe, NodeKind.Reg)
 
   def instantiate[M <: Module](mod: M, name: String = ""): M =
-    println(s"instantiate ${name}")
     elaborator.elaborateSubmodule(mod)
     val instName = if name.nonEmpty then name else freshName("inst")
     setInstanceIOs(mod, instName)
@@ -55,8 +54,8 @@ class ElabContext private[hdl] (
     for field <- clazz.getDeclaredFields do
       field.setAccessible(true)
       field.get(mod) match
-        case io: IO[?] =>
-          val baseName = if io.name.isEmpty then field.getName else io.name
+        case io: RefNode[?] if io.kind == NodeKind.IO =>
+          val baseName = if io.refName.isEmpty then field.getName else io.refName
           io.setName(s"$prefix.$baseName")
         case _ => ()
 
@@ -116,10 +115,10 @@ class Elaborator:
     for field <- clazz.getDeclaredFields do
       field.setAccessible(true)
       field.get(module) match
-        case io: IO[?] =>
-          if io.name.isEmpty then
+        case io: RefNode[?] if io.kind == NodeKind.IO =>
+          if io.refName.isEmpty then
             io.setName(field.getName)
-          registerIO(ctx, io.name, io.t.asInstanceOf[ValueType])
+          registerIO(ctx, io.refName, io.t.asInstanceOf[ValueType])
         case _ => ()
 
 

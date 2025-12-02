@@ -1,86 +1,7 @@
 package hdl
 
-import scala.deriving.*
-import scala.compiletime.*
 import scala.NamedTuple
-import scala.util.NotGiven
-import scala.quoted.*
-
-trait Connectable:
-  def refName: String
-  def toExpr: ExprIR = ExprIR.Ref(refName)
-
-trait TypedConnectable[T] extends Connectable:
-  def innerType: T
-  override def toExpr: ExprIR = ExprIR.Ref(refName)
-
-trait Node[T <: ValueType] extends TypedConnectable[T]
-
-final class Wire[T <: ValueType](val t: T, val name: String = "") extends Selectable with Node[T]:
-  type Fields = NamedTuple.Map[
-    NamedTuple.From[T],
-    [X] =>> Wire[X & ValueType]]
-
-  def innerType: T = t
-  def refName: String = name
-
-  inline def selectDynamic(fieldName: String): Wire[?] =
-    summonFrom {
-      case m: Mirror.ProductOf[T] =>
-        val labels = constValueTuple[m.MirroredElemLabels].toArray
-        val idx = labels.indexOf(fieldName)
-        val child = t.asInstanceOf[Product].productElement(idx).asInstanceOf[ValueType]
-        val childName = if name.isEmpty then fieldName else s"${name}.$fieldName"
-        new Wire(child, childName)
-      case _ =>
-        throw new NoSuchElementException(s"${t.getClass.getName} has no field '$fieldName'")
-    }
-  override def toString(): String =
-    s"Wire($t, $name)"
-
-object WireVecOps:
-  extension [A <: ValueType](wv: Wire[Vec[A]])
-    def apply(index: Int): Wire[A] =
-      val childName = if wv.name.isEmpty then s"($index)" else s"${wv.name}($index)"
-      new Wire(wv.t.elem, childName)
-
-    def apply(start: Int, end: Int): Wire[Vec[A]] =
-      val sliceLen = (end - start) + 1
-      val childName = if wv.name.isEmpty then s"(${start}, $end)" else s"${wv.name}(${start}, $end)"
-      new Wire(Vec(wv.t.elem, sliceLen), childName)
-
-final class Reg[T <: ValueType](val t: T, val name: String = "") extends Selectable with Node[T]:
-  type Fields = NamedTuple.Map[
-    NamedTuple.From[T],
-    [X] =>> Reg[X & ValueType]]
-
-  def innerType: T = t
-  def refName: String = name
-
-  inline def selectDynamic(fieldName: String): Reg[?] =
-    summonFrom {
-      case m: Mirror.ProductOf[T] =>
-        val labels = constValueTuple[m.MirroredElemLabels].toArray
-        val idx = labels.indexOf(fieldName)
-        val child = t.asInstanceOf[Product].productElement(idx).asInstanceOf[ValueType]
-        val childName = if name.isEmpty then fieldName else s"${name}.$fieldName"
-        new Reg(child, childName)
-      case _ =>
-        throw new NoSuchElementException(s"${t.getClass.getName} has no field '$fieldName'")
-    }
-  override def toString(): String =
-    s"Reg($t, $name)"
-
-object RegVecOps:
-  extension [A <: ValueType](rv: Reg[Vec[A]])
-    def apply(index: Int): Reg[A] =
-      val childName = if rv.name.isEmpty then s"($index)" else s"${rv.name}($index)"
-      new Reg(rv.t.elem, childName)
-
-    def apply(start: Int, end: Int): Reg[Vec[A]] =
-      val sliceLen = (end - start) + 1
-      val childName = if rv.name.isEmpty then s"(${start}, $end)" else s"${rv.name}(${start}, $end)"
-      new Reg(Vec(rv.t.elem, sliceLen), childName)
+import scala.language.dynamics
 
 type HostTypeOf[T] = T match
   case UInt    => BigInt
@@ -88,114 +9,125 @@ type HostTypeOf[T] = T match
   case Vec[t]  => Seq[HostTypeOf[t & ValueType]]
   case _       => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & ValueType]]
 
-final class Lit[T](private val payload: Any) extends Selectable with TypedConnectable[T]:
-  type Fields = NamedTuple.Map[
-    NamedTuple.From[T],
-    [X] =>> Lit[X & ValueType]
-  ]
+enum NodeKind:
+  case Wire, Reg, IO, Op, Lit
 
-  // Note: We can't expose innerType for Lit since we don't store the type parameter
-  // For Lit, we'll need to use a different approach
-  def innerType: T = throw new UnsupportedOperationException("Lit does not store type information at runtime")
-  def refName: String = ""
-  override def toExpr: ExprIR =
-    ExprIR.Lit(payload)
+sealed trait Node[+T <: ValueType] extends Selectable, scala.Dynamic:
+  def t: T
+  def expr: ExprIR
+  def kind: NodeKind
+  def refName: String
 
-  inline def selectDynamic(name: String): Lit[?] =
-    summonFrom {
-      case m: Mirror.ProductOf[T] =>
-        val labels = constValueTuple[m.MirroredElemLabels].toArray
-        val idx = labels.indexOf(name)
-        val subpayload = payload.asInstanceOf[Product].productElement(idx)
-        new Lit[Any](subpayload)
-      case _ =>
-        throw new NoSuchElementException(s"${summonInline[ValueOf[String]]}")
-    }
-  transparent inline def get: HostTypeOf[T] =
-    payload.asInstanceOf[HostTypeOf[T]]
-
-object LitVecOps:
-  extension [A <: ValueType](lv: Lit[Vec[A]])
-    def apply(index: Int): Lit[A] =
-      val seq = lv.get
-      new Lit[A](seq(index))
-
-    def apply(start: Int, end: Int): Lit[Vec[A]] =
-      val seq = lv.get
-      new Lit[Vec[A]](seq.slice(start, end + 1))
-
-object Lit:
-  inline def apply[T <: ValueType](inline v: HostTypeOf[T]): Lit[T] =
-    new Lit[T](v)
-
-final class IO[T <: ValueType](val t: T, private var _name: String = "") extends Selectable with Node[T]:
-  type Fields = NamedTuple.Map[
-    NamedTuple.From[T],
-    [X] =>> IO[X & ValueType]]
-
-  def innerType: T = t
-  def name: String = _name
-  private[hdl] def setName(n: String): Unit = _name = n
-  def refName: String = _name
-
-  inline def selectDynamic(fieldName: String): IO[?] =
-    summonFrom {
-      case m: Mirror.ProductOf[T] =>
-        val labels = constValueTuple[m.MirroredElemLabels].toArray
-        val idx = labels.indexOf(fieldName)
-        val child = t.asInstanceOf[Product].productElement(idx).asInstanceOf[ValueType]
-        val childName = if _name.isEmpty then fieldName else s"${_name}.$fieldName"
-        new IO(child, childName)
+  def selectDynamic(fieldName: String): Node[?] =
+    t match
+      case b: Bundle =>
+        val p = b.asInstanceOf[Product]
+        val idx = (0 until p.productArity).indexWhere(i => p.productElementName(i) == fieldName)
+        if idx < 0 then throw new NoSuchElementException(s"${t.getClass.getName} has no field '$fieldName'")
+        val childT = p.productElement(idx).asInstanceOf[ValueType]
+        this match
+          case l: LitNode[?] =>
+            val payload = l.payload.asInstanceOf[Product].productElement(idx)
+            LitNode(childT, payload)
+          case _ =>
+            FieldNode(this.asInstanceOf[Node[Bundle]], fieldName, childT)
       case _ =>
         throw new NoSuchElementException(s"${t.getClass.getName} has no field '$fieldName'")
-    }
-  override def toString(): String =
-    s"IO($t, $_name)"
+
+  def apply(index: Int): Node[?] =
+    t match
+      case v: Vec[?] =>
+        val childT = v.elem.asInstanceOf[ValueType]
+        this match
+          case l: LitNode[?] =>
+            val seq = l.payload.asInstanceOf[Seq[Any]]
+            LitNode(childT, seq(index))
+          case _ =>
+            IndexNode(this.asInstanceOf[Node[Vec[ValueType]]], index, childT)
+      case _ =>
+        throw new NoSuchElementException(s"${t.getClass.getName} is not indexable")
+
+  def apply(start: Int, end: Int): Node[Vec[ValueType]] =
+    t match
+      case v: Vec[?] =>
+        val childT = v.elem.asInstanceOf[ValueType]
+        val len = (end - start) + 1
+        this match
+          case l: LitNode[?] =>
+            val seq = l.payload.asInstanceOf[Seq[Any]].slice(start, end + 1)
+            LitNode(Vec(childT, len), seq)
+          case _ =>
+            SliceNode(this.asInstanceOf[Node[Vec[ValueType]]], start, end, Vec(childT, len))
+      case _ =>
+        throw new NoSuchElementException(s"${t.getClass.getName} is not sliceable")
+
+final class RefNode[T <: ValueType](private var name: String, val t: T, val kind: NodeKind) extends Node[T]:
+  def expr: ExprIR = ExprIR.Ref(name)
+  def refName: String = name
+  private[hdl] def setName(n: String): Unit = name = n
+  override def toString: String = s"${kind}($t,$name)"
+
+final class LitNode[T <: ValueType](val t: T, val payload: Any) extends Node[T]:
+  def expr: ExprIR = ExprIR.Lit(payload)
+  def kind: NodeKind = NodeKind.Lit
+  def refName: String = ""
+  def get: HostTypeOf[T] = payload.asInstanceOf[HostTypeOf[T]]
+  override def toString: String = s"Lit($payload)"
+
+final class FieldNode[T <: ValueType](val parent: Node[Bundle], val field: String, val t: T) extends Node[T]:
+  def expr: ExprIR = ExprIR.SubField(parent.expr, field)
+  def kind: NodeKind = NodeKind.Op
+  def refName: String = ""
+  override def toString: String = s"Field($field,$t)"
+
+final class IndexNode[A <: ValueType](val parent: Node[Vec[A]], val index: Int, val t: A) extends Node[A]:
+  def expr: ExprIR = ExprIR.SubIndex(parent.expr, index)
+  def kind: NodeKind = NodeKind.Op
+  def refName: String = ""
+  override def toString: String = s"Index($index,$t)"
+
+final class SliceNode[A <: ValueType](val parent: Node[Vec[A]], val start: Int, val end: Int, val t: Vec[A]) extends Node[Vec[A]]:
+  def expr: ExprIR = ExprIR.PrimOp("slice", Seq(parent.expr, ExprIR.Lit(start), ExprIR.Lit(end)))
+  def kind: NodeKind = NodeKind.Op
+  def refName: String = ""
+  override def toString: String = s"Slice($start,$end,$t)"
+
+final class PrimOpNode[T <: ValueType](val t: T, val op: String, val args: Seq[Node[?]]) extends Node[T]:
+  def expr: ExprIR = ExprIR.PrimOp(op, args.map(_.expr))
+  def kind: NodeKind = NodeKind.Op
+  def refName: String = ""
+  override def toString: String = s"PrimOp($op,$t)"
+
+object Lit:
+  def apply[T <: ValueType](t: T)(value: HostTypeOf[T]): LitNode[T] =
+    new LitNode[T](t, value)
 
 object IO:
-  def apply[T <: ValueType](t: T): IO[T] = new IO(t)
-  def apply[T <: ValueType](t: T, name: String): IO[T] = new IO(t, name)
-
-object IOVecOps:
-  extension [A <: ValueType](iov: IO[Vec[A]])
-    def apply(index: Int): IO[A] =
-      val childName = if iov.name.isEmpty then s"($index)" else s"${iov.name}($index)"
-      new IO(iov.t.elem, childName)
-
-    def apply(start: Int, end: Int): IO[Vec[A]] =
-      val sliceLen = (end - start) + 1
-      val childName = if iov.name.isEmpty then s"(${start}, $end)" else s"${iov.name}(${start}, $end)"
-      new IO(Vec(iov.t.elem, sliceLen), childName)
-
-trait TypeCompatible[LEFT, RIGHT]
-
-object TypeCompatible:
-  given [T]: TypeCompatible[T, T] = new TypeCompatible[T, T] {}
-
-final class OpNode[T <: ValueType](val t: T, val expr: ExprIR) extends Node[T]:
-  def innerType: T = t
-  def refName: String = ""
-  override def toExpr: ExprIR = expr
+  def apply[T <: ValueType](t: T): Node[T] = new RefNode("", t, NodeKind.IO)
+  def apply[T <: ValueType](t: T, name: String): Node[T] = new RefNode(name, t, NodeKind.IO)
 
 object Operations:
-  private def widthOf(tc: Node[UInt]): Int =
-    tc.innerType.w.value
+  private def widthOf(tc: Node[?]): Int =
+    tc.t match
+      case u: UInt => u.w.value
+      case _ => throw new IllegalArgumentException("add requires UInt")
 
-  extension (lhs: Node[UInt])
-    infix def +(rhs: Node[UInt]): Node[UInt] =
-      val lw = widthOf(lhs)
-      val rw = widthOf(rhs)
-      val outW = Width(math.max(lw, rw) + 1)
-      OpNode(UInt(outW), ExprIR.PrimOp("add", Seq(lhs.toExpr, rhs.toExpr)))
+  extension (lhs: Node[?])
+    infix def +(rhs: Node[?]): Node[UInt] =
+      (lhs.t, rhs.t) match
+        case (lu: UInt, ru: UInt) =>
+          val lw = lu.w.value
+          val rw = ru.w.value
+          val outW = Width(math.max(lw, rw) + 1)
+          PrimOpNode(UInt(outW), "add", Seq(lhs, rhs))
+        case _ =>
+          throw new IllegalArgumentException("add requires UInt")
 
   extension (xs: Seq[Node[UInt]])
     def sumAll: Node[UInt] =
       xs.reduce(_ + _)
 
 object ConnectOps:
-  extension [L <: ValueType](lhs: TypedConnectable[L])
-    def :=[R <: ValueType](rhs: TypedConnectable[R])(using ctx: ElabContext, ev: TypeCompatible[L, R]): Unit =
-      ctx.emit(StmtIR.Connect(lhs.toExpr, rhs.toExpr))
-
-    def :=[R <: ValueType](rhs: Lit[R])(using ctx: ElabContext, ev: TypeCompatible[L, R]): Unit =
-      ctx.emit(StmtIR.Connect(lhs.toExpr, rhs.toExpr))
+  extension (lhs: Node[?])
+    def :=(rhs: Node[?])(using ctx: ElabContext): Unit =
+      ctx.emit(StmtIR.Connect(lhs.expr, rhs.expr))

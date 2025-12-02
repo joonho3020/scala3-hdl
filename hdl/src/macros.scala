@@ -4,26 +4,26 @@ import scala.quoted.*
 
 object NameMacros:
   // Macro to create a Wire with auto-captured name from enclosing val
-  inline def wireWithName[T <: ValueType](tpe: T)(using ctx: ElabContext): Wire[T] =
+  inline def wireWithName[T <: ValueType](tpe: T)(using ctx: ElabContext): Node[T] =
     ${ wireWithNameImpl('tpe, 'ctx) }
 
   private def wireWithNameImpl[T <: ValueType: Type](
     tpe: Expr[T],
     ctx: Expr[ElabContext]
-  )(using Quotes): Expr[Wire[T]] =
+  )(using Quotes): Expr[Node[T]] =
     import quotes.reflect.*
 
     val name = findEnclosingValName()
     '{ $ctx.wire($tpe, ${Expr(name)}) }
 
   // Macro to create a Reg with auto-captured name
-  inline def regWithName[T <: ValueType](tpe: T)(using ctx: ElabContext): Reg[T] =
+  inline def regWithName[T <: ValueType](tpe: T)(using ctx: ElabContext): Node[T] =
     ${ regWithNameImpl('tpe, 'ctx) }
 
   private def regWithNameImpl[T <: ValueType: Type](
     tpe: Expr[T],
     ctx: Expr[ElabContext]
-  )(using Quotes): Expr[Reg[T]] =
+  )(using Quotes): Expr[Node[T]] =
     import quotes.reflect.*
 
     val name = findEnclosingValName()

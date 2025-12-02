@@ -3,8 +3,6 @@ package hdl
 import scala.deriving.*
 import scala.compiletime.*
 import scala.NamedTuple
-import scala.util.NotGiven
-import scala.quoted.*
 
 enum Direction:
   case In, Out
