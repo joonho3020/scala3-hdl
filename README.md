@@ -16,3 +16,14 @@ mill hdl.runMain hdl.compileTimeTypeTests
 things to test:
 
 - check that all instances of a module with different params are all elaborated
+
+
+
+TODO
+
+- Don't flatten io ports in `registerIO`
+
+- operators
+- vectors and heterogenous vectors
+- behavioral statements
+- memories

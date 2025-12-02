@@ -12,6 +12,7 @@ trait Connectable:
 
 trait TypedConnectable[T] extends Connectable:
   def innerType: T
+  override def toExpr: ExprIR = ExprIR.Ref(refName)
 
 final class Wire[T](val t: T, val name: String = "") extends Selectable with TypedConnectable[T]:
   type Fields = NamedTuple.Map[
@@ -97,10 +98,6 @@ final class Lit[T](private val payload: Any) extends Selectable with TypedConnec
   def refName: String = ""
   override def toExpr: ExprIR =
     ExprIR.Lit(payload)
-// payload match
-// case b: Boolean => ExprIR.Lit(if b then BigInt(1) else BigInt(0))
-// case bi: BigInt => ExprIR.Lit(bi)
-// case other => ExprIR.Lit(BigInt(other.toString))
 
   inline def selectDynamic(name: String): Lit[?] =
     summonFrom {
@@ -172,6 +169,24 @@ trait TypeCompatible[LEFT, RIGHT]
 
 object TypeCompatible:
   given [T]: TypeCompatible[T, T] = new TypeCompatible[T, T] {}
+
+final class Node[T](val w: Width, val expr: ExprIR) extends TypedConnectable[T]:
+  def innerType: UInt = UInt(w)
+  def refName: String = ""
+  override def toExpr: ExprIR = expr
+
+object Operations:
+  private def widthOf[T <: ValueType](tc: TypedConnectable[T]): Int =
+    tc.innerType match
+      case u: UInt => u.w.value
+      case b: Bool => 1
+
+  extension [T <: ValueType](lhs: TypedConnectable[T])
+    infix def +(rhs: TypedConnectable[T]): TypedConnectable[T] =
+      val lw = widthOf(lhs)
+      val rw = widthOf(rhs)
+      val outW = Width(math.max(lw, rw) + 1)
+      Node[T](outW, ExprIR.PrimOp("add", Seq(lhs.toExpr, rhs.toExpr)))
 
 object ConnectOps:
   extension [L <: ValueType](lhs: TypedConnectable[L])

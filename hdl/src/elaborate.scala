@@ -1,6 +1,11 @@
 package hdl
 
 import scala.collection.mutable
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CompletableFuture
+import java.util.function.Function
+import scala.jdk.CollectionConverters.*
+import java.lang.ThreadLocal
 
 class ElabContext private[hdl] (
   private val modName: String,
@@ -38,39 +43,73 @@ class ElabContext private[hdl] (
     println(s"instantiate ${name}")
     elaborator.elaborateSubmodule(mod)
     val instName = if name.nonEmpty then name else freshName("inst")
+    setInstanceIOs(mod, instName)
     emit(StmtIR.Instance(instName, mod.moduleName))
     mod
+
+  // Required for IR emission
+  // Otherwise, accessing IO ports of submodules won't have a reference to the
+  // module instance
+  private def setInstanceIOs(mod: Module, prefix: String): Unit =
+    val clazz = mod.getClass
+    for field <- clazz.getDeclaredFields do
+      field.setAccessible(true)
+      field.get(mod) match
+        case io: IO[?] =>
+          val baseName = if io.name.isEmpty then field.getName else io.name
+          io.setName(s"$prefix.$baseName")
+        case _ => ()
 
   private[hdl] def build(): ModuleIR =
     ModuleIR(modName, ports.toSeq, statements.toSeq)
 
 class Elaborator:
-  private val elaborated = mutable.LinkedHashMap[Module, ModuleIR]()
-  private val elaborating = mutable.Set[Module]()
+  private val elaborated = new ConcurrentHashMap[Module, CompletableFuture[ModuleIR]]()
+  private val elaboratingStack = new ThreadLocal[mutable.Set[Module]]:
+    override def initialValue(): mutable.Set[Module] = mutable.Set.empty[Module]
 
   def elaborate(module: Module): ModuleIR =
-    println(s"elaborate ${module.moduleName}")
     elaborateModule(module)
 
   private[hdl] def elaborateSubmodule(module: Module): ModuleIR =
-    println(s"elaborateSubmodule ${module.moduleName}")
     elaborateModule(module)
 
   private def elaborateModule(module: Module): ModuleIR =
-    elaborated.getOrElseUpdate(module, {
-      if elaborating.contains(module) then
+    val stack = elaboratingStack.get()
+    val existing = elaborated.get(module)
+    if existing != null then
+      if stack.contains(module) then
         throw new IllegalStateException(s"Circular elaboration detected for ${module.moduleName}")
-      elaborating += module
+      return existing.join()
+    val future = new CompletableFuture[ModuleIR]()
+    val prev = elaborated.putIfAbsent(module, future)
+    if prev != null then
+      if stack.contains(module) then
+        throw new IllegalStateException(s"Circular elaboration detected for ${module.moduleName}")
+      return prev.join()
+    if stack.contains(module) then
+      val ex = new IllegalStateException(s"Circular elaboration detected for ${module.moduleName}")
+      future.completeExceptionally(ex)
+      throw ex
+    stack += module
+    try
+      println(s"[${Thread.currentThread().getName}] start ${module.moduleName}")
       val ctx = new ElabContext(module.moduleName, this)
       discoverAndRegisterPorts(ctx, module)
       module.body(using ctx)
       val ir = ctx.build()
-      elaborating -= module
-      ir
-    })
+      println(s"[${Thread.currentThread().getName}] done ${module.moduleName}")
+      future.complete(ir)
+    catch
+      case e: Throwable =>
+        future.completeExceptionally(e)
+        throw e
+    finally
+      stack -= module
+    future.join()
 
   def modules: Seq[ModuleIR] =
-    elaborated.values.toSeq
+    elaborated.values.asScala.map(_.join()).toSeq
 
   private def discoverAndRegisterPorts(ctx: ElabContext, module: Module): Unit =
     // Find all IO[_] fields via reflection and set their names
@@ -84,6 +123,7 @@ class Elaborator:
             io.setName(field.getName)
           registerIO(ctx, io.name, io.t.asInstanceOf[ValueType])
         case _ => ()
+
 
   private def registerIO(ctx: ElabContext, baseName: String, v: ValueType): Unit =
     v match

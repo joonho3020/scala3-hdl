@@ -16,7 +16,7 @@ object ExprIR:
   case class SubField(target: ExprIR, field: String) extends ExprIR
   case class SubIndex(target: ExprIR, index: Int) extends ExprIR
   case class Mux(sel: ExprIR, tval: ExprIR, fval: ExprIR) extends ExprIR
-// case class PrimOp(op: String, args: Seq[ExprIR]) extends ExprIR
+  case class PrimOp(op: String, args: Seq[ExprIR]) extends ExprIR
 
 sealed trait StmtIR
 
