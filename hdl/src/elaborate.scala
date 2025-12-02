@@ -8,7 +8,7 @@ import scala.jdk.CollectionConverters.*
 import java.lang.ThreadLocal
 
 class ElabContext private[hdl] (
-  private val modName: String,
+  private var modName: String,
   private val elaborator: Elaborator
 ):
   private val statements = mutable.ListBuffer[StmtIR]()
@@ -18,6 +18,9 @@ class ElabContext private[hdl] (
   // Implicit clock and reset
   val clock: ExprIR = ExprIR.Ref("clock")
   val reset: ExprIR = ExprIR.Ref("reset")
+
+  private[hdl] def setModuleName(n: String): Unit =
+    modName = n
 
   private[hdl] def freshName(prefix: String): String =
     nameCounter += 1
@@ -39,12 +42,15 @@ class ElabContext private[hdl] (
     emit(StmtIR.RegDecl(n, valueTypeToIR(tpe)))
     new RefNode(n, tpe, NodeKind.Reg)
 
-  def instantiate[M <: Module](mod: M, name: String = ""): M =
-    elaborator.elaborateSubmodule(mod)
+  def instantiate[M <: Module](mod: ElabContext ?=> M, name: String = ""): M =
+    val childCtx = new ElabContext("", elaborator)
+    val m = mod(using childCtx)
+    childCtx.setModuleName(m.moduleName)
+    elaborator.elaborateSubmodule(m, childCtx)
     val instName = if name.nonEmpty then name else freshName("inst")
-    setInstanceIOs(mod, instName)
-    emit(StmtIR.Instance(instName, mod.moduleName))
-    mod
+    setInstanceIOs(m, instName)
+    emit(StmtIR.Instance(instName, m.moduleName))
+    m
 
   // Required for IR emission
   // Otherwise, accessing IO ports of submodules won't have a reference to the
@@ -67,13 +73,16 @@ class Elaborator:
   private val elaboratingStack = new ThreadLocal[mutable.Set[Module]]:
     override def initialValue(): mutable.Set[Module] = mutable.Set.empty[Module]
 
-  def elaborate(module: Module): ModuleIR =
-    elaborateModule(module)
+  def elaborate[M <: Module](factory: ElabContext ?=> M): ModuleIR =
+    val ctx = new ElabContext("", this)
+    val module = factory(using ctx)
+    ctx.setModuleName(module.moduleName)
+    elaborateModule(module, ctx)
 
-  private[hdl] def elaborateSubmodule(module: Module): ModuleIR =
-    elaborateModule(module)
+  private[hdl] def elaborateSubmodule[M <: Module](module: M, ctx: ElabContext): ModuleIR =
+    elaborateModule(module, ctx)
 
-  private def elaborateModule(module: Module): ModuleIR =
+  private def elaborateModule[M <: Module](module: M, ctx: ElabContext): ModuleIR =
     val stack = elaboratingStack.get()
     val existing = elaborated.get(module)
     if existing != null then
@@ -93,9 +102,9 @@ class Elaborator:
     stack += module
     try
       println(s"[${Thread.currentThread().getName}] start ${module.moduleName}")
-      val ctx = new ElabContext(module.moduleName, this)
+      ctx.setModuleName(module.moduleName)
       discoverAndRegisterPorts(ctx, module)
-      module.body(using ctx)
+      module.body()
       val ir = ctx.build()
       println(s"[${Thread.currentThread().getName}] done ${module.moduleName}")
       future.complete(ir)
