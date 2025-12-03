@@ -190,6 +190,22 @@ def nested_module_check(): Unit =
   println(elaborator.emit(design))
   println("=" * 50)
 
+def inheritance_check(): Unit =
+  final case class SimpleIO(in: UInt, out: UInt) extends Bundle
+  class Abstract extends Module:
+    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))), Some("io"))
+    io.out := io.in
+
+  class Concrete extends Abstract:
+    io.out := io.in + io.in
+
+  val elaborator = new Elaborator
+  val concrete = new Concrete
+  val design = elaborator.elaborate(concrete)
+  println("=" * 50)
+  println(elaborator.emit(design))
+  println("=" * 50)
+
 @main def demo(): Unit =
   instantiation_check()
   hosttype_check()
@@ -197,3 +213,4 @@ def nested_module_check(): Unit =
   directionality_check()
   list_operation_check()
   nested_module_check()
+  inheritance_check()
