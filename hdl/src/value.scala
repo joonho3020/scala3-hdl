@@ -37,13 +37,6 @@ object Bool:
 
 trait Bundle extends ValueType
 
-final class Vec[T <: ValueType](val elem: T, val len: Int) extends ValueType:
-  override def toString(): String = s"Vec($elem, $len)"
-
-object Vec:
-  def apply[T <: ValueType](elem: T, len: Int): Vec[T] = new Vec(elem, len)
-  // TODO: Add foreach, map...
-
 trait DirLike[T <: ValueType]:
   def setAll(t: T, dir: Direction): T
   def flipAll(t: T): T
@@ -62,10 +55,6 @@ object DirLike:
   given DirLike[Bool] with
     def setAll(t: Bool, dir: Direction): Bool = new Bool(dir)
     def flipAll(t: Bool): Bool = new Bool(Direction.flip(t.dir))
-
-  given [A <: ValueType](using a: DirLike[A]): DirLike[Vec[A]] with
-    def setAll(t: Vec[A], dir: Direction): Vec[A] = Vec(a.setAll(t.elem, dir), t.len)
-    def flipAll(t: Vec[A]): Vec[A] = Vec(a.flipAll(t.elem), t.len)
 
   inline given [T <: Bundle](using m: Mirror.ProductOf[T]): DirLike[T] =
     new DirLike[T]:
