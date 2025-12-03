@@ -91,7 +91,7 @@ def literal_check(): Unit =
   ))((
     y = 3,
     x = 2,
-    i = (a = 4, b = 5))) // order of x and y are flipped
+    i = (a = 4, b = 5)))
   """
   assert(typeCheckErrors(invalidLitType3).nonEmpty)
 
@@ -101,7 +101,7 @@ def directionality_check(): Unit =
 
   val bundle_a = A(
     a = Input(UInt(Width(3))),
-    b = UInt(Width(4)) // defaults to Output
+    b = UInt(Width(4))
   )
 
   assert(bundle_a.a.dir == Direction.In)
@@ -115,8 +115,31 @@ def directionality_check(): Unit =
   assert(bundle_b.x.b.dir == Direction.In)
   assert(bundle_b.y.dir == Direction.Out)
 
+def module_check(): Unit =
+  final case class MultBySumIO(a: UInt, b: UInt, sum: UInt) extends Bundle
+  object MultBySumIO:
+    def apply(w: Int): MultBySumIO =
+      MultBySumIO(
+        a = Input(UInt(Width(w))),
+        b = Input(UInt(Width(w))),
+        sum = Output(UInt(Width(w)))
+      )
+
+  class MultBySum(width: Int, maxMult: Int) extends Module:
+    val io = IO(MultBySumIO(width))
+    val wires = Seq.fill(maxMult)(Wire(UInt(Width(width))))
+    wires.foreach(_ := io.a)
+    io.sum := wires.reduce(_ + _)
+
+  val top = MultBySum(4, 3)
+  val elaborator = new Elaborator
+  val design = elaborator.elaborate(top)
+  val rendered = elaborator.emit(design)
+  println(rendered)
+
 @main def demo(): Unit =
   instantiation_check()
   hosttype_check()
   literal_check()
   directionality_check()
+  module_check()

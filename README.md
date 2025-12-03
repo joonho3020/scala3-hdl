@@ -12,7 +12,6 @@ mill hdl.runMain hdl.compileTimeTypeTests
 - will things like automatic port construction & lazy modules work with this approach?
 - refactor???
 
-
 things to test:
 
 - io bundle directions
