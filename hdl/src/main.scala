@@ -127,7 +127,7 @@ def directionality_check(): Unit =
   assert(bundle_b.x.b.dir == Direction.In)
   assert(bundle_b.y.dir == Direction.Out)
 
-def module_check(): Unit =
+def list_operation_check(): Unit =
   final case class MultBySumIO(a: UInt, b: UInt, sum: UInt) extends Bundle
   object MultBySumIO:
     def apply(w: Int): MultBySumIO =
@@ -147,11 +147,61 @@ def module_check(): Unit =
   val elaborator = new Elaborator
   val design = elaborator.elaborate(top)
   val rendered = elaborator.emit(design)
+  println("=" * 50)
   println(rendered)
+  println("=" * 50)
+
+def nested_module_check(): Unit =
+  final case class SimpleIO(in: UInt, out: UInt) extends Bundle
+  class A extends Module:
+    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))), Some("io"))
+    io.out := io.in
+
+  class C extends Module:
+    val io = IO(SimpleIO(Input(UInt(Width(5))), Output(UInt(Width(5)))), Some("io"))
+    io.out := io.in
+
+  class B extends Module:
+    val io = IO(SimpleIO(Input(UInt(Width(6))), Output(UInt(Width(6)))), Some("io"))
+    val c = new C
+    io.out := io.in
+
+  class Top extends Module:
+    val io = IO(SimpleIO(Input(UInt(Width(7))), Output(UInt(Width(7)))), Some("io"))
+    val a0 = new A
+    val a1 = new A
+    val b = new B
+    io.out := io.in
+
+  val elaborator = new Elaborator
+  val top = new Top
+  val topDesign = elaborator.elaborate(top)
+  val a0Design = elaborator.elaborate(top.a0)
+  val a1Design = elaborator.elaborate(top.a1)
+  val bDesign = elaborator.elaborate(top.b)
+  val cDesign = elaborator.elaborate(top.b.c)
+
+  println("=" * 50)
+  println("Top:")
+  println(elaborator.emit(topDesign))
+  println()
+  println("A0:")
+  println(elaborator.emit(a0Design))
+  println()
+  println("A1:")
+  println(elaborator.emit(a1Design))
+  println()
+  println("B:")
+  println(elaborator.emit(bDesign))
+  println()
+  println("C:")
+  println(elaborator.emit(cDesign))
+  println("=" * 50)
 
 @main def demo(): Unit =
   instantiation_check()
   hosttype_check()
   literal_check()
   directionality_check()
-  module_check()
+  list_operation_check()
+  nested_module_check()

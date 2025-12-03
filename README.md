@@ -18,6 +18,7 @@ things to test:
 - connection type checking
 - reduce, foreach function test
 - remove body in module? just use constructors. see if inheritance btw modules work
+- type parameterized bundles, modules etc
 - parallel elaboration
     - check that all instances of a module with different params are all elaborated
 
