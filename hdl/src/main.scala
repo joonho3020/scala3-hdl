@@ -21,6 +21,18 @@ def instantiation_check(): Unit =
   println(s"ulit.getValue: ${ulit.getValue}")
 
 
+  inline val tc1 = """
+  val rg: HW[MyBundle] = Reg(mb)
+  val reg_x: HW[UInt] = rg.x
+  val reg_y: HW[UInt] = rg.y
+  val reg_i: HW[InnerBundle] = rg.i
+  val reg_i_a: HW[UInt] = rg.i.a
+  val reg_i_b: HW[UInt] = rg.i.b
+  """
+
+  assert(typeCheckErrors(tc1).isEmpty)
+
+
 def hosttype_check(): Unit =
   val inner_bundle_host_type: HostTypeOf[InnerBundle] = (
     a = 3,
