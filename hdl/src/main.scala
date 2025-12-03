@@ -163,39 +163,26 @@ def nested_module_check(): Unit =
 
   class B extends Module:
     val io = IO(SimpleIO(Input(UInt(Width(6))), Output(UInt(Width(6)))), Some("io"))
-    val c = new C
-    io.out := io.in
+    val c = Module(new C)
+    c.io.in := io.in
+    io.out := c.io.out
 
   class Top extends Module:
     val io = IO(SimpleIO(Input(UInt(Width(7))), Output(UInt(Width(7)))), Some("io"))
-    val a0 = new A
-    val a1 = new A
-    val b = new B
-    io.out := io.in
+    val a0 = Module(new A)
+    val a1 = Module(new A)
+    val b = Module(new B)
+    a0.io.in := io.in
+    a1.io.in := io.in
+    b.io.in := io.in
+
+    io.out := (a0.io.out + a1.io.out) + b.io.out
 
   val elaborator = new Elaborator
   val top = new Top
-  val topDesign = elaborator.elaborate(top)
-  val a0Design = elaborator.elaborate(top.a0)
-  val a1Design = elaborator.elaborate(top.a1)
-  val bDesign = elaborator.elaborate(top.b)
-  val cDesign = elaborator.elaborate(top.b.c)
-
+  val design = elaborator.elaborate(top)
   println("=" * 50)
-  println("Top:")
-  println(elaborator.emit(topDesign))
-  println()
-  println("A0:")
-  println(elaborator.emit(a0Design))
-  println()
-  println("A1:")
-  println(elaborator.emit(a1Design))
-  println()
-  println("B:")
-  println(elaborator.emit(bDesign))
-  println()
-  println("C:")
-  println(elaborator.emit(cDesign))
+  println(elaborator.emit(design))
   println("=" * 50)
 
 @main def demo(): Unit =

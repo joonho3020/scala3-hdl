@@ -19,12 +19,8 @@ final class ModuleBuilder:
   def snapshot: ElaboratedDesign =
     ElaboratedDesign(nodes.toVector, connections.toVector)
 
-abstract class Module:
-  private val builder = new ModuleBuilder
-  protected given ModuleBuilder = builder
-  private lazy val built: ElaboratedDesign =
-    builder.snapshot
-  final def design: ElaboratedDesign = built
+abstract class Module(using protected val builder: ModuleBuilder = new ModuleBuilder):
+  final def design: ElaboratedDesign = builder.snapshot
   protected def IO[T <: ValueType](t: T, name: Option[String] = None): Node[T] =
     builder.register(hdl.IO(t, name))
   protected def Wire[T <: ValueType](t: T, name: Option[String] = None): Node[T] =
@@ -33,6 +29,9 @@ abstract class Module:
     builder.register(hdl.Reg(t, name))
   protected def PrimOp[T <: ValueType](t: T, name: Option[String] = None): Node[T] =
     builder.register(hdl.PrimOp(t, name))
+
+object Module:
+  def apply[M <: Module](gen: => M)(using b: ModuleBuilder): M = gen
 
 extension [T <: ValueType](dst: Node[T])
   def :=(src: Node[T])(using b: ModuleBuilder): Unit =
