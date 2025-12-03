@@ -176,6 +176,11 @@ def nested_module_check(): Unit =
     a1.io.in := io.in
     b.io.in := io.in
 
+    inline val connectionTypeCheck = """
+    b.io.in := Lit[Bool](false)
+    """
+    assert(typeCheckErrors(connectionTypeCheck).nonEmpty)
+
     io.out := (a0.io.out + a1.io.out) + b.io.out
 
   val elaborator = new Elaborator
