@@ -206,6 +206,22 @@ def inheritance_check(): Unit =
   println(elaborator.emit(design))
   println("=" * 50)
 
+def type_parameterization_check(): Unit =
+  final case class SimpleIO[T <: ValueType](in: T, out: T) extends Bundle
+  class TypeParamModule[T <: ValueType](val t: T)(using DirLike[T]) extends Module:
+    val io = IO(SimpleIO[T](
+      in = Input(t),
+      out = Output(t)
+    ), Some("io"))
+    io.out := io.in
+
+  val elaborator = new Elaborator
+  val tp = new TypeParamModule(t = UInt(Width(3)))
+  val design = elaborator.elaborate(tp)
+  println("=" * 50)
+  println(elaborator.emit(design))
+  println("=" * 50)
+
 @main def demo(): Unit =
   instantiation_check()
   hosttype_check()
@@ -214,3 +230,4 @@ def inheritance_check(): Unit =
   list_operation_check()
   nested_module_check()
   inheritance_check()
+  type_parameterization_check()
