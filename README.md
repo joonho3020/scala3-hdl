@@ -17,9 +17,8 @@ things to test:
 
 - io bundle directions
 - connection type checking
-- `reduce`, `foreach` function test
-- see if inheritance btw modules work
-- type parameterization of modules
+- reduce, foreach function test
+- remove body in module? just use constructors. see if inheritance btw modules work
 - parallel elaboration
     - check that all instances of a module with different params are all elaborated
 

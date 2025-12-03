@@ -1,8 +1,6 @@
 package hdl
 
 import scala.NamedTuple
-import scala.deriving.Mirror
-import scala.compiletime.{constValue, erasedValue, error}
 import scala.language.dynamics
 
 type HostTypeOf[T] = T match
@@ -10,20 +8,6 @@ type HostTypeOf[T] = T match
   case Bool    => Boolean
   case Vec[t]  => Seq[HostTypeOf[t & ValueType]]
   case _       => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & ValueType]]
-
-type LabelsOf[T <: Bundle] = Mirror.ProductOf[T]#MirroredElemLabels
-type ElemsOf[T <: Bundle] = Mirror.ProductOf[T]#MirroredElemTypes
-
-type FieldTypeLookup[Name <: String, Labels <: Tuple, Elems <: Tuple] <: ValueType = (Labels, Elems) match
-  case (Name *: _, h *: _) => h & ValueType
-  case (_ *: lt, _ *: et) => FieldTypeLookup[Name, lt, et]
-  case _ => Nothing
-
-type FieldTypeOf[T <: Bundle, Name <: String] = FieldTypeLookup[Name, LabelsOf[T], ElemsOf[T]]
-
-type ElemOfVec[T <: ValueType] <: ValueType = T match
-  case Vec[e] => e & ValueType
-  case _ => Nothing
 
 enum NodeKind:
   case Wire, Reg, IO, Op, Lit

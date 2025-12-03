@@ -2,6 +2,7 @@ package hdl
 
 @main def elaborateTest(): Unit =
   import ConnectOps.*
+  import builder.*
   import Operations.*
   import scala.concurrent.{Await, Future}
   import scala.concurrent.duration.*
@@ -9,20 +10,20 @@ package hdl
 
   case class AdderIO(a: UInt, b: UInt, sum: UInt) extends Bundle
 
-  class Adder(width: Int)(using ElabContext) extends Module:
+  class Adder(width: Int) extends Module:
     val my_io = IO(AdderIO(
       a = Input(UInt(Width(width))),
       b = Input(UInt(Width(width))),
       sum = Output(UInt(Width(width + 1)))
     ))
-    def body(): Unit =
+    def body(using ctx: ElabContext): Unit =
       val temp = Wire(UInt(Width(width + 1)))
       temp := my_io.a
       my_io.sum := temp
 
   val elaborator = Elaborator()
-  def makeAdder(using ElabContext): Adder = new Adder(8)
-  val ir = elaborator.elaborate(makeAdder)
+  val adder = Adder(8)
+  val ir = elaborator.elaborate(adder)
 
   println("=" * 50)
   println("Adder IR")
@@ -34,20 +35,91 @@ package hdl
   ir.body.foreach(s => println(s"  $s"))
 
   println("\n" + "=" * 50)
+  println("Bundle Wire and Reg Test")
+  println("=" * 50)
+
+  case class DataBundle(valid: Bool, data: UInt) extends Bundle
+  case class NestedBundle(ctrl: DataBundle, status: UInt) extends Bundle
+
+  class BundleTest extends Module:
+    val io = IO(AdderIO(
+      a = Input(UInt(Width(8))),
+      b = Input(UInt(Width(8))),
+      sum = Output(UInt(Width(9)))
+    ))
+
+    def body(using ctx: ElabContext): Unit =
+      val bundleType = DataBundle(
+        valid = Bool(),
+        data = UInt(Width(8))
+      )
+      val dataWire = Wire(bundleType)
+      val dataWire2 = Wire(bundleType)
+
+      val nestedType = NestedBundle(
+        ctrl = DataBundle(
+          valid = Bool(),
+          data = UInt(Width(16))
+        ),
+        status = UInt(Width(4))
+      )
+      val nestedReg = Reg(nestedType)
+
+      dataWire.valid := Lit(Bool())(true)
+      dataWire.data := io.a
+      nestedReg.ctrl.valid := dataWire.valid
+      nestedReg.ctrl.data := dataWire.data
+      nestedReg.status := io.b
+      dataWire := dataWire2
+      dataWire := Lit(bundleType)((valid = false, data = BigInt(3)))
+      io.sum := nestedReg.status
+
+  val bundleTest = BundleTest()
+  val bundleIR = elaborator.elaborate(bundleTest)
+
+  println(s"Module: ${bundleIR.name}")
+  println("Ports:")
+  bundleIR.ports.foreach(p => println(s"  ${p.dir} ${p.name}: ${p.tpe}"))
+  println("Body:")
+  bundleIR.body.foreach(s => println(s"  $s"))
+
+  println("\n" + "=" * 50)
+  println("Bundle Port Structure Test")
+  println("=" * 50)
+
+  case class InnerBundle2(a: UInt, b: UInt) extends Bundle
+  case class ComplexBundle(foo: UInt, bar: InnerBundle2) extends Bundle
+
+  class BundlePortTop extends Module:
+    val io = IO(ComplexBundle(
+      foo = Input(UInt(Width(3))),
+      bar = InnerBundle2(
+        a = Output(UInt(Width(2))),
+        b = Output(UInt(Width(4)))
+      )
+    ))
+    def body(using ctx: ElabContext): Unit =
+      io.bar.a := io.foo
+      io.bar.b := io.foo
+
+  val bundlePortTop = BundlePortTop()
+  val bundlePortIR = elaborator.elaborate(bundlePortTop)
+  bundlePortIR.ports.foreach(p => println(s"  ${p.dir} ${p.name}: ${p.tpe}"))
+
+  println("\n" + "=" * 50)
   println("Submodule Instantiation Test")
   println("=" * 50)
 
-  class NestedModule(width: Int)(using ElabContext) extends Module:
+  class NestedModule(width: Int) extends Module:
     val io = IO(AdderIO(
       a = Input(UInt(Width(width))),
       b = Input(UInt(Width(width))),
       sum = Output(UInt(Width(width + 1)))
     ))
-    def body(): Unit =
-      def makeA(using ElabContext): Adder = new Adder(width + 1)
-      def makeB(using ElabContext): Adder = new Adder(width)
-      val ma = Instantiate(makeA)
-      val mb = Instantiate(makeB)
+
+    def body(using ctx: ElabContext): Unit =
+      val ma = Module(new Adder(width + 1))
+      val mb = Module(new Adder(width))
       val ra = Reg(UInt(Width(width)))
       ra := io.a
       ma.my_io.a := io.a
@@ -57,8 +129,8 @@ package hdl
       io.sum := ma.my_io.sum + mb.my_io.sum
 
   val modulesBefore = elaborator.modules.toSet
-  def makeNested(using ElabContext): NestedModule = new NestedModule(4)
-  val nestedIR = elaborator.elaborate(makeNested)
+  val nested = NestedModule(4)
+  val nestedIR = elaborator.elaborate(nested)
 
   println(s"Module: ${nestedIR.name}")
   println("Ports:")
@@ -75,49 +147,39 @@ package hdl
 
   case class LinkIO(in: UInt, out: UInt) extends Bundle
 
-  class Leaf(id: Int)(using ElabContext) extends Module:
+  class Leaf(id: Int) extends Module:
     val io = IO(LinkIO(
       in = Input(UInt(Width(4))),
       out = Output(UInt(Width(4)))
     ))
-    def body(): Unit =
+    def body(using ctx: ElabContext): Unit =
       io.out := io.in
 
-  class Fanout(level: Int, fanout: Int)(using ElabContext) extends Module:
+  class Fanout(level: Int, fanout: Int) extends Module:
     val io = IO(LinkIO(
       in = Input(UInt(Width(4))),
       out = Output(UInt(Width(4)))
     ))
-    def body(): Unit =
-      val children = (0 until fanout).map { i =>
-        def makeLeaf(using ElabContext): Leaf = new Leaf(level * 10 + i)
-        Instantiate(makeLeaf)
-      }
+    def body(using ctx: ElabContext): Unit =
+      val children = (0 until fanout).map(i => Module(new Leaf(level * 10 + i)))
       children.foreach(c => c.io.in := io.in)
       val sum = children.map(c => c.io.out).reduce(_ + _)
       io.out := sum
 
-  class Deep(levels: Int, fanout: Int)(using ElabContext) extends Module:
+  class Deep(levels: Int, fanout: Int) extends Module:
     val io = IO(LinkIO(
       in = Input(UInt(Width(4))),
       out = Output(UInt(Width(4)))
     ))
-    def body(): Unit =
+    def body(using ctx: ElabContext): Unit =
       if levels == 0 then
         io.out := io.in
       else
-        val branches = (0 until fanout).map { _ =>
-          def makeDeep(using ElabContext): Deep = new Deep(levels - 1, fanout)
-          Instantiate(makeDeep)
-        }
+        val branches = (0 until fanout).map(_ => Module(new Deep(levels - 1, fanout)))
         branches.foreach(b => b.io.in := io.in)
         io.out := io.in
 
   val parallelElab = Elaborator()
-  def makeRootDeep(using ElabContext): Deep = new Deep(3, 2)
-  def makeRootFanout(using ElabContext): Fanout = new Fanout(2, 3)
-  val tasks = Seq(
-    Future(parallelElab.elaborate(makeRootDeep)),
-    Future(parallelElab.elaborate(makeRootFanout))
-  )
+  val roots = Seq(Deep(3, 2), Fanout(2, 3))
+  val tasks = roots.map(r => Future(parallelElab.elaborate(r)))
   Await.result(Future.sequence(tasks), 60.seconds)
