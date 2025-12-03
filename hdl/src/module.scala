@@ -7,11 +7,15 @@ final case class ElaboratedDesign(nodes: Seq[Node[?]], connections: Seq[Connecti
 final class ModuleBuilder:
   private val nodes = collection.mutable.ArrayBuffer.empty[Node[?]]
   private val connections = collection.mutable.ArrayBuffer.empty[Connection]
+  private val names = collection.mutable.Map.empty[Node[?], String]
   def register[T <: ValueType](n: Node[T]): Node[T] =
     nodes += n
+    n.name.foreach(names.update(n, _))
     n
   def connect(dst: Node[?], src: Node[?]): Unit =
     connections += Connection(dst, src)
+  def nameOf(n: Node[?], fallback: String): String =
+    names.getOrElse(n, fallback)
   def snapshot: ElaboratedDesign =
     ElaboratedDesign(nodes.toVector, connections.toVector)
 
@@ -36,7 +40,7 @@ extension [T <: ValueType](dst: Node[T])
 
 extension (lhs: Node[UInt])
   def +(rhs: Node[UInt])(using b: ModuleBuilder): Node[UInt] =
-    val out = b.register(hdl.PrimOp(UInt(lhs.tpe.w)))
+    val out = b.register(hdl.PrimOp(UInt(lhs.tpe.w), Some("+")))
     b.connect(out, lhs)
     b.connect(out, rhs)
     out
@@ -46,14 +50,28 @@ final class Elaborator:
   def emit(design: ElaboratedDesign): String =
     val ids = new java.util.IdentityHashMap[Node[?], String]()
     design.nodes.zipWithIndex.foreach { case (n, i) => ids.put(n, s"n$i") }
-    val nodesStr = design.nodes.zipWithIndex.map { case (n, i) =>
-      val id = s"n$i"
-      val nameStr = n.name.fold("")(s => s":$s")
-      s"$id ${n.kind} ${n.tpe}$nameStr"
+    def fmt(n: Node[?]): String =
+      n.name.orElse(Option(ids.get(n))).getOrElse(s"${n.kind}")
+    val decls = design.nodes.zipWithIndex.map { case (n, i) =>
+      val nm = fmt(n)
+      val kindStr = n.kind match
+        case NodeKind.IO     => "io"
+        case NodeKind.Reg    => "reg"
+        case NodeKind.Wire   => "wire"
+        case NodeKind.PrimOp => "op"
+        case NodeKind.Lit    => "lit"
+      s"$kindStr $nm: ${n.tpe}"
     }
-    val connsStr = design.connections.map { c =>
-      val dstId = Option(ids.get(c.dst)).getOrElse("?")
-      val srcId = Option(ids.get(c.src)).getOrElse("?")
-      s"$dstId <= $srcId"
+    val opStmts = design.nodes.filter(_.kind == NodeKind.PrimOp).map { op =>
+      val inputs = design.connections.filter(_.dst eq op).map(_.src)
+      val lhs = fmt(op)
+      val opSym = op.name.getOrElse("+")
+      val rhs = inputs.map(fmt).mkString(s" $opSym ")
+      s"$lhs = $rhs"
     }
-    (nodesStr ++ connsStr).mkString("\n")
+    val assigns = design.connections.filter(_.dst.kind != NodeKind.PrimOp).map { c =>
+      val dstId = fmt(c.dst)
+      val srcId = fmt(c.src)
+      s"$dstId := $srcId"
+    }
+    (decls ++ opStmts ++ assigns).mkString("\n")
