@@ -17,6 +17,14 @@ type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] <: ValueTy
   case (_ *: lt, _ *: et)  => FieldTypeFromTuple[lt, et, L]
   case _                   => Nothing & ValueType
 
+inline def indexOfLabel[Labels <: Tuple, L <: String & Singleton]: Int =
+  inline erasedValue[Labels] match
+    case _: (L *: t)      => 0
+    case _: (_ *: tail)   =>
+      val idx = indexOfLabel[tail, L]
+      if idx < 0 then -1 else idx + 1
+    case _: EmptyTuple    => -1
+
 final case class Node[T <: ValueType](tpe: T, kind: NodeKind, name: Option[String] = None, literal: Option[Any] = None) extends Selectable:
   type Fields = NamedTuple.Map[NamedTuple.From[T], [X] =>> Node[X & ValueType]]
 
@@ -26,8 +34,7 @@ final case class Node[T <: ValueType](tpe: T, kind: NodeKind, name: Option[Strin
         type Labels = m.MirroredElemLabels
         type Elems = m.MirroredElemTypes
         type FT = FieldTypeFromTuple[Labels, Elems, L]
-        val labels = constValueTuple[Labels].toArray
-        val idx = labels.indexOf(constValue[L])
+        val idx = indexOfLabel[Labels, L]
         if idx < 0 then throw new NoSuchElementException(s"${tpe.getClass.getName} has no field '${label}'")
         val childT = tpe.asInstanceOf[Product].productElement(idx).asInstanceOf[FT]
         val childLit = literal.map(_.asInstanceOf[Product].productElement(idx))
