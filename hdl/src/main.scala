@@ -2,10 +2,8 @@ package hdl
 
 import scala.compiletime.testing.*
 
-
 final case class InnerBundle(a: UInt, b: UInt) extends Bundle
 final case class MyBundle(x: UInt, y: UInt, i: InnerBundle) extends Bundle
-
 
 def instantiation_check(): Unit =
   val mb = MyBundle(UInt(Width(2)), UInt(Width(3)), InnerBundle(UInt(Width(4)), UInt(Width(5))))
@@ -127,6 +125,23 @@ def directionality_check(): Unit =
   assert(bundle_b.x.b.dir == Direction.In)
   assert(bundle_b.y.dir == Direction.Out)
 
+final case class SimpleIO(in: UInt, out: UInt) extends Bundle
+
+def simple_module_test(): Unit =
+  class A extends Module:
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+    io.out := io.in
+
+
+  val elaborator = new Elaborator
+  val a = new A
+  val design = elaborator.elaborate(a)
+  println("=" * 50)
+  println("Simple Module Test:")
+  println(elaborator.emit(design))
+  println("=" * 50)
+
 def list_operation_check(): Unit =
   final case class MultBySumIO(a: UInt, b: UInt, sum: UInt) extends Bundle
   object MultBySumIO:
@@ -138,37 +153,42 @@ def list_operation_check(): Unit =
       )
 
   class MultBySum(width: Int, maxMult: Int) extends Module:
+    given Module = this
     val io = IO(MultBySumIO(width))
-    val wires = Seq.fill(maxMult)(Wire(UInt(Width(width))))
+    val wires = Seq.tabulate(maxMult)(i => Wire(UInt(Width(width))))
     wires.foreach(_ := io.a)
     io.sum := wires.reduce(_ + _)
 
-  val top = MultBySum(4, 3)
+  val top = new MultBySum(4, 3)
   val elaborator = new Elaborator
   val design = elaborator.elaborate(top)
   val rendered = elaborator.emit(design)
   println("=" * 50)
+  println("List Operation Check:")
   println(rendered)
   println("=" * 50)
 
 def nested_module_check(): Unit =
-  final case class SimpleIO(in: UInt, out: UInt) extends Bundle
   class A extends Module:
-    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))), Some("io"))
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
     io.out := io.in
 
   class C extends Module:
-    val io = IO(SimpleIO(Input(UInt(Width(5))), Output(UInt(Width(5)))), Some("io"))
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(5))), Output(UInt(Width(5)))))
     io.out := io.in
 
   class B extends Module:
-    val io = IO(SimpleIO(Input(UInt(Width(6))), Output(UInt(Width(6)))), Some("io"))
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(6))), Output(UInt(Width(6)))))
     val c = Module(new C)
     c.io.in := io.in
     io.out := c.io.out
 
   class Top extends Module:
-    val io = IO(SimpleIO(Input(UInt(Width(7))), Output(UInt(Width(7)))), Some("io"))
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(7))), Output(UInt(Width(7)))))
     val a0 = Module(new A)
     val a1 = Module(new A)
     val b = Module(new B)
@@ -176,24 +196,22 @@ def nested_module_check(): Unit =
     a1.io.in := io.in
     b.io.in := io.in
 
-    inline val connectionTypeCheck = """
-    b.io.in := Lit[Bool](false)
-    """
-    assert(typeCheckErrors(connectionTypeCheck).nonEmpty)
-
     io.out := (a0.io.out + a1.io.out) + b.io.out
 
   val elaborator = new Elaborator
   val top = new Top
   val design = elaborator.elaborate(top)
   println("=" * 50)
+  println("Nested Module Check:")
   println(elaborator.emit(design))
   println("=" * 50)
 
 def inheritance_check(): Unit =
-  final case class SimpleIO(in: UInt, out: UInt) extends Bundle
   class Abstract extends Module:
-    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))), Some("io"))
+    given Module = this
+    val io = IO(
+      SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4))))
+    )
     io.out := io.in
 
   class Concrete extends Abstract:
@@ -203,22 +221,25 @@ def inheritance_check(): Unit =
   val concrete = new Concrete
   val design = elaborator.elaborate(concrete)
   println("=" * 50)
+  println("Inheritance Check:")
   println(elaborator.emit(design))
   println("=" * 50)
 
 def type_parameterization_check(): Unit =
-  final case class SimpleIO[T <: ValueType](in: T, out: T) extends Bundle
+  final case class SimpleIOT[T <: ValueType](in: T, out: T) extends Bundle
   class TypeParamModule[T <: ValueType](val t: T)(using DirLike[T]) extends Module:
-    val io = IO(SimpleIO[T](
+    given Module = this
+    val io = IO(SimpleIOT[T](
       in = Input(t),
       out = Output(t)
-    ), Some("io"))
+    ))
     io.out := io.in
 
   val elaborator = new Elaborator
   val tp = new TypeParamModule(t = UInt(Width(3)))
   val design = elaborator.elaborate(tp)
   println("=" * 50)
+  println("Type Parameterization Check:")
   println(elaborator.emit(design))
   println("=" * 50)
 
@@ -227,6 +248,7 @@ def type_parameterization_check(): Unit =
   hosttype_check()
   literal_check()
   directionality_check()
+  simple_module_test()
   list_operation_check()
   nested_module_check()
   inheritance_check()

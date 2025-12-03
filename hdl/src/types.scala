@@ -3,6 +3,7 @@ package hdl
 import scala.deriving.*
 import scala.compiletime.*
 import scala.NamedTuple
+import scala.language.dynamics
 
 enum NodeKind:
   case Reg, Wire, IO, PrimOp, Lit
@@ -17,16 +18,17 @@ type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] <: ValueTy
   case (_ *: lt, _ *: et)  => FieldTypeFromTuple[lt, et, L]
   case _                   => Nothing & ValueType
 
-// inline def indexOfLabel[Labels <: Tuple, L <: String & Singleton]: Int =
-// inline erasedValue[Labels] match
-// case _: (L *: t)      => 0
-// case _: (_ *: tail)   =>
-// val idx = indexOfLabel[tail, L]
-// if idx < 0 then -1 else idx + 1
-// case _: EmptyTuple    => -1
-
-final case class Node[T <: ValueType](tpe: T, kind: NodeKind, name: Option[String] = None, literal: Option[Any] = None) extends Selectable:
+final case class Node[T <: ValueType](
+  tpe: T,
+  kind: NodeKind,
+  name: Option[String] = None,
+  literal: Option[Any] = None,
+  private var _ref: String = ""
+) extends Selectable:
   type Fields = NamedTuple.Map[NamedTuple.From[T], [X] =>> Node[X & ValueType]]
+
+  def setRef(ref: String) = _ref = ref
+  def ref: String = _ref
 
   transparent inline def selectDynamic[L <: String & Singleton](label: L) =
     summonFrom {
@@ -41,7 +43,8 @@ final case class Node[T <: ValueType](tpe: T, kind: NodeKind, name: Option[Strin
         if idx < 0 then throw new NoSuchElementException(s"${tpe.getClass.getName} has no field '${label}'")
         val childT = tpe.asInstanceOf[Product].productElement(idx).asInstanceOf[FT]
         val childLit = literal.map(_.asInstanceOf[Product].productElement(idx))
-        Node(childT, kind, None, childLit)
+        val childRef = if _ref.isEmpty then constValue[L] else s"$_ref.${constValue[L]}"
+        Node(childT, kind, Some(constValue[L]), childLit, childRef)
       case _ =>
         throw new NoSuchElementException(s"${tpe.getClass.getName} has no field '${label}'")
     }
@@ -58,18 +61,32 @@ final case class Node[T <: ValueType](tpe: T, kind: NodeKind, name: Option[Strin
 type HW[T <: ValueType] = Node[T]
 type Lit[T <: ValueType] = Node[T]
 
+object Node:
+  def apply[T <: ValueType](
+    tpe: T,
+    kind: NodeKind,
+    name: Option[String] = None,
+    literal: Option[Any] = None,
+    ref: String = ""
+  ): Node[T] =
+    new Node(tpe, kind, name, literal, if ref.isEmpty then name.getOrElse("") else ref)
+
 object Reg:
-  def apply[T <: ValueType](t: T, name: Option[String] = None): Node[T] = Node(t, NodeKind.Reg, name)
+  def apply[T <: ValueType](t: T, name: Option[String] = None): Node[T] =
+    Node(t, NodeKind.Reg, name, None, name.getOrElse(""))
 
 object Wire:
-  def apply[T <: ValueType](t: T, name: Option[String] = None): Node[T] = Node(t, NodeKind.Wire, name)
+  def apply[T <: ValueType](t: T, name: Option[String] = None): Node[T] =
+    Node(t, NodeKind.Wire, name, None, name.getOrElse(""))
 
 object IO:
-  def apply[T <: ValueType](t: T, name: Option[String] = None): Node[T] = Node(t, NodeKind.IO, name)
+  def apply[T <: ValueType](t: T, name: Option[String] = None): Node[T] =
+    Node(t, NodeKind.IO, name, None, name.getOrElse(""))
 
 object PrimOp:
-  def apply[T <: ValueType](t: T, name: Option[String] = None): Node[T] = Node(t, NodeKind.PrimOp, name)
+  def apply[T <: ValueType](t: T, name: Option[String] = None): Node[T] =
+    Node(t, NodeKind.PrimOp, name, None, name.getOrElse(""))
 
 object Lit:
   def apply[T <: ValueType](t: T, name: Option[String] = None)(payload: HostTypeOf[T]): Node[T] =
-    Node(t, NodeKind.Lit, name, Some(payload))
+    Node(t, NodeKind.Lit, name, Some(payload), name.getOrElse(""))
