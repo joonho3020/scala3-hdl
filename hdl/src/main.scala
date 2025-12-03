@@ -17,7 +17,7 @@ def instantiation_check(): Unit =
   val reg_i: HW[InnerBundle] = reg.i
   val reg_i_a: HW[UInt] = reg_i.a
 
-  val ulit = Lit[UInt](3)
+  val ulit = Lit(UInt(Width(3)))(3)
   println(s"ulit.getValue: ${ulit.getValue}")
 
 
@@ -36,12 +36,13 @@ def hosttype_check(): Unit =
   assert(typeCheckErrors(invalidHostType).nonEmpty)
 
 def literal_check(): Unit =
-  val ilit = Lit[InnerBundle]((a = 3, b = 4))
+  val ilit = Lit(InnerBundle(UInt(Width(4)), UInt(Width(5))))((a = 3, b = 4))
 
   val ilit_a: Lit[UInt] = ilit.a
 
   inline val invalidLitType = """
-  val ilit_a: Lit[Bool] = ilit.a // Type mismatch doesn't compile
+  val ilit = hdl.Lit(hdl.InnerBundle(hdl.UInt(hdl.Width(4)), hdl.UInt(hdl.Width(5))))((a = 3, b = 4))
+  val ilit_a: hdl.Lit[hdl.Bool] = ilit.a
   """
   assert(typeCheckErrors(invalidLitType).nonEmpty)
 
@@ -49,7 +50,11 @@ def literal_check(): Unit =
   assert(ilit_a.getValue == 3)
   assert(ilit.getValue == (3, 4))
 
-  val mylit = Lit[MyBundle]((
+  val mylit = Lit(MyBundle(
+    x = UInt(Width(2)),
+    y = UInt(Width(3)),
+    i = InnerBundle(UInt(Width(4)), UInt(Width(5)))
+  ))((
     x = 2,
     y = 3,
     i = (a = 4, b = 5)))
@@ -60,8 +65,16 @@ def literal_check(): Unit =
 
   val mylit_i: Lit[InnerBundle] = mylit.i
   inline val invalidLitType2 = """
-  val mylit_i: Lit[MyBundle] = mylit.i // Type mismatch doesn't compile
-  val mylit_i: Lit[UInt] = mylit.i // Type mismatch doesn't compile
+  val mylit = hdl.Lit(hdl.MyBundle(
+    x = hdl.UInt(hdl.Width(2)),
+    y = hdl.UInt(hdl.Width(3)),
+    i = hdl.InnerBundle(hdl.UInt(hdl.Width(4)), hdl.UInt(hdl.Width(5)))
+  ))((
+    x = 2,
+    y = 3,
+    i = (a = 4, b = 5)))
+  val mylit_i1: hdl.Lit[hdl.MyBundle] = mylit.i
+  val mylit_i2: hdl.Lit[hdl.UInt] = mylit.i
   """
   assert(typeCheckErrors(invalidLitType2).nonEmpty)
 
@@ -71,10 +84,14 @@ def literal_check(): Unit =
   assert(mylit.i.b.getValue == 5)
 
   inline val invalidLitType3 = """
-  val mylit_2 = Lit[MyBundle]((
+  val mylit_2 = hdl.Lit(hdl.MyBundle(
+    x = hdl.UInt(hdl.Width(2)),
+    y = hdl.UInt(hdl.Width(3)),
+    i = hdl.InnerBundle(hdl.UInt(hdl.Width(4)), hdl.UInt(hdl.Width(5)))
+  ))((
     y = 3,
     x = 2,
-    i = (a = 4, b = 5))) // Doesn't compile because we mixed up the order of named tuples
+    i = (a = 4, b = 5))) // order of x and y are flipped
   """
   assert(typeCheckErrors(invalidLitType3).nonEmpty)
 
@@ -103,4 +120,3 @@ def directionality_check(): Unit =
   hosttype_check()
   literal_check()
   directionality_check()
-
