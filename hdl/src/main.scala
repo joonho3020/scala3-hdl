@@ -234,7 +234,11 @@ def inheritance_check(): Unit =
 
 def type_parameterization_check(): Unit =
   final case class SimpleIOT[T <: ValueType](in: T, out: T) extends Bundle
-  class TypeParamModule[T <: ValueType](val t: T)(using DirLike[T]) extends Module:
+  class TypeParamModule[T <: ValueType](
+    val t: T
+  )(
+    using DirLike[T]
+  ) extends Module:
     given Module = this
     val io = IO(SimpleIOT[T](
       in = Input(t),
@@ -268,6 +272,25 @@ def conditional_generation_check(): Unit =
   val design_false = elaborator.elaborate(add_false)
   println(elaborator.emit(design_false))
 
+def adhoc_io_check(): Unit =
+  class A(w: Int) extends Module:
+    given Module = this
+    val nt = (
+      a = Input(UInt(Width(w))),
+      b = Input(UInt(Width(w))),
+      c = Output(UInt(Width(w + 1)))) extends Bundle
+
+    val io = IO(Bundle((
+      a = Input(UInt(Width(w))),
+      b = Input(UInt(Width(w))),
+      c = Output(UInt(Width(w + 1)))
+    )))
+    io.c := io.a + io.b
+  val elaborator = new Elaborator
+  val add_true = new A(w = 2)
+  val design = elaborator.elaborate(add_true)
+  println(elaborator.emit(design))
+
 @main def demo(): Unit =
   instantiation_check()
   hosttype_check()
@@ -279,3 +302,4 @@ def conditional_generation_check(): Unit =
   inheritance_check()
   type_parameterization_check()
   conditional_generation_check()
+  adhoc_io_check()

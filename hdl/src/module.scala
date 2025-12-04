@@ -5,6 +5,8 @@ import scala.concurrent.{Future, Await}
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
 import scala.util.hashing.MurmurHash3
+import java.security.MessageDigest
+import java.util.HexFormat
 
 final case class ElaboratedDesign(
   name: String,
@@ -42,10 +44,11 @@ final class ModuleBuilder(val moduleName: String):
 
 abstract class Module:
   private[hdl] val _builder: ModuleBuilder = new ModuleBuilder(moduleName)
+  private var _elabKey: Option[String] = None
 
   def moduleName: String = getClass.getSimpleName.stripSuffix("$")
-  def elaborationKey: String =
-    Module.uniqueKey(moduleName, this)
+  def elaborationKey: String = _elabKey.getOrElse(Module.autoElaborationKey(this))
+  private[hdl] def setElabKey(k: String): Unit = _elabKey = Some(k)
 
   private[hdl] def getBuilder: ModuleBuilder = _builder
 
@@ -67,8 +70,8 @@ object Module:
   inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
     ${ Macros.moduleInstImpl('gen, 'parent) }
 
-  private def uniqueKey(base: String, mod: Module): String =
-    s"$base@${System.identityHashCode(mod)}"
+  private def autoElaborationKey(mod: Module): String =
+    s"${mod.moduleName}@${System.identityHashCode(mod)}"
 
 extension [T <: ValueType](dst: Node[T])
   def :=(src: Node[?])(using m: Module): Unit =
@@ -223,14 +226,47 @@ object Macros:
   )(using q: Quotes): Expr[M] =
     import q.reflect.*
     val nameOpt = findEnclosingValName
+    val key = buildModuleKey[M](gen)
     '{
       val submod = $gen
       val m = $parent
+      submod.setElabKey(${Expr(key)})
       val instName = m.getBuilder.allocateName(${Expr(nameOpt)}, "inst")
       m.getBuilder.addBody(s"inst $instName of ${submod.moduleName}")
       setSubmodulePrefix(submod, instName)
       submod
     }
+
+  private def buildModuleKey[M: Type](gen: Expr[M])(using Quotes): String =
+    import quotes.reflect.*
+    def extractArgs(term: Term): List[Term] =
+      term match
+        case Inlined(_, _, expr) => extractArgs(expr)
+        case Apply(_, args) => args
+        case TypeApply(fun, _) => extractArgs(fun)
+        case _ => Nil
+
+    def renderTerm(term: Term): String =
+      term match
+        case Literal(c) => c.value match
+          case null => "null"
+          case b: Boolean => b.toString
+          case b: Byte => b.toString
+          case s: Short => s.toString
+          case i: Int => i.toString
+          case l: Long => l.toString
+          case f: Float => f.toString
+          case d: Double => d.toString
+          case s: String => s
+          case other => other.toString
+        case _ => term.show(using Printer.TreeShortCode)
+
+    val tpeStr = Type.show[M]
+    val args = extractArgs(gen.asTerm)
+    val rendered = args.map(renderTerm)
+    val body = s"$tpeStr|${rendered.mkString(",")}"
+    val hash = MurmurHash3.stringHash(body)
+    s"$tpeStr#$hash"
 
 def emitPortDecl(name: String, tpe: ValueType, prefix: String = ""): Seq[String] =
   val fullName = if prefix.isEmpty then name else s"$prefix.$name"
