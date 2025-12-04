@@ -133,6 +133,10 @@ def simple_module_test(): Unit =
     val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
     io.out := io.in
 
+    inline val tc1 = """
+    io.out := Lit(Bool)(false)
+    """
+    assert(typeCheckErrors(tc1).nonEmpty)
 
   val elaborator = new Elaborator
   val a = new A
