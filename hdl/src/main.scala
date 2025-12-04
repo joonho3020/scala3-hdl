@@ -250,6 +250,24 @@ def type_parameterization_check(): Unit =
   println(elaborator.emit(design))
   println("=" * 50)
 
+def conditional_generation_check(): Unit =
+  class A(add: Boolean) extends Module:
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+    if (add)
+      io.out := io.in + io.in
+    else
+      io.out := io.in
+
+  val elaborator = new Elaborator
+  val add_true = new A(add = true)
+  val design = elaborator.elaborate(add_true)
+  println(elaborator.emit(design))
+
+  val add_false = new A(add = false)
+  val design_false = elaborator.elaborate(add_false)
+  println(elaborator.emit(design_false))
+
 @main def demo(): Unit =
   instantiation_check()
   hosttype_check()
@@ -260,3 +278,4 @@ def type_parameterization_check(): Unit =
   nested_module_check()
   inheritance_check()
   type_parameterization_check()
+  conditional_generation_check()
