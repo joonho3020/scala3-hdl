@@ -1,6 +1,10 @@
 package hdl
 
 import scala.quoted.*
+import scala.concurrent.{Future, Await}
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.Duration
+import scala.util.hashing.MurmurHash3
 
 final case class ElaboratedDesign(
   name: String,
@@ -40,6 +44,8 @@ abstract class Module:
   private[hdl] val _builder: ModuleBuilder = new ModuleBuilder(moduleName)
 
   def moduleName: String = getClass.getSimpleName.stripSuffix("$")
+  def elaborationKey: String =
+    Module.uniqueKey(moduleName, this)
 
   private[hdl] def getBuilder: ModuleBuilder = _builder
 
@@ -61,6 +67,9 @@ object Module:
   inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
     ${ Macros.moduleInstImpl('gen, 'parent) }
 
+  private def uniqueKey(base: String, mod: Module): String =
+    s"$base@${System.identityHashCode(mod)}"
+
 extension [T <: ValueType](dst: Node[T])
   def :=(src: Node[?])(using m: Module): Unit =
     src.kind match
@@ -76,25 +85,32 @@ extension [T <: ValueType](lhs: Node[T])
     Node(lhs.tpe, NodeKind.PrimOp, Some(tmpName), None, tmpName)
 
 final class Elaborator:
-  private val elaborated = collection.mutable.Map.empty[String, ElaboratedDesign]
+  private implicit val ec: ExecutionContext = ExecutionContext.global
+  private val elaborated =
+    collection.concurrent.TrieMap.empty[String, Future[ElaboratedDesign]]
 
   def elaborate(top: Module): ElaboratedDesign =
-    elaborateModule(top)
-    elaborated(top.moduleName)
+    Await.result(elaborateAsync(top), Duration.Inf)
 
-  private[hdl] def elaborateModule(mod: Module): Unit =
-    if elaborated.contains(mod.moduleName) then return
-    discoverSubmodules(mod)
-    elaborated(mod.moduleName) = mod.design
+  private[hdl] def elaborateAsync(mod: Module): Future[ElaboratedDesign] =
+    val key = mod.elaborationKey
+    elaborated.getOrElseUpdate(key, Future:
+      val subs = discoverSubmodules(mod)
+      val subFuts = subs.map(elaborateAsync)
+      subFuts.foreach(f => Await.result(f, Duration.Inf))
+      mod.design
+    )
 
-  private def discoverSubmodules(mod: Module): Unit =
+  private def discoverSubmodules(mod: Module): Seq[Module] =
+    val buf = collection.mutable.ArrayBuffer.empty[Module]
     val clazz = mod.getClass
     for field <- clazz.getDeclaredFields do
       field.setAccessible(true)
       field.get(mod) match
         case submod: Module if submod ne mod =>
-          elaborateModule(submod)
+          buf += submod
         case _ => ()
+    buf.toSeq
 
   def emit(design: ElaboratedDesign): String =
     val sb = new StringBuilder
@@ -105,7 +121,7 @@ final class Elaborator:
     sb.toString
 
   def emitAll: String =
-    elaborated.values.map(emit).mkString("\n")
+    elaborated.values.map(f => emit(Await.result(f, Duration.Inf))).mkString("\n")
 
 object Macros:
   def findEnclosingValName(using q: Quotes): Option[String] =
