@@ -272,24 +272,47 @@ def conditional_generation_check(): Unit =
   val design_false = elaborator.elaborate(add_false)
   println(elaborator.emit(design_false))
 
-def adhoc_io_check(): Unit =
-  class A(w: Int) extends Module:
-    given Module = this
-    val nt = (
-      a = Input(UInt(Width(w))),
-      b = Input(UInt(Width(w))),
-      c = Output(UInt(Width(w + 1)))) extends Bundle
+// def adhoc_io_check(): Unit =
+//   class A(w: Int) extends Module:
+//     given Module = this
+//     val io = IO(Bundle((
+//       a = Input(UInt(Width(w))),
+//       b = Input(UInt(Width(w))),
+//       c = Output(UInt(Width(w + 1)))
+//     )))
+//     io.c := io.a + io.b
+//   val elaborator = new Elaborator
+//   val add_true = new A(w = 2)
+//   val design = elaborator.elaborate(add_true)
+//   println(elaborator.emit(design))
 
-    val io = IO(Bundle((
-      a = Input(UInt(Width(w))),
-      b = Input(UInt(Width(w))),
-      c = Output(UInt(Width(w + 1)))
-    )))
-    io.c := io.a + io.b
-  val elaborator = new Elaborator
-  val add_true = new A(w = 2)
-  val design = elaborator.elaborate(add_true)
-  println(elaborator.emit(design))
+
+// def optional_io_check(): Unit =
+//    class A(debug: Boolean, w: Int) extends Module:
+//      given Module = this
+//      case class MyBundle(
+//        a: Option[UInt],
+//        b: UInt,
+//        c: UInt) extends Bundle
+// 
+//      val io = IO(MyBundle(
+//        a = if (debug) Some(Input(UInt(Width(w)))) else None,
+//        b = Input(UInt(Width(w))),
+//        c = Output(UInt(Width(w + 1)))
+//      ))
+//      io.c := io.b
+//      io.a.map(x => {
+//        io.c := x + io.b
+//      })
+// 
+//    val elaborator = new Elaborator
+//    val add_true = new A(debug = true, w = 2)
+//    val design = elaborator.elaborate(add_true)
+//    println(elaborator.emit(design))
+// 
+//    val add_false = new A(debug = false, w = 2)
+//    val design_2 = elaborator.elaborate(add_false)
+//    println(elaborator.emit(design_2))
 
 @main def demo(): Unit =
   instantiation_check()
@@ -302,4 +325,5 @@ def adhoc_io_check(): Unit =
   inheritance_check()
   type_parameterization_check()
   conditional_generation_check()
-  adhoc_io_check()
+// optional_io_check()
+// adhoc_io_check()
