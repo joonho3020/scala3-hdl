@@ -155,8 +155,10 @@ def list_operation_check(): Unit =
   class MultBySum(width: Int, maxMult: Int) extends Module:
     given Module = this
     val io = IO(MultBySumIO(width))
-    val wires = Seq.tabulate(maxMult)(i => Wire(UInt(Width(width))))
+// val wires = Seq.tabulate(maxMult)(i => Wire(UInt(Width(width))))
+    val wires = Seq.fill(maxMult)(Wire(UInt(Width(width))))
     wires.foreach(_ := io.a)
+    wires(0) := wires(1) + Lit(UInt(Width(width)))(3)
     io.sum := wires.reduce(_ + _)
 
   val top = new MultBySum(4, 3)
@@ -215,7 +217,8 @@ def inheritance_check(): Unit =
     io.out := io.in
 
   class Concrete extends Abstract:
-    io.out := io.in + io.in
+    val add_result = io.in + io.in + io.in
+    io.out := add_result
 
   val elaborator = new Elaborator
   val concrete = new Concrete

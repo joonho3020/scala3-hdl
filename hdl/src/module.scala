@@ -2,16 +2,33 @@ package hdl
 
 import scala.quoted.*
 
-final case class ElaboratedDesign(name: String, ports: Seq[String], body: Seq[String])
+final case class ElaboratedDesign(
+  name: String,
+  ports: Seq[String],
+  body: Seq[String]
+)
 
 final class ModuleBuilder(val moduleName: String):
   private val ports = collection.mutable.ArrayBuffer.empty[String]
   private val body = collection.mutable.ArrayBuffer.empty[String]
+  private val usedNames = collection.mutable.Set.empty[String]
   private var tempCounter = 0
 
   def freshName(prefix: String): String =
     tempCounter += 1
-    s"${prefix}_$tempCounter"
+    val candidate = s"${prefix}_$tempCounter"
+    if usedNames.contains(candidate) then freshName(prefix)
+    else
+      usedNames += candidate
+      candidate
+
+  def allocateName(name: Option[String], prefix: String): String =
+    name.filter(_.nonEmpty).flatMap { n =>
+      if usedNames.contains(n) then None
+      else
+        usedNames += n
+        Some(n)
+    }.getOrElse(freshName(prefix))
 
   def addPort(stmt: String): Unit = ports += stmt
   def addBody(stmt: String): Unit = body += stmt
@@ -35,6 +52,9 @@ abstract class Module:
   protected inline def Reg[T <: ValueType](inline t: T): Node[T] =
     ${ Macros.regImpl('t, 'this) }
 
+  protected inline def Lit[T <: ValueType](inline t: T)(inline payload: HostTypeOf[T]): Node[T] =
+    ${ Macros.litImpl('t, 'payload, 'this) }
+
   final def design: ElaboratedDesign = _builder.snapshot
 
 object Module:
@@ -43,7 +63,11 @@ object Module:
 
 extension [T <: ValueType](dst: Node[T])
   def :=(src: Node[?])(using m: Module): Unit =
-    m.getBuilder.addBody(s"connect ${dst.ref}, ${src.ref}")
+    src.kind match
+      case hdl.NodeKind.Lit =>
+        m.getBuilder.addBody(s"connect ${dst.ref}, ${src}")
+      case _ =>
+        m.getBuilder.addBody(s"connect ${dst.ref}, ${src.ref}")
 
 extension [T <: ValueType](lhs: Node[T])
   def +(rhs: Node[?])(using m: Module): Node[T] =
@@ -84,26 +108,53 @@ final class Elaborator:
     elaborated.values.map(emit).mkString("\n")
 
 object Macros:
-  def findEnclosingValName(using q: Quotes): String =
+  def findEnclosingValName(using q: Quotes): Option[String] =
     import q.reflect.*
-    def searchOwners(sym: Symbol): String =
-      if sym.isNoSymbol then "unnamed"
-      else if sym.isValDef then sym.name
-      else searchOwners(sym.owner)
-    searchOwners(Symbol.spliceOwner.owner)
+    val nodeTpe = TypeRepr.of[Node[?]]
+    val moduleTpe = TypeRepr.of[Module]
+
+    def isNodeVal(sym: Symbol): Boolean =
+      if !sym.isTerm || sym.isPackageDef then false
+      else
+        sym.tree match
+          case v: ValDef =>
+            val tpe = v.tpt.tpe
+            report.info(s"isNodeVal tpe=${tpe}")
+            tpe != null && ((tpe <:< nodeTpe) || (tpe <:< moduleTpe))
+          case _ => false
+
+    def searchOwners(sym: Symbol, crossedSyntheticDef: Boolean): Option[String] =
+      val flagStr = sym.flags.show
+      val nodeMatch = isNodeVal(sym)
+      report.info(s"findEnclosingValName visiting=${sym.fullName} flags=$flagStr nodeVal=$nodeMatch crossedSynthetic=$crossedSyntheticDef isTerm=${sym.isTerm} isPackageDef=${sym.isPackageDef}")
+      if sym.isNoSymbol then
+        report.info("findEnclosingValName reached no symbol")
+        None
+      else if sym.isValDef && nodeMatch && !sym.flags.is(Flags.Synthetic) && !sym.flags.is(Flags.Artifact) then
+        if crossedSyntheticDef then
+          report.info(s"findEnclosingValName dropping ${sym.name} due to synthetic boundary")
+          None
+        else
+          report.info(s"findEnclosingValName found=${sym.name}")
+          Some(sym.name)
+      else
+        val crossed = crossedSyntheticDef || (sym.isDefDef && (sym.flags.is(Flags.Synthetic) || sym.flags.is(Flags.Artifact)))
+        searchOwners(sym.owner, crossed)
+    searchOwners(Symbol.spliceOwner.owner, false)
 
   def ioImpl[T <: ValueType: Type](
     t: Expr[T],
     mod: Expr[Module]
   )(using q: Quotes): Expr[Node[T]] =
     import q.reflect.*
-    val name = findEnclosingValName
+    val nameOpt = findEnclosingValName
     '{
       val tpe = $t
       val m = $mod
-      val portDecls = emitPortDecl(${Expr(name)}, tpe)
+      val baseName = m.getBuilder.allocateName(${Expr(nameOpt)}, "io")
+      val portDecls = emitPortDecl(baseName, tpe)
       portDecls.foreach(m.getBuilder.addPort)
-      Node(tpe, NodeKind.IO, Some(${Expr(name)}), None, ${Expr(name)})
+      Node(tpe, NodeKind.IO, Some(baseName), None, baseName)
     }
 
   def wireImpl[T <: ValueType: Type](
@@ -111,12 +162,13 @@ object Macros:
     mod: Expr[Module]
   )(using q: Quotes): Expr[Node[T]] =
     import q.reflect.*
-    val name = findEnclosingValName
+    val nameOpt = findEnclosingValName
     '{
       val tpe = $t
       val m = $mod
-      m.getBuilder.addBody(s"wire ${${Expr(name)}} : ${formatType(tpe)}")
-      Node(tpe, NodeKind.Wire, Some(${Expr(name)}), None, ${Expr(name)})
+      val wireName = m.getBuilder.allocateName(${Expr(nameOpt)}, "wire")
+      m.getBuilder.addBody(s"wire $wireName : ${formatType(tpe)}")
+      Node(tpe, NodeKind.Wire, Some(wireName), None, wireName)
     }
 
   def regImpl[T <: ValueType: Type](
@@ -124,12 +176,29 @@ object Macros:
     mod: Expr[Module]
   )(using q: Quotes): Expr[Node[T]] =
     import q.reflect.*
-    val name = findEnclosingValName
+    val nameOpt = findEnclosingValName
     '{
       val tpe = $t
       val m = $mod
-      m.getBuilder.addBody(s"reg ${${Expr(name)}} : ${formatType(tpe)}, clock")
-      Node(tpe, NodeKind.Reg, Some(${Expr(name)}), None, ${Expr(name)})
+      val regName = m.getBuilder.allocateName(${Expr(nameOpt)}, "reg")
+      m.getBuilder.addBody(s"reg $regName : ${formatType(tpe)}, clock")
+      Node(tpe, NodeKind.Reg, Some(regName), None, regName)
+    }
+
+  def litImpl[T <: ValueType: Type](
+    t: Expr[T],
+    payload: Expr[HostTypeOf[T]],
+    mod: Expr[Module]
+  )(using q: Quotes): Expr[Node[T]] =
+    import q.reflect.*
+    val nameOpt = findEnclosingValName
+    '{
+      val tpe = $t
+      val value = $payload
+      val m = $mod
+      val litName = m.getBuilder.allocateName(${Expr(nameOpt)}, "lit")
+      m.getBuilder.addBody(s"node $litName = ${formatLiteral(tpe, value)}")
+      Node(tpe, NodeKind.Lit, Some(litName), Some(value), litName)
     }
 
   def moduleInstImpl[M <: Module: Type](
@@ -137,12 +206,13 @@ object Macros:
     parent: Expr[Module]
   )(using q: Quotes): Expr[M] =
     import q.reflect.*
-    val name = findEnclosingValName
+    val nameOpt = findEnclosingValName
     '{
       val submod = $gen
       val m = $parent
-      m.getBuilder.addBody(s"inst ${${Expr(name)}} of ${submod.moduleName}")
-      setSubmodulePrefix(submod, ${Expr(name)})
+      val instName = m.getBuilder.allocateName(${Expr(nameOpt)}, "inst")
+      m.getBuilder.addBody(s"inst $instName of ${submod.moduleName}")
+      setSubmodulePrefix(submod, instName)
       submod
     }
 
@@ -187,3 +257,8 @@ def formatType(tpe: ValueType): String = tpe match
       s"$fieldDir$fieldName : ${formatType(fieldVal)}"
     }
     s"{ ${fields.mkString(", ")} }"
+
+def formatLiteral(tpe: ValueType, value: Any): String = tpe match
+  case u: UInt => s"UInt<${u.w.value}>($value)"
+  case _: Bool => s"Bool($value)"
+  case _ => value.toString
