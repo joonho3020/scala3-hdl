@@ -357,3 +357,398 @@ Takeaway:
 
 ### Trial 4
 
+Separate `BundleIf` from `Bundle` representation.
+`case class`s will extend `BundleIf` and we will wrap `BundleIf` as `Bundle`s for setting literals and subfield access.
+
+
+```scala
+trait BundleIf
+
+// NOTE: Literals assume that the BundleIf is pure. THat is, all fields are of HWData
+// and there is no mixing with Scala's library types such as Option, Seq, List
+class Bundle[T <: BundleIf](
+  val tpe: T,
+  var kind: NodeKind = NodeKind.Unset,
+  var name: Option[String] = None,
+  var literal: Option[Any] = None,
+  private var _ref: String = ""
+) extends Selectable with HWData:
+
+  type FieldToNode[X] = X match
+    case BundleIf => Bundle[X]
+    case _           => X
+// type FieldToNode[X] = X match
+// case _           => X
+
+  type Fields = NamedTuple.Map[NamedTuple.From[T], [X] =>> FieldToNode[X]]
+
+  def setRef(ref: String) = _ref = ref
+  def ref: String = _ref
+
+  transparent inline def selectDynamic[L <: String & Singleton](label: L): Any =
+    summonFrom {
+      case m: Mirror.ProductOf[T] =>
+        type Labels = m.MirroredElemLabels
+        type Elems = m.MirroredElemTypes
+        type FT = FieldTypeFromTuple[Labels, Elems, L]
+
+        val labels = constValueTuple[Labels].toArray
+        val idx = labels.indexOf(constValue[L])
+
+        if idx < 0 then throw new NoSuchElementException(s"${tpe.getClass.getName} has no field '${label}'")
+        val childT = tpe.asInstanceOf[Product].productElement(idx).asInstanceOf[FT]
+        val childLit = literal.map(_.asInstanceOf[Product].productElement(idx))
+        val childRef = if _ref.isEmpty then constValue[L] else s"$_ref.${constValue[L]}"
+        inline erasedValue[FT] match
+          case _: BundleIf =>
+            new Bundle(tpe = childT.asInstanceOf[FT & BundleIf], literal = childLit)
+          case _: HWData =>
+            childLit.map(lit => childT.asInstanceOf[FT & HWData].setLitVal(lit))
+            childT
+          case _ =>
+            childT
+      case _ =>
+        throw new NoSuchElementException(s"${tpe.getClass.getName} has no field '${label}'")
+    }
+```
+
+There is a tension when using `BundleIf` and `Bundle`.
+
+The first problem is that directionality is set on `Bundle`.
+Hence, if we want to perform `x = Flipped(Bundle(bundle_a))`, the type of `x` must be `Bundle[A]`, not `A` (`final case class B(x: Bundle[A], y: Bool) extends BundleIf`).
+However, this causes an error on `bundle_b_lit` because `Lit` expects to use `BundleIf` (i.e. the case class representing the bundle shapes) to create host types given a bundle type:
+
+```scala
+final case class A(a: UInt, b: UInt) extends BundleIf
+final case class B(x: Bundle[A], y: Bool) extends BundleIf
+
+val bundle_a = A(
+  a = Input(UInt(Width(3))),
+  b = UInt(Width(4))
+)
+
+assert(bundle_a.a.dir == Direction.In)
+assert(bundle_a.b.dir == Direction.Out)
+
+val bundle_b = B(
+  x = Flipped(Bundle(bundle_a)),
+  y = Output(Bool(()))
+)
+assert(bundle_b.x.a.dir == Direction.In)
+assert(bundle_b.x.b.dir == Direction.Out)
+assert(bundle_b.y.dir   == Direction.Out)
+
+val bundle_b_lit = Lit(bundle_b)((
+  x = (
+    a = BigInt(1),
+    b = BigInt(2),
+  ),
+  y = false))
+```
+
+We can't do this either because `Flipped` works on the `Bundle` type, not on `BundleIf`.
+Hence, `bundle_b` will complain as we cannot call `Flipped` on `bundle_a` which is a `BundleIf`.
+
+  ```scala
+final case class A(a: UInt, b: UInt) extends BundleIf
+final case class B(x: A, y: Bool) extends BundleIf
+
+val bundle_a = A(
+  a = Input(UInt(Width(3))),
+  b = UInt(Width(4))
+)
+
+assert(bundle_a.a.dir == Direction.In)
+assert(bundle_a.b.dir == Direction.Out)
+
+val bundle_b = B(
+  x = Flipped(bundle_a),
+  y = Output(Bool(()))
+)
+// assert(bundle_b.x.a.dir == Direction.In)
+// assert(bundle_b.x.b.dir == Direction.Out)
+// assert(bundle_b.y.dir   == Direction.Out)
+
+val bundle_b_lit = Lit(bundle_b)((
+  x = (
+    a = BigInt(1),
+    b = BigInt(2),
+  ),
+  y = false))
+```
+
+Another problem with is approach is that it is hampered by various corner cases when trying to mix things with Scala types.
+
+
+```scala
+case class A(
+  a: UInt,
+  b: UInt
+) extends BundleIf
+
+case class B(
+  x: UInt,
+  y: A,
+  z: Option[A],
+) extends BundleIf
+
+val b = Reg(Bundle(B))
+val b_x: UInt = b.x // so far so good
+
+val b_y: Bundle[A] = b.y // since A is of a BundleIf type, the return type is also wrapped as a Bundle
+
+val b_z: Option[A] = b.z // Since z is of a Option type, it is returned without being wrapped as a Bundle
+b_z.map(z: A => { // Now when we access z, the type is A, not Bundle[A]. Inconsistency between return types is not desirable
+  z
+})
+```
+
+
+### Trial 5
+
+We could merge the `BundleIf` and `Bundle` interface into one like below:
+
+```scala
+// NOTE: Literals assume that the BundleIf is pure. That is, all fields are of HWData
+// and there is no mixing with Scala's library types such as Option, Seq, List
+trait Bundle[T] extends Selectable with HWData with HasDirectionality { self: T =>
+  type FieldToNode[X] = X match
+    case _           => X
+
+  type Fields = NamedTuple.Map[NamedTuple.From[T], [X] =>> FieldToNode[X]]
+
+  transparent inline def selectDynamic[L <: String & Singleton](label: L): Any =
+    summonFrom {
+      case m: Mirror.ProductOf[T] =>
+        type Labels = m.MirroredElemLabels
+        type Elems = m.MirroredElemTypes
+        type FT = FieldTypeFromTuple[Labels, Elems, L]
+
+        val labels = constValueTuple[Labels].toArray
+        val idx = labels.indexOf(constValue[L])
+
+        if idx < 0 then throw new NoSuchElementException(s"${self.getClass.getName} has no field '${label}'")
+        val childT = self.asInstanceOf[Product].productElement(idx).asInstanceOf[FT]
+        val childLit = literal.map(_.asInstanceOf[Product].productElement(idx))
+        val childRef = constValue[L]
+        println(s"label: ${label} childRef: ${childRef} childLit: ${childLit}")
+        inline erasedValue[FT] match
+          case _: HWData =>
+            childLit.map(lit => childT.asInstanceOf[FT & HWData].setLitVal(lit))
+            childT
+          case _ =>
+            childT
+      case _ =>
+        throw new NoSuchElementException(s"${self.getClass.getName} has no field '${label}'")
+    }
+
+  def setLitVal(payload: Any): Unit =
+    this.literal = Some(payload.asInstanceOf[HostTypeOf[T]])
+
+  def getLitVal: HostTypeOf[T] =
+    literal match
+      case Some(v) => v.asInstanceOf[HostTypeOf[T]]
+      case None    => throw new NoSuchElementException("Node does not carry a literal value")
+}
+```
+
+
+Now, the `Bundle` types can be mixed flexibly with the Scala library types (e.g. `Option`, `Seq`), without which destroys the point of an eDSL.
+However, attentive readers will notice that accessing fields of `Bundle` instantiations will now just use the static `case class` fields instead of our `selectDynamic` function.
+`selectDynamic` only works when there are no matching static fields.
+
+
+
+```scala
+def optional_io_directionality_check(): Unit =
+  case class OptBundle(
+    a: Option[UInt],
+    b: UInt,
+    c: UInt) extends Bundle[OptBundle]
+
+  case class MyBundleIf(
+    opt: OptBundle,
+    lux: UInt) extends Bundle[MyBundleIf]
+
+  case class SimpleBundle(a: UInt, b: UInt) extends Bundle[SimpleBundle]
+  case class OptBundle2(
+    a: Option[SimpleBundle],
+    b: UInt,
+    c: UInt,
+    d: UInt,
+  ) extends Bundle[OptBundle2]
+
+  val io_2 = IO(
+    Flipped(OptBundle2(
+      a = Some(Flipped(SimpleBundle(
+        a = Input(UInt(Width(2))),
+        b = Output(UInt(Width(3)))
+      ))),
+      b = UInt(Width(4)),
+      c = Input(UInt(Width(5))),
+      d = Flipped(Input(UInt(Width(6))))
+  )))
+  io_2.a.get.a
+  io_2.a.map(x => println(s"io.a = ${x}"))
+
+// println(s"io_2 ${io_2}")
+
+  assert(io_2.dir == Direction.Flipped)
+  assert(io_2.b.dir == Direction.Default)
+  assert(io_2.c.dir == Direction.Flipped)
+  assert(io_2.d.dir == Direction.Default)
+  assert(io_2.a.get.dir == Direction.Flipped)
+  assert(io_2.a.get.a.dir == Direction.Flipped)
+  assert(io_2.a.get.b.dir == Direction.Default)
+
+
+def parameterized_bundle_check(): Unit =
+  case class Security(
+    pixelstealing: UInt,
+    bpred: UInt,
+    prefetcher: UInt
+  ) extends Bundle[Security]
+
+  case class SecurityParams(w: Int)
+
+  object Security:
+    def apply(p: SecurityParams): Security =
+      Security(
+        pixelstealing = UInt(Width(p.w)),
+        bpred = UInt(Width(p.w)),
+        prefetcher = UInt(Width(p.w)))
+
+  case class Student(
+    age: UInt,
+    female: Bool
+  ) extends Bundle[Student]
+
+  object Student:
+    def apply(): Student =
+      Student(
+        age = UInt(Width(3)),
+        female = Bool())
+
+  case class Child(
+    age: UInt,
+  ) extends Bundle[Child]
+
+  object Child:
+    def apply(): Child =
+      Child(age = Input(UInt(Width(4))))
+
+  case class Fletcher(
+    private val security: Security,
+    private val students: Seq[Student],
+    private val childs: Option[Seq[Child]]
+  ) extends Bundle[Fletcher]
+
+  case class FletcherParams(
+    num_students: Int,
+    has_child: Boolean,
+    num_childs: Int,
+    security: SecurityParams
+  )
+
+  object Fletcher:
+    def apply(p: FletcherParams): Fletcher =
+      Fletcher(
+        security = Input(Security(p.security)),
+        students = Seq.fill(p.num_students)(
+          Flipped(Student())
+        ),
+        childs = if (p.has_child) Some(Seq.fill(p.num_childs)(Output(Child())))
+                 else None)
+
+  val fp = FletcherParams(
+    num_students = 3,
+    num_childs = 2,
+    has_child = true,
+    SecurityParams(w = 5))
+
+  val fletcher = Reg(Fletcher(fp))
+
+  val students: Seq[Student] = fletcher.students
+  val age: UInt = fletcher.students(0).age
+
+  assert(fletcher.security.dir == Direction.Flipped)
+
+  fletcher.students.foreach(x => {
+    assert(x.dir        == Direction.Flipped)
+    assert(x.age.dir    == Direction.Default)
+    assert(x.female.dir == Direction.Default)
+  })
+
+  fletcher.childs.map(child => {
+    child.foreach(c => {
+      assert(c.age.dir == Direction.Flipped)
+    })
+  })
+
+  // Note: Literals with Scala types doesn't work. In theary, we can add support
+  // later by extending `HostTypeOf` and `FieldToNode` for `Bundle`.
+  //
+  // val fletcher_lit = Lit(Fletcher(fp))((
+  //   security = (
+  //     pixelstealing = BigInt(1),
+  //     bpred = BigInt(2),
+  //     prefetcher = BigInt(3)
+  //   ),
+  //   students = Seq.fill(fp.num_students)((
+  //     age = BigInt(4),
+  //     female = true
+  //   )),
+  //   childs = if (fp.has_child) Some(
+  //     Seq.fill(fp.num_childs)((
+  //       age = BigInt(5)
+  //     )))
+  //     else None
+  // ))
+```
+
+There are ways around this though:
+
+- First, we can declare the fields of the case class as `private val`. As these fields cannot be accessed from the outside, field accesses will now default to `selectDynamic`
+- Next, we can force the type to be of a `Bundle` type by simply wrapping it: `Bundle(MyBundleIf)`
+
+```scala
+// Need to declare fields as `private val` so that when accessing subfields, selectDynamic in Bundle gets called
+// This is only required for Literal types where you want to propagate the top level literal payload to subfields
+final case class InnerBundleIf(private val a: UInt, private val b: UInt) extends Bundle[InnerBundleIf]
+final case class MyBundleIf(private val x: UInt, private val y: UInt, private val i: InnerBundleIf) extends Bundle[MyBundleIf]
+
+val mb = MyBundleIf(
+x = UInt(Width(2)),
+y = UInt(Width(3)),
+i = InnerBundleIf(
+  a = UInt(Width(4)),
+  b = UInt(Width(5))
+))
+
+val reg = Reg(mb)
+println(s"$reg")
+
+val reg_x: UInt = reg.x
+val reg_y: UInt = reg.y
+val x: InnerBundleIf = reg.i
+
+val ulit = Lit(UInt(Width(3)))(3)
+assert(ulit.getLitVal == BigInt(3))
+
+inline val tc1 = """
+val rg: MyBundleIf = Reg(mb)
+val reg_x: UInt = rg.x
+val reg_y: UInt = rg.y
+val reg_i: InnerBundleIf = rg.i
+val reg_i_a: UInt = rg.i.a
+val reg_i_b: UInt = rg.i.b
+"""
+assert(typeCheckErrors(tc1).isEmpty)
+```
+
+Although not entirely desirable as we are now forcing the library users certain behaviors for things to work properly, its not the worse thing in the world.
+This is because, `selectDynamic` is only required for `Bundle`s that want to generate literals.
+To propagate the top level literal payload to its childs, `selectDynamic` is required.
+
+Another caviat of this `Literal` approach is that the `Bundle`s that define literals must consist of purely `HWData` types. No mixing with `Scala` types are allowed as we are using typeclass derivation to create literal shapes.
+In theory, we can add support for important Scala library types in the future for derivation, but we should leave this as is for now.
