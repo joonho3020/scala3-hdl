@@ -8,8 +8,8 @@ import scala.util.NotGiven
 trait Bundle
 
 object Bundle:
-  def apply[T <: NamedTuple.AnyNamedTuple](fields: T): T =
-    fields
+  def apply[T <: NamedTuple.AnyNamedTuple](fields: T): NamedTuple.From[T] =
+    fields.asInstanceOf[NamedTuple.From[T]]
 
 type HostTypeOf[T] = T match
   case UInt => Int
