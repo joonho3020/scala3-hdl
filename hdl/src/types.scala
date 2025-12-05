@@ -13,10 +13,10 @@ type HostTypeOf[T] = T match
   case Bool  => Boolean
   case _     => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & HWData]]
 
-type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] <: HWData = (Labels, Elems) match
-  case (L *: _, h *: _)    => h & HWData
+type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] = (Labels, Elems) match
+  case (L *: _, h *: _)    => h
   case (_ *: lt, _ *: et)  => FieldTypeFromTuple[lt, et, L]
-  case _                   => Nothing & HWData
+  case _                   => Nothing
 
 final case class Node[T <: HWData](
   tpe: T,
@@ -25,12 +25,16 @@ final case class Node[T <: HWData](
   literal: Option[Any] = None,
   private var _ref: String = ""
 ) extends Selectable:
-  type Fields = NamedTuple.Map[NamedTuple.From[T], [X] =>> Node[X & HWData]]
+  type FieldToNode[X] = X match
+    case HWData => Node[X]
+    case _           => X
+
+  type Fields = NamedTuple.Map[NamedTuple.From[T], [X] =>> FieldToNode[X]]
 
   def setRef(ref: String) = _ref = ref
   def ref: String = _ref
 
-  transparent inline def selectDynamic[L <: String & Singleton](label: L) =
+  transparent inline def selectDynamic[L <: String & Singleton](label: L): Any =
     summonFrom {
       case m: Mirror.ProductOf[T] =>
         type Labels = m.MirroredElemLabels
@@ -44,7 +48,11 @@ final case class Node[T <: HWData](
         val childT = tpe.asInstanceOf[Product].productElement(idx).asInstanceOf[FT]
         val childLit = literal.map(_.asInstanceOf[Product].productElement(idx))
         val childRef = if _ref.isEmpty then constValue[L] else s"$_ref.${constValue[L]}"
-        Node(childT, kind, Some(constValue[L]), childLit, childRef)
+        inline erasedValue[FT] match
+          case _: HWData =>
+            Node(childT.asInstanceOf[FT & HWData], kind, Some(constValue[L]), childLit, childRef)
+          case _ =>
+            childT
       case _ =>
         throw new NoSuchElementException(s"${tpe.getClass.getName} has no field '${label}'")
     }

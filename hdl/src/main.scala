@@ -30,99 +30,125 @@ def instantiation_check(): Unit =
 
   assert(typeCheckErrors(tc1).isEmpty)
 
-// def hosttype_check(): Unit =
-// val inner_bundle_host_type: HostTypeOf[InnerBundle] = (
-// a = 3,
-// b = 2,
+def hosttype_check(): Unit =
+  val inner_bundle_host_type: HostTypeOf[InnerBundle] = (
+    a = 3,
+    b = 2,
+  )
+  println(s"inner_bundle_host_type ${inner_bundle_host_type}")
+
+  inline val invalidHostType = """
+  val inner_bundle_host_type: hdl.HostTypeOf[hdl.InnerBundle] = (
+    a = 3, b = 2, c = 4
+  )
+  """
+  assert(typeCheckErrors(invalidHostType).nonEmpty)
+
+def literal_check(): Unit =
+  val ilit = Lit(InnerBundle(UInt(Width(4)), UInt(Width(5))))((a = 3, b = 4))
+
+  val ilit_a: Lit[UInt] = ilit.a
+
+  inline val invalidLitType = """
+  val ilit = hdl.Lit(hdl.InnerBundle(hdl.UInt(hdl.Width(4)), hdl.UInt(hdl.Width(5))))((a = 3, b = 4))
+  val ilit_a: hdl.Lit[hdl.Bool] = ilit.a
+  """
+  assert(typeCheckErrors(invalidLitType).nonEmpty)
+
+  assert(ilit.a.getValue == 3)
+  assert(ilit_a.getValue == 3)
+  assert(ilit.getValue == (3, 4))
+
+  val mylit = Lit(MyBundle(
+    x = UInt(Width(2)),
+    y = UInt(Width(3)),
+    i = InnerBundle(UInt(Width(4)), UInt(Width(5)))
+  ))((
+    x = 2,
+    y = 3,
+    i = (a = 4, b = 5)))
+
+  val mylit_x: Lit[UInt] = mylit.x
+  assert(mylit.x.getValue == 2)
+  assert(mylit_x.getValue == 2)
+
+  val mylit_i: Lit[InnerBundle] = mylit.i
+  inline val invalidLitType2 = """
+  val mylit = hdl.Lit(hdl.MyBundle(
+    x = hdl.UInt(hdl.Width(2)),
+    y = hdl.UInt(hdl.Width(3)),
+    i = hdl.InnerBundle(hdl.UInt(hdl.Width(4)), hdl.UInt(hdl.Width(5)))
+    ))((
+      x = 2,
+      y = 3,
+      i = (a = 4, b = 5)))
+    val mylit_i1: hdl.Lit[hdl.MyBundle] = mylit.i
+    val mylit_i2: hdl.Lit[hdl.UInt] = mylit.i
+    """
+  assert(typeCheckErrors(invalidLitType2).nonEmpty)
+
+  assert(mylit_i.getValue == (4, 5))
+  assert(mylit.i.getValue == (4, 5))
+  assert(mylit.i.a.getValue == 4)
+  assert(mylit.i.b.getValue == 5)
+
+  inline val invalidLitType3 = """
+  val mylit_2 = hdl.Lit(hdl.MyBundle(
+    x = hdl.UInt(hdl.Width(2)),
+    y = hdl.UInt(hdl.Width(3)),
+    i = hdl.InnerBundle(hdl.UInt(hdl.Width(4)), hdl.UInt(hdl.Width(5)))
+    ))((
+      y = 3,
+      x = 2,
+      i = (a = 4, b = 5)))
+    """
+  assert(typeCheckErrors(invalidLitType3).nonEmpty)
+
+def directionality_check(): Unit =
+  final case class A(a: UInt, b: UInt) extends Bundle
+  final case class B(x: A, y: Bool) extends Bundle
+
+  val bundle_a = A(
+    a = Input(UInt(Width(3))),
+    b = UInt(Width(4))
+  )
+
+  assert(bundle_a.a.dir == Direction.In)
+  assert(bundle_a.b.dir == Direction.Out)
+
+  val bundle_b = B(
+    x = Flipped(bundle_a),
+    y = Output(Bool(()))
+  )
+  assert(bundle_b.x.a.dir == Direction.Out)
+  assert(bundle_b.x.b.dir == Direction.In)
+  assert(bundle_b.y.dir == Direction.Out)
+
+
+def optional_io_directionality_check(): Unit =
+  case class OptBundle(
+    a: Option[UInt],
+    b: UInt,
+    c: UInt) extends Bundle
+
+  case class MyBundle(
+    opt: OptBundle,
+    lux: UInt) extends Bundle
+
+  val io = IO(MyBundle(
+    opt = Flipped(OptBundle(
+      a = Some(UInt(Width(3))),
+      b = UInt(Width(4)),
+      c = UInt(Width(5)))),
+    lux = UInt(Width(6))))
+
+
+// val io = IO(OptBundle(
+// a = Some(Flipped(UInt(Width(3)))),
+// b = UInt(Width(4)),
+// c = UInt(Width(5)))
 // )
-// println(s"inner_bundle_host_type ${inner_bundle_host_type}")
-
-// inline val invalidHostType = """
-// val inner_bundle_host_type: hdl.HostTypeOf[hdl.InnerBundle] = (
-// a = 3, b = 2, c = 4
-// )
-// """
-// assert(typeCheckErrors(invalidHostType).nonEmpty)
-
-// def literal_check(): Unit =
-// val ilit = Lit(InnerBundle(UInt(Width(4)), UInt(Width(5))))((a = 3, b = 4))
-
-// val ilit_a: Lit[UInt] = ilit.a
-
-// inline val invalidLitType = """
-// val ilit = hdl.Lit(hdl.InnerBundle(hdl.UInt(hdl.Width(4)), hdl.UInt(hdl.Width(5))))((a = 3, b = 4))
-// val ilit_a: hdl.Lit[hdl.Bool] = ilit.a
-// """
-// assert(typeCheckErrors(invalidLitType).nonEmpty)
-
-// assert(ilit.a.getValue == 3)
-// assert(ilit_a.getValue == 3)
-// assert(ilit.getValue == (3, 4))
-
-// val mylit = Lit(MyBundle(
-// x = UInt(Width(2)),
-// y = UInt(Width(3)),
-// i = InnerBundle(UInt(Width(4)), UInt(Width(5)))
-// ))((
-// x = 2,
-// y = 3,
-// i = (a = 4, b = 5)))
-
-// val mylit_x: Lit[UInt] = mylit.x
-// assert(mylit.x.getValue == 2)
-// assert(mylit_x.getValue == 2)
-
-// val mylit_i: Lit[InnerBundle] = mylit.i
-// inline val invalidLitType2 = """
-// val mylit = hdl.Lit(hdl.MyBundle(
-// x = hdl.UInt(hdl.Width(2)),
-// y = hdl.UInt(hdl.Width(3)),
-// i = hdl.InnerBundle(hdl.UInt(hdl.Width(4)), hdl.UInt(hdl.Width(5)))
-// ))((
-// x = 2,
-// y = 3,
-// i = (a = 4, b = 5)))
-// val mylit_i1: hdl.Lit[hdl.MyBundle] = mylit.i
-// val mylit_i2: hdl.Lit[hdl.UInt] = mylit.i
-// """
-// assert(typeCheckErrors(invalidLitType2).nonEmpty)
-
-// assert(mylit_i.getValue == (4, 5))
-// assert(mylit.i.getValue == (4, 5))
-// assert(mylit.i.a.getValue == 4)
-// assert(mylit.i.b.getValue == 5)
-
-// inline val invalidLitType3 = """
-// val mylit_2 = hdl.Lit(hdl.MyBundle(
-// x = hdl.UInt(hdl.Width(2)),
-// y = hdl.UInt(hdl.Width(3)),
-// i = hdl.InnerBundle(hdl.UInt(hdl.Width(4)), hdl.UInt(hdl.Width(5)))
-// ))((
-// y = 3,
-// x = 2,
-// i = (a = 4, b = 5)))
-// """
-// assert(typeCheckErrors(invalidLitType3).nonEmpty)
-
-// def directionality_check(): Unit =
-// final case class A(a: UInt, b: UInt) extends Bundle
-// final case class B(x: A, y: Bool) extends Bundle
-
-// val bundle_a = A(
-// a = Input(UInt(Width(3))),
-// b = UInt(Width(4))
-// )
-
-// assert(bundle_a.a.dir == Direction.In)
-// assert(bundle_a.b.dir == Direction.Out)
-
-// val bundle_b = B(
-// x = Flipped(bundle_a),
-// y = Output(Bool(()))
-// )
-// assert(bundle_b.x.a.dir == Direction.Out)
-// assert(bundle_b.x.b.dir == Direction.In)
-// assert(bundle_b.y.dir == Direction.Out)
+// io.a.map(x => println(s"io.a = ${x}"))
 
 // final case class SimpleIO(in: UInt, out: UInt) extends Bundle
 
@@ -158,7 +184,6 @@ def instantiation_check(): Unit =
 // class MultBySum(width: Int, maxMult: Int) extends Module:
 // given Module = this
 // val io = IO(MultBySumIO(width))
-val wires = Seq.tabulate(maxMult)(i => Wire(UInt(Width(width))))
 // val wires = Seq.fill(maxMult)(Wire(UInt(Width(width))))
 // wires.foreach(_ := io.a)
 // wires(0) := wires(1) + Lit(UInt(Width(width)))(3)
@@ -315,9 +340,10 @@ val wires = Seq.tabulate(maxMult)(i => Wire(UInt(Width(width))))
 
 @main def demo(): Unit =
   instantiation_check()
-// hosttype_check()
-// literal_check()
-// directionality_check()
+  hosttype_check()
+  literal_check()
+  directionality_check()
+  optional_io_directionality_check()
 // simple_module_test()
 // list_operation_check()
 // nested_module_check()
