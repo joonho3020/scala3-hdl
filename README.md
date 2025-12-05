@@ -190,6 +190,17 @@ def optional_io_check(): Unit =
      })
 ```
 
+## Uncertain APIs
+
+```scala
+// Does this even make sense???????
+def mixed_bundle(): Unit =
+    val mixed_bundle = Bundle(
+        a = UInt(Width(2)),
+        b = Lit(UInt(Width(3)))(4)
+    )
+```
+
 ---
 
 
@@ -342,3 +353,37 @@ In the above example, the type of `io.a` is `Node[Option[UInt]]`, hence we canno
 Takeaway:
 
 - Subfield access should return the type of the subfield unmodified
+
+
+### Trial 4
+
+#### Plan for Bundle, Reg, and Lit
+
+- Keep user-facing types as plain Scala shapes (`UInt`, `Bool`, `Bundle case classes`, `NamedTuples`) so subfields retain their Scala types and work with `Option`/`Seq` APIs
+- Track hardware metadata on leaf values (kind, name, literal) or in a side table. Avoid wrapping subfields in a generic `Node` that changes their types.
+
+## Bundle
+
+- Provide a marker trait `Bundle` for case-class bundles and a `Bundle.apply` helper for ad-hoc NamedTuple bundles; both should preserve field names for reflection.
+- Define a `Shape[T]`/`Traverse[T]` typeclass (derived via Mirror for products and by hand for Option/Seq/NamedTuple) to map/zip leaves while rebuilding the same outer type.
+- Use the shape to derive `HostTypeOf[T]` (host literal form) and to preserve field order for literal construction and subfield access.
+
+## Reg
+
+- Implement `Reg[T](t: T): T` by traversing `t` with `mapLeaves`, cloning each `LeafValue`, setting `kind = Reg`, and recording hierarchical names.
+- For bundles/collections, reconstruction yields the same Scala types; e.g., `reg.x` has type `UInt` (not `Reg[UInt]`), enabling Scala list operations.
+
+## Lit
+
+- Implement `Lit[T](t: T)(payload: HostTypeOf[T]): T` by zipping the type skeleton `t` with the host payload via `zipLeaves`, producing the same Scala shape with each leaf marked `kind = Lit` and carrying the literal bits.
+- Provide `getValue` on leaves plus an extension to rebuild host values for structured types, so nested bundle literals work (`mylit.i.a.getValue`).
+
+## Shared traversal utilities
+
+- Core operations: `mapLeaves(t)(f)` and `zipLeaves(t, host)(f)` derived from `Shape[T]`, reusable for Wire/IO/direction flipping.
+- Maintain a small `LeafKind` enum and optional `name` on leaves for IR emission; direction flipping can be another traversal using the same shape metadata.
+
+## Open questions
+
+- Decide whether literal payloads live on leaves or in a side table keyed by identity.
+- Settle on naming strategy (path-based vs. user-specified) during traversal for better emitted IR readability.
