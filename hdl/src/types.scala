@@ -14,15 +14,14 @@ object Reg:
     t
 
 object Lit:
-  def apply[T <: BundleIf](t: T)(payload: HostTypeOf[T]): Bundle[T] =
-    var bundle = Bundle(t)
-    bundle.setNodeKind(NodeKind.Lit)
-    bundle.setLitVal(payload)
-    bundle
-
   def apply[T <: HWData](t: T)(payload: HostTypeOf[T]): T =
     t.setNodeKind(NodeKind.Lit)
     t.setLitVal(payload)
+    t
+
+object IO:
+  def apply[T <: HWData](t: T, name: Option[String] = None): T =
+    t.setNodeKind(NodeKind.IO)
     t
 
 // def apply[T <: BundleIf](t: T, name: Option[String] = None)(payload: HostTypeOf[T]): T =

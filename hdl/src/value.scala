@@ -7,12 +7,14 @@ import scala.util.NotGiven
 import scala.quoted.*
 
 enum Direction:
-  case In, Out
+  case Default, Flipped
 
 object Direction:
+  inline def In: Direction = Direction.Flipped
+  inline def Out: Direction = Direction.Default
   inline def flip(d: Direction): Direction = d match
-    case Direction.In  => Direction.Out
-    case Direction.Out => Direction.In
+    case Direction.Default => Direction.Flipped
+    case Direction.Flipped => Direction.Default
 
 sealed class Width(val value: Int):
   override def toString: String = s"${value}"
@@ -20,24 +22,28 @@ sealed class Width(val value: Int):
 object Width:
   def apply(x: Int): Width = new Width(x)
 
+sealed trait HasDirectionality:
+  var dir: Direction = Direction.Default
+  def flip: Unit =
+    this.dir = Direction.flip(this.dir)
+
 sealed trait HWData:
-  def setNodeKind(kind: NodeKind): Unit
+  var literal: Option[Any] = None
+  var kind: NodeKind = NodeKind.Unset
+
+  def setNodeKind(kind: NodeKind) = this.kind = kind
   def setLitVal(payload: Any): Unit
   def getLitVal: Any
 
 sealed class UInt(
-  val w: Width,
-  var dir: Direction = Direction.Out,
-  var kind: NodeKind = NodeKind.Unset,
-  var literal: Option[HostTypeOf[UInt]] = None
-) extends HWData:
-  def setNodeKind(kind: NodeKind) = this.kind = kind
+  val w: Width
+) extends HWData with HasDirectionality:
 
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[UInt]])
 
   def getLitVal: HostTypeOf[UInt] =
-    literal match
+    this.literal match
       case Some(v) => v.asInstanceOf[HostTypeOf[UInt]]
       case None    => throw new NoSuchElementException("UInt does not carry a literal value")
 
@@ -46,13 +52,7 @@ sealed class UInt(
 object UInt:
   def apply(w: Width): UInt = new UInt(w)
 
-sealed class Bool(
-  var dir: Direction = Direction.Out,
-  var kind: NodeKind = NodeKind.Unset,
-  var literal: Option[HostTypeOf[Bool]] = None
-) extends HWData:
-  def setNodeKind(kind: NodeKind) = this.kind = kind
-
+sealed class Bool extends HWData with HasDirectionality:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[Bool]])
 
@@ -77,28 +77,13 @@ type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] = (Labels,
   case (_ *: lt, _ *: et)  => FieldTypeFromTuple[lt, et, L]
   case _                   => Nothing
 
-trait BundleIf
-
-// NOTE: Literals assume that the BundleIf is pure. THat is, all fields are of HWData
+// NOTE: Literals assume that the BundleIf is pure. That is, all fields are of HWData
 // and there is no mixing with Scala's library types such as Option, Seq, List
-class Bundle[T <: BundleIf](
-  val tpe: T,
-  var kind: NodeKind = NodeKind.Unset,
-  var name: Option[String] = None,
-  var literal: Option[Any] = None,
-  private var _ref: String = ""
-) extends Selectable with HWData:
-
+trait Bundle[T] extends Selectable with HWData with HasDirectionality { self: T =>
   type FieldToNode[X] = X match
-    case BundleIf => Bundle[X]
     case _           => X
-// type FieldToNode[X] = X match
-// case _           => X
 
   type Fields = NamedTuple.Map[NamedTuple.From[T], [X] =>> FieldToNode[X]]
-
-  def setRef(ref: String) = _ref = ref
-  def ref: String = _ref
 
   transparent inline def selectDynamic[L <: String & Singleton](label: L): Any =
     summonFrom {
@@ -110,23 +95,20 @@ class Bundle[T <: BundleIf](
         val labels = constValueTuple[Labels].toArray
         val idx = labels.indexOf(constValue[L])
 
-        if idx < 0 then throw new NoSuchElementException(s"${tpe.getClass.getName} has no field '${label}'")
-        val childT = tpe.asInstanceOf[Product].productElement(idx).asInstanceOf[FT]
+        if idx < 0 then throw new NoSuchElementException(s"${self.getClass.getName} has no field '${label}'")
+        val childT = self.asInstanceOf[Product].productElement(idx).asInstanceOf[FT]
         val childLit = literal.map(_.asInstanceOf[Product].productElement(idx))
-        val childRef = if _ref.isEmpty then constValue[L] else s"$_ref.${constValue[L]}"
+        val childRef = constValue[L]
+        println(s"label: ${label} childRef: ${childRef} childLit: ${childLit}")
         inline erasedValue[FT] match
-          case _: BundleIf =>
-            new Bundle(tpe = childT.asInstanceOf[FT & BundleIf], literal = childLit)
           case _: HWData =>
             childLit.map(lit => childT.asInstanceOf[FT & HWData].setLitVal(lit))
             childT
           case _ =>
             childT
       case _ =>
-        throw new NoSuchElementException(s"${tpe.getClass.getName} has no field '${label}'")
+        throw new NoSuchElementException(s"${self.getClass.getName} has no field '${label}'")
     }
-
-  def setNodeKind(kind: NodeKind) = this.kind = kind
 
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[T]])
@@ -135,73 +117,17 @@ class Bundle[T <: BundleIf](
     literal match
       case Some(v) => v.asInstanceOf[HostTypeOf[T]]
       case None    => throw new NoSuchElementException("Node does not carry a literal value")
+}
 
-  override def toString(): String =
-    val suffix = name.fold("")(n => s":$n")
-    s"$kind(${tpe}$suffix)"
+object Input:
+  def apply[T <: HasDirectionality](t: T): T =
+    t.flip
+    t
 
-object Bundle:
-  def apply[T <: BundleIf](
-    tpe: T,
-  ): Bundle[T] =
-    new Bundle(tpe)
+object Output:
+  def apply[T <: HasDirectionality](t: T): T =
+    t
 
-// object Node:
-// def apply[T <: HWData](
-// tpe: T,
-// kind: NodeKind,
-// name: Option[String] = None,
-// literal: Option[Any] = None,
-// ref: String = ""
-// ): Node[T] =
-// new Node(tpe, kind, name, literal, if ref.isEmpty then name.getOrElse("") else ref)
-
-
-//  trait DirLike[T <: HWData]:
-//    def setAll(t: T, dir: Direction): T
-//    def flipAll(t: T): T
-//  
-//  object DirLike:
-//    inline def summonAll[Elems <: Tuple]: List[DirLike[? <: HWData]] =
-//      inline erasedValue[Elems] match
-//        case _: EmptyTuple => Nil
-//        case _: (h *: t) =>
-//          summonInline[DirLike[h & HWData]] :: summonAll[t]
-//  
-//    given DirLike[UInt] with
-//      def setAll(t: UInt, dir: Direction): UInt = new UInt(t.w, dir)
-//      def flipAll(t: UInt): UInt = new UInt(t.w, Direction.flip(t.dir))
-//  
-//    given DirLike[Bool] with
-//      def setAll(t: Bool, dir: Direction): Bool = new Bool(dir)
-//      def flipAll(t: Bool): Bool = new Bool(Direction.flip(t.dir))
-//  
-//    inline given [T <: Bundle](using m: Mirror.ProductOf[T]): DirLike[T] =
-//      new DirLike[T]:
-//        def setAll(t: T, dir: Direction): T =
-//          val p = t.asInstanceOf[Product]
-//          val typeclasses = DirLike.summonAll[m.MirroredElemTypes]
-//          val arr = new Array[Any](p.productArity)
-//          var i = 0
-//          while i < arr.length do
-//            val dl = typeclasses(i).asInstanceOf[DirLike[HWData]]
-//            val v = p.productElement(i).asInstanceOf[HWData]
-//            arr(i) = dl.setAll(v, dir)
-//            i += 1
-//          m.fromProduct(Tuple.fromArray(arr)).asInstanceOf[T]
-//  
-//        def flipAll(t: T): T =
-//          val p = t.asInstanceOf[Product]
-//          val typeclasses = DirLike.summonAll[m.MirroredElemTypes]
-//          val arr = new Array[Any](p.productArity)
-//          var i = 0
-//          while i < arr.length do
-//            val dl = typeclasses(i).asInstanceOf[DirLike[HWData]]
-//            val v = p.productElement(i).asInstanceOf[HWData]
-//            arr(i) = dl.flipAll(v)
-//            i += 1
-//          m.fromProduct(Tuple.fromArray(arr)).asInstanceOf[T]
-//  
-//  inline def Input[T <: HWData](t: T): T = summonInline[DirLike[T]].setAll(t, Direction.In)
-//  inline def Output[T <: HWData](t: T): T = summonInline[DirLike[T]].setAll(t, Direction.Out)
-//  inline def Flipped[T <: HWData](t: T): T = summonInline[DirLike[T]].flipAll(t)
+object Flipped:
+  def apply[T <: HasDirectionality](t: T): T =
+    Input(t)
