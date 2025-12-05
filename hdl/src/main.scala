@@ -36,6 +36,32 @@ def literal_check(): Unit =
   assert(mylit.i.a.getValue == 4)
   assert(mylit.i.b.getValue == 5)
 
+final case class OptBundle(a: Option[UInt], b: UInt) extends Bundle
+
+def optional_field_check(): Unit =
+  val ob = OptBundle(Some(UInt(Width(3))), UInt(Width(4)))
+  val reg = Reg(ob)
+  assert(reg.a.exists(_.kind == LeafKinds.Reg))
+  assert(reg.b.kind == LeafKinds.Reg)
+  val olit = Lit(ob)((a = Some(5), b = 6))
+  assert(olit.a.exists(_.getValue == 5))
+  assert(olit.b.getValue == 6)
+
+def list_operation_check(): Unit =
+  val regs: Seq[UInt] = Seq.fill(4)(Reg(UInt(Width(4))))
+  val widths = regs.map(_.w.value)
+  assert(widths.reduce(_ + _) == 16)
+  assert(regs.forall(_.kind == LeafKinds.Reg))
+
+def adhoc_io_check(): Unit =
+  val adhoc = Bundle((a = UInt(Width(2)), b = UInt(Width(3))))
+  val reg = Reg(adhoc)
+  assert(reg.a.kind == LeafKinds.Reg)
+  assert(reg.b.kind == LeafKinds.Reg)
+
 @main def run(): Unit =
   instantiation_check()
   literal_check()
+  optional_field_check()
+  list_operation_check()
+  adhoc_io_check()

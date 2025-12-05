@@ -8,15 +8,20 @@ import scala.util.NotGiven
 trait Bundle
 
 object Bundle:
-  def apply[T <: NamedTuple.AnyNamedTuple](fields: T): T & Bundle =
-    fields.asInstanceOf[T & Bundle]
+  def apply[T <: NamedTuple.AnyNamedTuple](fields: T): T =
+    fields
 
 type HostTypeOf[T] = T match
   case UInt => Int
   case Bool => Boolean
-  case Option[t] => Option[HostTypeOf[t & Any]]
-  case Seq[t] => Seq[HostTypeOf[t & Any]]
-  case _ => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & Any]]
+  case Option[t] => Option[HostTypeOf[t]]
+  case Seq[t] => Seq[HostTypeOf[t]]
+  case _ => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X]]
+
+type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] = (Labels, Elems) match
+  case (L *: _, h *: _) => h
+  case (_ *: lt, _ *: et) => FieldTypeFromTuple[lt, et, L]
+  case _ => Nothing
 
 trait Shape[T]:
   def map(t: T, path: List[String])(f: (LeafValue, List[String]) => LeafValue): T
