@@ -11,21 +11,21 @@ enum NodeKind:
 type HostTypeOf[T] = T match
   case UInt  => Int
   case Bool  => Boolean
-  case _     => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & ValueType]]
+  case _     => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X & HWData]]
 
-type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] <: ValueType = (Labels, Elems) match
-  case (L *: _, h *: _)    => h & ValueType
+type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] <: HWData = (Labels, Elems) match
+  case (L *: _, h *: _)    => h & HWData
   case (_ *: lt, _ *: et)  => FieldTypeFromTuple[lt, et, L]
-  case _                   => Nothing & ValueType
+  case _                   => Nothing & HWData
 
-final case class Node[T <: ValueType](
+final case class Node[T <: HWData](
   tpe: T,
   kind: NodeKind,
   name: Option[String] = None,
   literal: Option[Any] = None,
   private var _ref: String = ""
 ) extends Selectable:
-  type Fields = NamedTuple.Map[NamedTuple.From[T], [X] =>> Node[X & ValueType]]
+  type Fields = NamedTuple.Map[NamedTuple.From[T], [X] =>> Node[X & HWData]]
 
   def setRef(ref: String) = _ref = ref
   def ref: String = _ref
@@ -58,11 +58,11 @@ final case class Node[T <: ValueType](
     val suffix = name.fold("")(n => s":$n")
     s"$kind(${tpe}$suffix)"
 
-type HW[T <: ValueType] = Node[T]
-type Lit[T <: ValueType] = Node[T]
+type HW[T <: HWData] = Node[T]
+type Lit[T <: HWData] = Node[T]
 
 object Node:
-  def apply[T <: ValueType](
+  def apply[T <: HWData](
     tpe: T,
     kind: NodeKind,
     name: Option[String] = None,
@@ -72,21 +72,21 @@ object Node:
     new Node(tpe, kind, name, literal, if ref.isEmpty then name.getOrElse("") else ref)
 
 object Reg:
-  def apply[T <: ValueType](t: T, name: Option[String] = None): Node[T] =
+  def apply[T <: HWData](t: T, name: Option[String] = None): Node[T] =
     Node(t, NodeKind.Reg, name, None, name.getOrElse(""))
 
 object Wire:
-  def apply[T <: ValueType](t: T, name: Option[String] = None): Node[T] =
+  def apply[T <: HWData](t: T, name: Option[String] = None): Node[T] =
     Node(t, NodeKind.Wire, name, None, name.getOrElse(""))
 
 object IO:
-  def apply[T <: ValueType](t: T, name: Option[String] = None): Node[T] =
+  def apply[T <: HWData](t: T, name: Option[String] = None): Node[T] =
     Node(t, NodeKind.IO, name, None, name.getOrElse(""))
 
 object PrimOp:
-  def apply[T <: ValueType](t: T, name: Option[String] = None): Node[T] =
+  def apply[T <: HWData](t: T, name: Option[String] = None): Node[T] =
     Node(t, NodeKind.PrimOp, name, None, name.getOrElse(""))
 
 object Lit:
-  def apply[T <: ValueType](t: T, name: Option[String] = None)(payload: HostTypeOf[T]): Node[T] =
+  def apply[T <: HWData](t: T, name: Option[String] = None)(payload: HostTypeOf[T]): Node[T] =
     Node(t, NodeKind.Lit, name, Some(payload), name.getOrElse(""))
