@@ -27,6 +27,10 @@
 - behavioral statements
 - memories
 
+## Misc Notes
+
+- Better enum support?
+
 ## Some Commands
 
 ```bash
@@ -228,7 +232,7 @@ A compiler plugin also won't work.
 This is because in order to generate `case class InnerBundleLit` from `case class InnerBundle`, the AST must have resolved types before we run our compiler pass.
 How else will the pass figure out whether `a` has to change to `UIntLit` and `b` has to change to `SIntLit`?
 However, at this point, if we have tried using `InnerBundleLit` to describe our program, the type checking pass would have failed.
-A huge connundrum!
+A huge conundrum!
 
 ### Trial 2
 
@@ -557,8 +561,6 @@ Now, the `Bundle` types can be mixed flexibly with the Scala library types (e.g.
 However, attentive readers will notice that accessing fields of `Bundle` instantiations will now just use the static `case class` fields instead of our `selectDynamic` function.
 `selectDynamic` only works when there are no matching static fields.
 
-
-
 ```scala
 def optional_io_directionality_check(): Unit =
   case class OptBundle(
@@ -746,9 +748,9 @@ val reg_i_b: UInt = rg.i.b
 assert(typeCheckErrors(tc1).isEmpty)
 ```
 
-Although not entirely desirable as we are now forcing the library users certain behaviors for things to work properly, its not the worse thing in the world.
+Although not entirely desirable as we are now forcing the library users certain behaviors for things to work properly, it's not the worse thing in the world.
 This is because, `selectDynamic` is only required for `Bundle`s that want to generate literals.
-To propagate the top level literal payload to its childs, `selectDynamic` is required.
+To propagate the top level literal payload to its children, `selectDynamic` is required.
 
-Another caviat of this `Literal` approach is that the `Bundle`s that define literals must consist of purely `HWData` types. No mixing with `Scala` types are allowed as we are using typeclass derivation to create literal shapes.
+Another caveat of this `Literal` approach is that the `Bundle`s that define literals must consist of purely `HWData` types. No mixing with `Scala` types are allowed as we are using typeclass derivation to create literal shapes.
 In theory, we can add support for important Scala library types in the future for derivation, but we should leave this as is for now.

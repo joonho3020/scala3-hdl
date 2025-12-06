@@ -298,92 +298,91 @@ def parameterized_bundle_check(): Unit =
   //     else None
   // ))
 
+final case class SimpleIO(in: UInt, out: UInt) extends Bundle[SimpleIO]
 
-// final case class SimpleIO(in: UInt, out: UInt) extends Bundle
+def simple_module_test(): Unit =
+  class A extends Module:
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+    io.out := io.in
 
-// def simple_module_test(): Unit =
-// class A extends Module:
-// given Module = this
-// val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
-// io.out := io.in
+  inline val tc1 = """
+  io.out := Lit(Bool)(false)
+  """
+  assert(typeCheckErrors(tc1).nonEmpty)
 
-// inline val tc1 = """
-// io.out := Lit(Bool)(false)
-// """
-// assert(typeCheckErrors(tc1).nonEmpty)
+  val elaborator = new Elaborator
+  val a = new A
+  val design = elaborator.elaborate(a)
+  println("=" * 50)
+  println("Simple Module Test:")
+  println(elaborator.emit(design))
+  println("=" * 50)
 
-// val elaborator = new Elaborator
-// val a = new A
-// val design = elaborator.elaborate(a)
-// println("=" * 50)
-// println("Simple Module Test:")
-// println(elaborator.emit(design))
-// println("=" * 50)
+def list_operation_check(): Unit =
+  final case class MultBySumIO(a: UInt, b: UInt, sum: UInt) extends Bundle[MultBySumIO]
+  object MultBySumIO:
+    def apply(w: Int): MultBySumIO =
+      MultBySumIO(
+        a = Input(UInt(Width(w))),
+        b = Input(UInt(Width(w))),
+        sum = Output(UInt(Width(w)))
+      )
 
-// def list_operation_check(): Unit =
-// final case class MultBySumIO(a: UInt, b: UInt, sum: UInt) extends Bundle
-// object MultBySumIO:
-// def apply(w: Int): MultBySumIO =
-// MultBySumIO(
-// a = Input(UInt(Width(w))),
-// b = Input(UInt(Width(w))),
-// sum = Output(UInt(Width(w)))
-// )
+  class MultBySum(width: Int, maxMult: Int) extends Module:
+    given Module = this
+    val io = IO(MultBySumIO(width))
+    val wires = Seq.fill(maxMult)(Wire(UInt(Width(width))))
+    wires.foreach(_ := io.a)
+    wires(0) := wires(1) + Lit(UInt(Width(width)))(3)
+    io.sum := wires.reduce(_ + _)
 
-// class MultBySum(width: Int, maxMult: Int) extends Module:
-// given Module = this
-// val io = IO(MultBySumIO(width))
-// val wires = Seq.fill(maxMult)(Wire(UInt(Width(width))))
-// wires.foreach(_ := io.a)
-// wires(0) := wires(1) + Lit(UInt(Width(width)))(3)
-// io.sum := wires.reduce(_ + _)
+  val top = new MultBySum(4, 3)
+  val elaborator = new Elaborator
+  val design = elaborator.elaborate(top)
+  val rendered = elaborator.emit(design)
+  println("=" * 50)
+  println("List Operation Check:")
+  println(rendered)
+  println("=" * 50)
 
-// val top = new MultBySum(4, 3)
-// val elaborator = new Elaborator
-// val design = elaborator.elaborate(top)
-// val rendered = elaborator.emit(design)
-// println("=" * 50)
-// println("List Operation Check:")
-// println(rendered)
-// println("=" * 50)
+def nested_module_check(): Unit =
+  class A extends Module:
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+    io.out := io.in
 
-// def nested_module_check(): Unit =
-// class A extends Module:
-// given Module = this
-// val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
-// io.out := io.in
+  class C extends Module:
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(5))), Output(UInt(Width(5)))))
+    io.out := io.in
 
-// class C extends Module:
-// given Module = this
-// val io = IO(SimpleIO(Input(UInt(Width(5))), Output(UInt(Width(5)))))
-// io.out := io.in
+  class B extends Module:
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(6))), Output(UInt(Width(6)))))
+    val c = Module(new C)
+    c.io.in := io.in
+    io.out := c.io.out
 
-// class B extends Module:
-// given Module = this
-// val io = IO(SimpleIO(Input(UInt(Width(6))), Output(UInt(Width(6)))))
-// val c = Module(new C)
-// c.io.in := io.in
-// io.out := c.io.out
+  class Top extends Module:
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(7))), Output(UInt(Width(7)))))
+    val a0 = Module(new A)
+    val a1 = Module(new A)
+    val b = Module(new B)
+    a0.io.in := io.in
+    a1.io.in := io.in
+    b.io.in := io.in
 
-// class Top extends Module:
-// given Module = this
-// val io = IO(SimpleIO(Input(UInt(Width(7))), Output(UInt(Width(7)))))
-// val a0 = Module(new A)
-// val a1 = Module(new A)
-// val b = Module(new B)
-// a0.io.in := io.in
-// a1.io.in := io.in
-// b.io.in := io.in
+    io.out := (a0.io.out + a1.io.out) + b.io.out
 
-// io.out := (a0.io.out + a1.io.out) + b.io.out
-
-// val elaborator = new Elaborator
-// val top = new Top
-// val design = elaborator.elaborate(top)
-// println("=" * 50)
-// println("Nested Module Check:")
-// println(elaborator.emit(design))
-// println("=" * 50)
+  val elaborator = new Elaborator
+  val top = new Top
+  val design = elaborator.elaborate(top)
+  println("=" * 50)
+  println("Nested Module Check:")
+  println(elaborator.emit(design))
+  println("=" * 50)
 
 // def inheritance_check(): Unit =
 // class Abstract extends Module:
@@ -445,21 +444,6 @@ def parameterized_bundle_check(): Unit =
 // val design_false = elaborator.elaborate(add_false)
 // println(elaborator.emit(design_false))
 
-// def adhoc_io_check(): Unit =
-//   class A(w: Int) extends Module:
-//     given Module = this
-//     val io = IO(Bundle((
-//       a = Input(UInt(Width(w))),
-//       b = Input(UInt(Width(w))),
-//       c = Output(UInt(Width(w + 1)))
-//     )))
-//     io.c := io.a + io.b
-//   val elaborator = new Elaborator
-//   val add_true = new A(w = 2)
-//   val design = elaborator.elaborate(add_true)
-//   println(elaborator.emit(design))
-
-
 // def optional_io_check(): Unit =
 //    class A(debug: Boolean, w: Int) extends Module:
 //      given Module = this
@@ -494,11 +478,10 @@ def parameterized_bundle_check(): Unit =
   directionality_check()
   optional_io_directionality_check()
   parameterized_bundle_check()
-// simple_module_test()
-// list_operation_check()
-// nested_module_check()
+  simple_module_test()
+  list_operation_check()
+  nested_module_check()
 // inheritance_check()
 // type_parameterization_check()
 // conditional_generation_check()
 // optional_io_check()
-// adhoc_io_check()

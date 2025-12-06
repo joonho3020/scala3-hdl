@@ -1,316 +1,322 @@
 package hdl
 
-import scala.quoted.*
-import scala.concurrent.{Future, Await}
+import scala.collection.mutable
+import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
-import scala.util.hashing.MurmurHash3
-import java.security.MessageDigest
-import java.util.HexFormat
 
-// final case class ElaboratedDesign(
-// name: String,
-// ports: Seq[String],
-// body: Seq[String]
-// )
+final case class ElaboratedDesign(name: String, ports: Seq[String], body: Seq[String])
 
-// final class ModuleBuilder(val moduleName: String):
-// private val ports = collection.mutable.ArrayBuffer.empty[String]
-// private val body = collection.mutable.ArrayBuffer.empty[String]
-// private val usedNames = collection.mutable.Set.empty[String]
-// private var tempCounter = 0
+final class ModuleBuilder(val moduleName: String):
+  private val ports = mutable.ArrayBuffer.empty[String]
+  private val body = mutable.ArrayBuffer.empty[String]
+  private val usedNames = mutable.Set.empty[String]
+  private var tempCounter = 0
 
-// def freshName(prefix: String): String =
-// tempCounter += 1
-// val candidate = s"${prefix}_$tempCounter"
-// if usedNames.contains(candidate) then freshName(prefix)
-// else
-// usedNames += candidate
-// candidate
+  def freshName(prefix: String): String =
+    tempCounter += 1
+    val candidate = s"${prefix}_$tempCounter"
+    if usedNames.contains(candidate) then freshName(prefix) else
+      usedNames += candidate
+      candidate
 
-// def allocateName(name: Option[String], prefix: String): String =
-// name.filter(_.nonEmpty).flatMap { n =>
-// if usedNames.contains(n) then None
-// else
-// usedNames += n
-// Some(n)
-// }.getOrElse(freshName(prefix))
+  def allocateName(name: Option[String], prefix: String): String =
+    name.filter(n => n.nonEmpty && !usedNames.contains(n)).map { n =>
+      usedNames += n
+      n
+    }.getOrElse(freshName(prefix))
 
-// def addPort(stmt: String): Unit = ports += stmt
-// def addBody(stmt: String): Unit = body += stmt
+  def addPort(stmt: String): Unit = ports += stmt
+  def addBody(stmt: String): Unit = body += stmt
+  def snapshot: ElaboratedDesign = ElaboratedDesign(moduleName, ports.toSeq, body.toSeq)
 
-// def snapshot: ElaboratedDesign =
-// ElaboratedDesign(moduleName, ports.toVector, body.toVector)
+abstract class Module:
+  private val _builder = new ModuleBuilder(moduleName)
+  private val _children = mutable.ArrayBuffer.empty[Module]
+  private var _elabKey: Option[String] = None
+  private var _instanceName: Option[String] = None
 
-// abstract class Module:
-// private[hdl] val _builder: ModuleBuilder = new ModuleBuilder(moduleName)
-// private var _elabKey: Option[String] = None
+  def moduleName: String = getClass.getSimpleName.stripSuffix("$")
+  def elaborationKey: String = _elabKey.getOrElse(Module.autoElaborationKey(this))
+  private[hdl] def setElabKey(k: String): Unit = _elabKey = Some(k)
+  private[hdl] def setInstanceName(n: String): Unit = _instanceName = Some(n)
+  private[hdl] def instanceName: Option[String] = _instanceName
+  private[hdl] def addChild(m: Module): Unit = _children += m
+  private[hdl] def children: Seq[Module] = _children.toSeq
+  private[hdl] def getBuilder: ModuleBuilder = _builder
+  private[hdl] def register(data: HWData, ref: Option[String]): Unit =
+    ModuleUtils.assignOwner(data, this)
+    ref.foreach(r => ModuleUtils.assignRefs(data, r))
 
-// def moduleName: String = getClass.getSimpleName.stripSuffix("$")
-// def elaborationKey: String = _elabKey.getOrElse(Module.autoElaborationKey(this))
-// private[hdl] def setElabKey(k: String): Unit = _elabKey = Some(k)
+  protected inline def IO[T <: HWData](inline t: T): T =
+    ${ ModuleMacros.ioImpl('t, 'this) }
 
-// private[hdl] def getBuilder: ModuleBuilder = _builder
+  protected inline def IO[T <: HWData](inline t: T, name: String): T =
+    ${ ModuleMacros.ioWithNameImpl('t, 'name, 'this) }
 
-// protected inline def IO[T <: ValueType](inline t: T): Node[T] =
-// ${ Macros.ioImpl('t, 'this) }
+  protected inline def Wire[T <: HWData](inline t: T): T =
+    ${ ModuleMacros.wireImpl('t, 'this) }
 
-// protected inline def Wire[T <: ValueType](inline t: T): Node[T] =
-// ${ Macros.wireImpl('t, 'this) }
+  protected inline def Wire[T <: HWData](inline t: T, name: String): T =
+    ${ ModuleMacros.wireWithNameImpl('t, 'name, 'this) }
 
-// protected inline def Reg[T <: ValueType](inline t: T): Node[T] =
-// ${ Macros.regImpl('t, 'this) }
+  protected inline def Reg[T <: HWData](inline t: T): T =
+    ${ ModuleMacros.regImpl('t, 'this) }
 
-// protected inline def Lit[T <: ValueType](inline t: T)(inline payload: HostTypeOf[T]): Node[T] =
-// ${ Macros.litImpl('t, 'payload, 'this) }
+  protected inline def Reg[T <: HWData](inline t: T, name: String): T =
+    ${ ModuleMacros.regWithNameImpl('t, 'name, 'this) }
 
-// final def design: ElaboratedDesign = _builder.snapshot
+  protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T]): T =
+    ${ ModuleMacros.litImpl('t, 'payload, 'this) }
 
-// object Module:
-// inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
-// ${ Macros.moduleInstImpl('gen, 'parent) }
+  protected inline def Lit[T <: HWData](inline t: T, name: String)(inline payload: HostTypeOf[T]): T =
+    ${ ModuleMacros.litWithNameImpl('t, 'payload, 'name, 'this) }
 
-// private def autoElaborationKey(mod: Module): String =
-// s"${mod.moduleName}@${System.identityHashCode(mod)}"
+object Module:
+  inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
+    ${ ModuleMacros.moduleInstImpl('gen, 'parent) }
 
-// extension [T <: ValueType](dst: Node[T])
-// def :=(src: Node[?])(using m: Module): Unit =
-// src.kind match
-// case hdl.NodeKind.Lit =>
-// m.getBuilder.addBody(s"connect ${dst.ref}, ${src}")
-// case _ =>
-// m.getBuilder.addBody(s"connect ${dst.ref}, ${src.ref}")
+  def instantiate[M <: hdl.Module](gen: => M, parent: hdl.Module, name: Option[String]): M =
+    val sub = gen
+    val instName = parent.getBuilder.allocateName(name, "inst")
+    sub.setInstanceName(instName)
+    sub.setElabKey(autoElaborationKey(sub))
+    parent.addChild(sub)
+    parent.getBuilder.addBody(s"inst $instName of ${sub.moduleName}")
+    sub
 
-// extension [T <: ValueType](lhs: Node[T])
-// def +(rhs: Node[?])(using m: Module): Node[T] =
-// val tmpName = m.getBuilder.freshName("add")
-// m.getBuilder.addBody(s"node $tmpName = add(${lhs.ref}, ${rhs.ref})")
-// Node(lhs.tpe, NodeKind.PrimOp, Some(tmpName), None, tmpName)
+  private def autoElaborationKey(mod: Module): String =
+    s"${mod.moduleName}@${System.identityHashCode(mod)}"
 
-// final class Elaborator:
-// private implicit val ec: ExecutionContext = ExecutionContext.global
-// private val elaborated =
-// collection.concurrent.TrieMap.empty[String, Future[ElaboratedDesign]]
+private[hdl] object ModuleUtils:
+  def assignOwner(value: Any, mod: Module): Unit =
+    value match
+      case h: HWData =>
+        h.setOwner(mod)
+        h match
+          case b: Bundle[?] =>
+            val p = b.asInstanceOf[Product]
+            (0 until p.productArity).foreach(i => assignOwner(p.productElement(i), mod))
+          case _ =>
+      case Some(v) =>
+        assignOwner(v, mod)
+      case seq: Seq[?] =>
+        seq.foreach(elem => assignOwner(elem, mod))
+      case _ =>
 
-// def elaborate(top: Module): ElaboratedDesign =
-// Await.result(elaborateAsync(top), Duration.Inf)
+  def assignRefs(value: Any, base: String): Unit =
+    value match
+      case h: HWData =>
+        h.setRef(base)
+        h match
+          case b: Bundle[?] =>
+            val p = b.asInstanceOf[Product]
+            (0 until p.productArity).foreach { i =>
+              val fieldName = p.productElementName(i)
+              p.productElement(i) match
+                case hd: HWData => assignRefs(hd, s"$base.$fieldName")
+                case Some(hd: HWData) => assignRefs(hd, s"$base.$fieldName")
+                case seq: Seq[?] =>
+                  seq.zipWithIndex.foreach {
+                    case (hd: HWData, idx) => assignRefs(hd, s"$base.$fieldName[$idx]")
+                    case (Some(hd: HWData), idx) => assignRefs(hd, s"$base.$fieldName[$idx]")
+                    case _ =>
+                  }
+                case _ =>
+            }
+          case _ =>
+      case _ =>
 
-// private[hdl] def elaborateAsync(mod: Module): Future[ElaboratedDesign] =
-// val key = mod.elaborationKey
-// elaborated.getOrElseUpdate(key, Future:
-// val subs = discoverSubmodules(mod)
-// val subFuts = subs.map(elaborateAsync)
-// subFuts.foreach(f => Await.result(f, Duration.Inf))
-// mod.design
-// )
+private[hdl] object ModuleOps:
+  def io[T <: HWData](t: T, name: Option[String], mod: Module): T =
+    val baseName = mod.getBuilder.allocateName(name, "io")
+    t.setNodeKind(NodeKind.IO)
+    mod.register(t, Some(baseName))
+    emitPortDecl(baseName, t).foreach(mod.getBuilder.addPort)
+    t
 
-// private def discoverSubmodules(mod: Module): Seq[Module] =
-// val buf = collection.mutable.ArrayBuffer.empty[Module]
-// val clazz = mod.getClass
-// for field <- clazz.getDeclaredFields do
-// field.setAccessible(true)
-// field.get(mod) match
-// case submod: Module if submod ne mod =>
-// buf += submod
-// case _ => ()
-// buf.toSeq
+  def wire[T <: HWData](t: T, name: Option[String], mod: Module): T =
+    val wireName = mod.getBuilder.allocateName(name, "wire")
+    t.setNodeKind(NodeKind.Wire)
+    mod.register(t, Some(wireName))
+    mod.getBuilder.addBody(s"wire $wireName : ${formatType(t)}")
+    t
 
-// def emit(design: ElaboratedDesign): String =
-// val sb = new StringBuilder
-// sb.append(s"module ${design.name}:\n")
-// design.ports.foreach(p => sb.append(s"  $p\n"))
-// sb.append("\n")
-// design.body.foreach(s => sb.append(s"  $s\n"))
-// sb.toString
+  def reg[T <: HWData](t: T, name: Option[String], mod: Module): T =
+    val regName = mod.getBuilder.allocateName(name, "reg")
+    t.setNodeKind(NodeKind.Reg)
+    mod.register(t, Some(regName))
+    mod.getBuilder.addBody(s"reg $regName : ${formatType(t)}, clock")
+    t
 
-// def emitAll: String =
-// elaborated.values.map(f => emit(Await.result(f, Duration.Inf))).mkString("\n")
+  def lit[T <: HWData](t: T, payload: HostTypeOf[T], name: Option[String], mod: Module): T =
+    val litName = mod.getBuilder.allocateName(name, "lit")
+    t.setNodeKind(NodeKind.Lit)
+    t.setLitVal(payload)
+    mod.register(t, Some(litName))
+    mod.getBuilder.addBody(s"node $litName = ${formatLiteral(t, payload)}")
+    t
 
-// object Macros:
-// def findEnclosingValName(using q: Quotes): Option[String] =
-// import q.reflect.*
-// val nodeTpe = TypeRepr.of[Node[?]]
-// val moduleTpe = TypeRepr.of[Module]
+  def connect[T <: HWData](dst: T, src: T, mod: Module): Unit =
+    val lhs = refFor(dst, mod)
+    val rhs = refFor(src, mod)
+    mod.getBuilder.addBody(s"connect $lhs, $rhs")
 
-// def isNodeVal(sym: Symbol): Boolean =
-// if !sym.isTerm || sym.isPackageDef then false
-// else
-// sym.tree match
-// case v: ValDef =>
-// val tpe = v.tpt.tpe
-// report.info(s"isNodeVal tpe=${tpe}")
-// tpe != null && ((tpe <:< nodeTpe) || (tpe <:< moduleTpe))
-// case _ => false
+  def add(lhs: UInt, rhs: UInt, mod: Module): UInt =
+    val resWidth = math.max(lhs.w.value, rhs.w.value)
+    val result = UInt(Width(resWidth))
+    result.setNodeKind(NodeKind.PrimOp)
+    val name = mod.getBuilder.allocateName(None, "add")
+    mod.register(result, Some(name))
+    val lhsRef = refFor(lhs, mod)
+    val rhsRef = refFor(rhs, mod)
+    mod.getBuilder.addBody(s"node $name = add($lhsRef, $rhsRef)")
+    result
 
-// def searchOwners(sym: Symbol, crossedSyntheticDef: Boolean): Option[String] =
-// val flagStr = sym.flags.show
-// val nodeMatch = isNodeVal(sym)
-// report.info(s"findEnclosingValName visiting=${sym.fullName} flags=$flagStr nodeVal=$nodeMatch crossedSynthetic=$crossedSyntheticDef isTerm=${sym.isTerm} isPackageDef=${sym.isPackageDef}")
-// if sym.isNoSymbol then
-// report.info("findEnclosingValName reached no symbol")
-// None
-// else if sym.isValDef && nodeMatch && !sym.flags.is(Flags.Synthetic) && !sym.flags.is(Flags.Artifact) then
-// if crossedSyntheticDef then
-// report.info(s"findEnclosingValName dropping ${sym.name} due to synthetic boundary")
-// None
-// else
-// report.info(s"findEnclosingValName found=${sym.name}")
-// Some(sym.name)
-// else
-// val crossed = crossedSyntheticDef || (sym.isDefDef && (sym.flags.is(Flags.Synthetic) || sym.flags.is(Flags.Artifact)))
-// searchOwners(sym.owner, crossed)
-// searchOwners(Symbol.spliceOwner.owner, false)
+  def refFor(data: HWData, current: Module): String =
+    val base = data.getRef
+      .orElse(data.literal.map(v => formatLiteral(data, v)))
+      .getOrElse(data.toString)
+    data.getOwner match
+      case Some(owner) if owner.ne(current) =>
+        owner.instanceName.map(prefix => s"$prefix.$base").getOrElse(base)
+      case _ => base
 
-// def ioImpl[T <: ValueType: Type](
-// t: Expr[T],
-// mod: Expr[Module]
-// )(using q: Quotes): Expr[Node[T]] =
-// import q.reflect.*
-// val nameOpt = findEnclosingValName
-// '{
-// val tpe = $t
-// val m = $mod
-// val baseName = m.getBuilder.allocateName(${Expr(nameOpt)}, "io")
-// val portDecls = emitPortDecl(baseName, tpe)
-// portDecls.foreach(m.getBuilder.addPort)
-// Node(tpe, NodeKind.IO, Some(baseName), None, baseName)
-// }
+  def emitPortDecl(name: String, tpe: HWData, prefix: String = ""): Seq[String] =
+    val fullName = if prefix.isEmpty then name else s"$prefix.$name"
+    tpe match
+      case u: UInt =>
+        val dirStr = if u.dir == Direction.In then "input" else "output"
+        Seq(s"$dirStr $fullName : UInt<${u.w.value}>")
+      case b: Bool =>
+        val dirStr = if b.dir == Direction.In then "input" else "output"
+        Seq(s"$dirStr $fullName : Bool")
+      case bundle: Bundle[?] =>
+        val p = bundle.asInstanceOf[Product]
+        (0 until p.productArity).flatMap { i =>
+          val fieldName = p.productElementName(i)
+          p.productElement(i) match
+            case hd: HWData => emitPortDecl(fieldName, hd, fullName)
+            case Some(hd: HWData) => emitPortDecl(fieldName, hd, fullName)
+            case seq: Seq[?] =>
+              seq.zipWithIndex.flatMap {
+                case (hd: HWData, idx) => emitPortDecl(s"$fieldName[$idx]", hd, fullName)
+                case (Some(hd: HWData), idx) => emitPortDecl(s"$fieldName[$idx]", hd, fullName)
+                case _ => Seq.empty
+              }
+            case _ => Seq.empty
+        }
+      case _ => Seq.empty
 
-// def wireImpl[T <: ValueType: Type](
-// t: Expr[T],
-// mod: Expr[Module]
-// )(using q: Quotes): Expr[Node[T]] =
-// import q.reflect.*
-// val nameOpt = findEnclosingValName
-// '{
-// val tpe = $t
-// val m = $mod
-// val wireName = m.getBuilder.allocateName(${Expr(nameOpt)}, "wire")
-// m.getBuilder.addBody(s"wire $wireName : ${formatType(tpe)}")
-// Node(tpe, NodeKind.Wire, Some(wireName), None, wireName)
-// }
+  def formatType(tpe: HWData): String = tpe match
+    case u: UInt => s"UInt<${u.w.value}>"
+    case _: Bool => "Bool"
+    case bundle: Bundle[?] =>
+      val p = bundle.asInstanceOf[Product]
+      val fields = (0 until p.productArity).flatMap { i =>
+        val fieldName = p.productElementName(i)
+        p.productElement(i) match
+          case hd: HWData =>
+            val dirPrefix = dirPrefixOf(hd)
+            Some(s"$dirPrefix$fieldName : ${formatType(hd)}")
+          case Some(hd: HWData) =>
+            val dirPrefix = dirPrefixOf(hd)
+            Some(s"$dirPrefix$fieldName : ${formatType(hd)}")
+          case seq: Seq[?] =>
+            seq.zipWithIndex.collect {
+              case (hd: HWData, idx) =>
+                val dirPrefix = dirPrefixOf(hd)
+                s"$dirPrefix$fieldName[$idx] : ${formatType(hd)}"
+              case (Some(hd: HWData), idx) =>
+                val dirPrefix = dirPrefixOf(hd)
+                s"$dirPrefix$fieldName[$idx] : ${formatType(hd)}"
+            }
+          case _ => Nil
+      }
+      s"{ ${fields.mkString(", ")} }"
+    case _ => tpe.toString
 
-// def regImpl[T <: ValueType: Type](
-// t: Expr[T],
-// mod: Expr[Module]
-// )(using q: Quotes): Expr[Node[T]] =
-// import q.reflect.*
-// val nameOpt = findEnclosingValName
-// '{
-// val tpe = $t
-// val m = $mod
-// val regName = m.getBuilder.allocateName(${Expr(nameOpt)}, "reg")
-// m.getBuilder.addBody(s"reg $regName : ${formatType(tpe)}, clock")
-// Node(tpe, NodeKind.Reg, Some(regName), None, regName)
-// }
+  def formatLiteral(tpe: HWData, value: Any): String = tpe match
+    case u: UInt => s"UInt<${u.w.value}>($value)"
+    case _: Bool => s"Bool($value)"
+    case _ => value.toString
 
-// def litImpl[T <: ValueType: Type](
-// t: Expr[T],
-// payload: Expr[HostTypeOf[T]],
-// mod: Expr[Module]
-// )(using q: Quotes): Expr[Node[T]] =
-// import q.reflect.*
-// val nameOpt = findEnclosingValName
-// '{
-// val tpe = $t
-// val value = $payload
-// val m = $mod
-// val litName = m.getBuilder.allocateName(${Expr(nameOpt)}, "lit")
-// m.getBuilder.addBody(s"node $litName = ${formatLiteral(tpe, value)}")
-// Node(tpe, NodeKind.Lit, Some(litName), Some(value), litName)
-// }
+  private def dirPrefixOf(h: HWData): String = h match
+    case hd: HasDirectionality if hd.dir == Direction.In => "flip "
+    case _ => ""
 
-// def moduleInstImpl[M <: Module: Type](
-// gen: Expr[M],
-// parent: Expr[Module]
-// )(using q: Quotes): Expr[M] =
-// import q.reflect.*
-// val nameOpt = findEnclosingValName
-// val key = buildModuleKey[M](gen)
-// '{
-// val submod = $gen
-// val m = $parent
-// submod.setElabKey(${Expr(key)})
-// val instName = m.getBuilder.allocateName(${Expr(nameOpt)}, "inst")
-// m.getBuilder.addBody(s"inst $instName of ${submod.moduleName}")
-// setSubmodulePrefix(submod, instName)
-// submod
-// }
+extension [T <: HWData](dst: T)
+  def :=(src: T)(using m: Module): Unit =
+    ModuleOps.connect(dst, src, m)
 
-// private def buildModuleKey[M: Type](gen: Expr[M])(using Quotes): String =
-// import quotes.reflect.*
-// def extractArgs(term: Term): List[Term] =
-// term match
-// case Inlined(_, _, expr) => extractArgs(expr)
-// case Apply(_, args) => args
-// case TypeApply(fun, _) => extractArgs(fun)
-// case _ => Nil
+extension (lhs: UInt)
+  def +(rhs: UInt)(using m: Module): UInt =
+    ModuleOps.add(lhs, rhs, m)
 
-// def renderTerm(term: Term): String =
-// term match
-// case Literal(c) => c.value match
-// case null => "null"
-// case b: Boolean => b.toString
-// case b: Byte => b.toString
-// case s: Short => s.toString
-// case i: Int => i.toString
-// case l: Long => l.toString
-// case f: Float => f.toString
-// case d: Double => d.toString
-// case s: String => s
-// case other => other.toString
-// case _ => term.show(using Printer.TreeShortCode)
+object ModuleMacros:
+  import scala.quoted.*
 
-// val tpeStr = Type.show[M]
-// val args = extractArgs(gen.asTerm)
-// val rendered = args.map(renderTerm)
-// val body = s"$tpeStr|${rendered.mkString(",")}"
-// val hash = MurmurHash3.stringHash(body)
-// s"$tpeStr#$hash"
+  private def findEnclosingValName(using Quotes): Option[String] =
+    import quotes.reflect.*
+    def loop(sym: Symbol): Option[String] =
+      if sym.isNoSymbol then None
+      else if sym.isValDef && !sym.flags.is(Flags.Synthetic) && !sym.flags.is(Flags.Artifact) then Some(sym.name)
+      else loop(sym.owner)
+    loop(Symbol.spliceOwner)
 
-// def emitPortDecl(name: String, tpe: ValueType, prefix: String = ""): Seq[String] =
-// val fullName = if prefix.isEmpty then name else s"$prefix.$name"
-// tpe match
-// case u: UInt =>
-// val dirStr = if u.dir == Direction.In then "input" else "output"
-// Seq(s"$dirStr $fullName : UInt<${u.w.value}>")
-// case b: Bool =>
-// val dirStr = if b.dir == Direction.In then "input" else "output"
-// Seq(s"$dirStr $fullName : Bool")
-// case bundle: Bundle =>
-// val p = bundle.asInstanceOf[Product]
-// (0 until p.productArity).flatMap { i =>
-// val fieldName = p.productElementName(i)
-// val fieldVal = p.productElement(i).asInstanceOf[ValueType]
-// emitPortDecl(fieldName, fieldVal, fullName)
-// }
+  def ioImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
+    val nameOpt = findEnclosingValName
+    '{ ModuleOps.io($t, ${Expr(nameOpt)}, $mod) }
 
-// def setSubmodulePrefix(mod: Module, prefix: String): Unit =
-// val clazz = mod.getClass
-// for field <- clazz.getDeclaredFields do
-// field.setAccessible(true)
-// field.get(mod) match
-// case node: Node[?] if node.kind == NodeKind.IO =>
-// node.setRef(s"$prefix.${node.ref}")
-// case _ => ()
+  def ioWithNameImpl[T <: HWData: Type](t: Expr[T], name: Expr[String], mod: Expr[Module])(using Quotes): Expr[T] =
+    '{ ModuleOps.io($t, Some($name), $mod) }
 
-// def formatType(tpe: ValueType): String = tpe match
-// case u: UInt => s"UInt<${u.w.value}>"
-// case b: Bool => "Bool"
-// case bundle: Bundle =>
-// val p = bundle.asInstanceOf[Product]
-// val fields = (0 until p.productArity).map { i =>
-// val fieldName = p.productElementName(i)
-// val fieldVal = p.productElement(i).asInstanceOf[ValueType]
-// val fieldDir = fieldVal match
-// case u: UInt => if u.dir == Direction.In then "flip " else ""
-// case b: Bool => if b.dir == Direction.In then "flip " else ""
-// case _: Bundle => ""
-// s"$fieldDir$fieldName : ${formatType(fieldVal)}"
-// }
-// s"{ ${fields.mkString(", ")} }"
+  def wireImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
+    val nameOpt = findEnclosingValName
+    '{ ModuleOps.wire($t, ${Expr(nameOpt)}, $mod) }
 
-// def formatLiteral(tpe: ValueType, value: Any): String = tpe match
-// case u: UInt => s"UInt<${u.w.value}>($value)"
-// case _: Bool => s"Bool($value)"
-// case _ => value.toString
+  def wireWithNameImpl[T <: HWData: Type](t: Expr[T], name: Expr[String], mod: Expr[Module])(using Quotes): Expr[T] =
+    '{ ModuleOps.wire($t, Some($name), $mod) }
+
+  def regImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
+    val nameOpt = findEnclosingValName
+    '{ ModuleOps.reg($t, ${Expr(nameOpt)}, $mod) }
+
+  def regWithNameImpl[T <: HWData: Type](t: Expr[T], name: Expr[String], mod: Expr[Module])(using Quotes): Expr[T] =
+    '{ ModuleOps.reg($t, Some($name), $mod) }
+
+  def litImpl[T <: HWData: Type](t: Expr[T], payload: Expr[HostTypeOf[T]], mod: Expr[Module])(using Quotes): Expr[T] =
+    val nameOpt = findEnclosingValName
+    '{ ModuleOps.lit($t, $payload, ${Expr(nameOpt)}, $mod) }
+
+  def litWithNameImpl[T <: HWData: Type](t: Expr[T], payload: Expr[HostTypeOf[T]], name: Expr[String], mod: Expr[Module])(using Quotes): Expr[T] =
+    '{ ModuleOps.lit($t, $payload, Some($name), $mod) }
+
+  def moduleInstImpl[M <: Module: Type](gen: Expr[M], parent: Expr[Module])(using Quotes): Expr[M] =
+    val nameOpt = findEnclosingValName
+    '{ Module.instantiate($gen, $parent, ${Expr(nameOpt)}) }
+
+final class Elaborator:
+  private implicit val ec: ExecutionContext = ExecutionContext.global
+  private val elaborated = collection.concurrent.TrieMap.empty[String, Future[ElaboratedDesign]]
+
+  def elaborate(top: Module): ElaboratedDesign =
+    Await.result(elaborateAsync(top), Duration.Inf)
+
+  private def elaborateAsync(mod: Module): Future[ElaboratedDesign] =
+    val key = mod.elaborationKey
+    elaborated.getOrElseUpdate(key, Future:
+      mod.children.foreach(child => Await.result(elaborateAsync(child), Duration.Inf))
+      mod.getBuilder.snapshot
+    )
+
+  def emit(design: ElaboratedDesign): String =
+    val sb = new StringBuilder
+    sb.append(s"module ${design.name}:\n")
+    design.ports.foreach(p => sb.append(s"  $p\n"))
+    if design.body.nonEmpty then sb.append("\n")
+    design.body.foreach(s => sb.append(s"  $s\n"))
+    sb.toString
+
+  def emitAll: String =
+    elaborated.values.map(f => emit(Await.result(f, Duration.Inf))).mkString("\n")

@@ -30,10 +30,16 @@ sealed trait HasDirectionality:
 sealed trait HWData:
   var literal: Option[Any] = None
   var kind: NodeKind = NodeKind.Unset
+  var ref: Option[String] = None
+  private var owner: Option[Module] = None
 
   def setNodeKind(kind: NodeKind) = this.kind = kind
   def setLitVal(payload: Any): Unit
   def getLitVal: Any
+  def setRef(r: String): Unit = ref = Some(r)
+  def getRef: Option[String] = ref
+  def setOwner(m: Module): Unit = owner = Some(m)
+  def getOwner: Option[Module] = owner
 
 sealed class UInt(
   val w: Width
@@ -99,10 +105,13 @@ trait Bundle[T] extends Selectable with HWData with HasDirectionality { self: T 
         val childT = self.asInstanceOf[Product].productElement(idx).asInstanceOf[FT]
         val childLit = literal.map(_.asInstanceOf[Product].productElement(idx))
         val childRef = constValue[L]
-        println(s"label: ${label} childRef: ${childRef} childLit: ${childLit}")
         inline erasedValue[FT] match
           case _: HWData =>
             childLit.map(lit => childT.asInstanceOf[FT & HWData].setLitVal(lit))
+            childT.asInstanceOf[FT & HWData].getOwner.orElse(this.getOwner).foreach(childT.asInstanceOf[FT & HWData].setOwner)
+            this.getRef.foreach { prefix =>
+              childT.asInstanceOf[FT & HWData].setRef(s"$prefix.${constValue[L]}")
+            }
             childT
           case _ =>
             childT
