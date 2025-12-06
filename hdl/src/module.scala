@@ -51,26 +51,14 @@ abstract class Module:
   protected inline def IO[T <: HWData](inline t: T): T =
     ${ ModuleMacros.ioImpl('t, 'this) }
 
-  protected inline def IO[T <: HWData](inline t: T, name: String): T =
-    ${ ModuleMacros.ioWithNameImpl('t, 'name, 'this) }
-
   protected inline def Wire[T <: HWData](inline t: T): T =
     ${ ModuleMacros.wireImpl('t, 'this) }
-
-  protected inline def Wire[T <: HWData](inline t: T, name: String): T =
-    ${ ModuleMacros.wireWithNameImpl('t, 'name, 'this) }
 
   protected inline def Reg[T <: HWData](inline t: T): T =
     ${ ModuleMacros.regImpl('t, 'this) }
 
-  protected inline def Reg[T <: HWData](inline t: T, name: String): T =
-    ${ ModuleMacros.regWithNameImpl('t, 'name, 'this) }
-
   protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T]): T =
     ${ ModuleMacros.litImpl('t, 'payload, 'this) }
-
-  protected inline def Lit[T <: HWData](inline t: T, name: String)(inline payload: HostTypeOf[T]): T =
-    ${ ModuleMacros.litWithNameImpl('t, 'payload, 'name, 'this) }
 
 object Module:
   inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
@@ -268,29 +256,17 @@ object ModuleMacros:
     val nameOpt = findEnclosingValName
     '{ ModuleOps.io($t, ${Expr(nameOpt)}, $mod) }
 
-  def ioWithNameImpl[T <: HWData: Type](t: Expr[T], name: Expr[String], mod: Expr[Module])(using Quotes): Expr[T] =
-    '{ ModuleOps.io($t, Some($name), $mod) }
-
   def wireImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
     '{ ModuleOps.wire($t, ${Expr(nameOpt)}, $mod) }
-
-  def wireWithNameImpl[T <: HWData: Type](t: Expr[T], name: Expr[String], mod: Expr[Module])(using Quotes): Expr[T] =
-    '{ ModuleOps.wire($t, Some($name), $mod) }
 
   def regImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
     '{ ModuleOps.reg($t, ${Expr(nameOpt)}, $mod) }
 
-  def regWithNameImpl[T <: HWData: Type](t: Expr[T], name: Expr[String], mod: Expr[Module])(using Quotes): Expr[T] =
-    '{ ModuleOps.reg($t, Some($name), $mod) }
-
   def litImpl[T <: HWData: Type](t: Expr[T], payload: Expr[HostTypeOf[T]], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
     '{ ModuleOps.lit($t, $payload, ${Expr(nameOpt)}, $mod) }
-
-  def litWithNameImpl[T <: HWData: Type](t: Expr[T], payload: Expr[HostTypeOf[T]], name: Expr[String], mod: Expr[Module])(using Quotes): Expr[T] =
-    '{ ModuleOps.lit($t, $payload, Some($name), $mod) }
 
   def moduleInstImpl[M <: Module: Type](gen: Expr[M], parent: Expr[Module])(using Quotes): Expr[M] =
     val nameOpt = findEnclosingValName
