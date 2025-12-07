@@ -313,10 +313,10 @@ def simple_module_test(): Unit =
 
   val elaborator = new Elaborator
   val a = new A
-  val design = elaborator.elaborate(a)
+  val designs = elaborator.elaborate(a)
   println("=" * 50)
   println("Simple Module Test:")
-  println(elaborator.emit(design))
+  println(elaborator.emitAll(designs))
   println("=" * 50)
 
 def list_operation_check(): Unit =
@@ -340,8 +340,8 @@ def list_operation_check(): Unit =
 
   val top = new MultBySum(4, 3)
   val elaborator = new Elaborator
-  val design = elaborator.elaborate(top)
-  val rendered = elaborator.emit(design)
+  val designs = elaborator.elaborate(top)
+  val rendered = elaborator.emitAll(designs)
   println("=" * 50)
   println("List Operation Check:")
   println(rendered)
@@ -379,10 +379,10 @@ def nested_module_check(): Unit =
 
   val elaborator = new Elaborator
   val top = new Top
-  val design = elaborator.elaborate(top)
+  val designs = elaborator.elaborate(top)
   println("=" * 50)
   println("Nested Module Check:")
-  println(elaborator.emit(design))
+  println(elaborator.emitAll(designs))
   println("=" * 50)
 
 def inheritance_check(): Unit =
@@ -399,10 +399,10 @@ def inheritance_check(): Unit =
 
   val elaborator = new Elaborator
   val concrete = new Concrete
-  val design = elaborator.elaborate(concrete)
+  val designs = elaborator.elaborate(concrete)
   println("=" * 50)
   println("Inheritance Check:")
-  println(elaborator.emit(design))
+  println(elaborator.emitAll(designs))
   println("=" * 50)
 
 def type_parameterization_check(): Unit =
@@ -424,12 +424,13 @@ def type_parameterization_check(): Unit =
   val design = elaborator.elaborate(tp)
   println("=" * 50)
   println("Type Parameterization Check: UInt(Width(3))")
-  println(elaborator.emit(design))
+  println(elaborator.emitAll(design))
 
+  val elaborator2 = new Elaborator
   val tp2 = new TypeParamModule(t = Bool())
-  val design2 = elaborator.elaborate(tp2)
+  val design2 = elaborator2.elaborate(tp2)
   println("Type Parameterization Check: Bool")
-  println(elaborator.emit(design2))
+  println(elaborator2.emitAll(design2))
   println("=" * 50)
 
 def conditional_generation_check(): Unit =
@@ -447,13 +448,14 @@ def conditional_generation_check(): Unit =
 
   println("=" * 50)
   println("Conditional generational check: add = true")
-  println(elaborator.emit(design))
+  println(elaborator.emitAll(design))
 
+  val elaborator2 = new Elaborator
   val add_false = new A(add = false)
-  val design_false = elaborator.elaborate(add_false)
+  val design_false = elaborator2.elaborate(add_false)
 
   println("Conditional generational check: add = false")
-  println(elaborator.emit(design_false))
+  println(elaborator.emitAll(design_false))
   println("=" * 50)
 
 def optional_io_check(): Unit =
@@ -477,11 +479,95 @@ def optional_io_check(): Unit =
    val elaborator = new Elaborator
    val add_true = new A(debug = true, w = 2)
    val design = elaborator.elaborate(add_true)
-   println(elaborator.emit(design))
+   println(elaborator.emitAll(design))
 
+   val elaborator2 = new Elaborator
    val add_false = new A(debug = false, w = 2)
-   val design_2 = elaborator.elaborate(add_false)
-   println(elaborator.emit(design_2))
+   val design_2 = elaborator2.elaborate(add_false)
+   println(elaborator2.emitAll(design_2))
+
+def nested_seq_generation_check(): Unit =
+  final case class AccIO(in: UInt, out: UInt) extends Bundle[AccIO]
+  class MatrixAcc(rows: Int, cols: Int) extends Module:
+    given Module = this
+    val io = IO(AccIO(Input(UInt(Width(8))), Output(UInt(Width(16)))))
+    val mats = Seq.tabulate(rows, cols)((r, c) => Wire(UInt(Width(8))))
+    mats.flatten.zipWithIndex.foreach { case (w, idx) =>
+      w := io.in + Lit(UInt(Width(8)))(idx)
+    }
+    val rowSums = mats.map(_.reduce(_ + _))
+    io.out := rowSums.reduce(_ + _)
+  val elaborator = new Elaborator
+  val top = new MatrixAcc(2, 3)
+  val designs = elaborator.elaborate(top)
+  println("=" * 50)
+  println("Nested Seq Generation Check:")
+  println(elaborator.emitAll(designs))
+  println("=" * 50)
+
+def optional_and_map_check(): Unit =
+  final case class OptIO(a: Option[UInt], b: UInt, out: UInt) extends Bundle[OptIO]
+  class OptModule(useA: Boolean) extends Module:
+    given Module = this
+    val io = IO(OptIO(
+      a = if useA then Some(Input(UInt(Width(4)))) else None,
+      b = Input(UInt(Width(4))),
+      out = Output(UInt(Width(5)))
+    ))
+    io.out := io.b
+    io.a.map(x => io.out := x + io.b)
+  val elaborator = new Elaborator
+  val m1 = new OptModule(true)
+  val d1 = elaborator.elaborate(m1)
+  println("=" * 50)
+  println("Optional Map Check (with a):")
+  println(elaborator.emitAll(d1))
+  println("=" * 50)
+  val elaborator2 = new Elaborator
+  val m2 = new OptModule(false)
+  val d2 = elaborator2.elaborate(m2)
+  println("=" * 50)
+  println("Optional Map Check (without a):")
+  println(elaborator.emitAll(d2))
+  println("=" * 50)
+
+def module_array_generation_check(): Unit =
+  final case class FanIO(in: UInt, out: UInt) extends Bundle[FanIO]
+  class Leaf(offset: Int) extends Module:
+    given Module = this
+    val io = IO(FanIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+    io.out := io.in + Lit(UInt(Width(4)))(offset)
+  class Fanout(count: Int) extends Module:
+    given Module = this
+    val io = IO(FanIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+    val leaves = Seq.tabulate(count)(i => Module(new Leaf(i)))
+    leaves.foreach(_.io.in := io.in)
+    io.out := leaves.map(_.io.out).reduce(_ + _)
+  val elaborator = new Elaborator
+  val top = new Fanout(3)
+  val designs = elaborator.elaborate(top)
+  println("=" * 50)
+  println("Module Array Generation Check:")
+  println(elaborator.emitAll(designs))
+  println("=" * 50)
+
+def parameter_sweep_check(): Unit =
+  final case class PassthroughIO[T <: HWData](in: T, out: T) extends Bundle[PassthroughIO[T]]
+  class Passthrough[T <: HWData](gen: => T) extends Module:
+    given Module = this
+    val io = IO(PassthroughIO(Input(gen), Output(gen)))
+    io.out := io.in
+  val elaborator = new Elaborator
+  val mods = Seq(
+    new Passthrough(UInt(Width(8))),
+    new Passthrough(UInt(Width(12))),
+    new Passthrough(Bool())
+  )
+  val designs = mods.flatMap(m => elaborator.elaborate(m))
+  println("=" * 50)
+  println("Parameter Sweep Check:")
+  println(elaborator.emitAll(designs))
+  println("=" * 50)
 
 @main def demo(): Unit =
   instantiation_check()
@@ -497,3 +583,7 @@ def optional_io_check(): Unit =
   type_parameterization_check()
   conditional_generation_check()
   optional_io_check()
+  nested_seq_generation_check()
+  optional_and_map_check()
+  module_array_generation_check()
+  parameter_sweep_check()
