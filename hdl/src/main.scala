@@ -317,7 +317,6 @@ def simple_module_test(): Unit =
   println("=" * 50)
   println("Simple Module Test:")
   println(elaborator.emitAll(designs))
-  println("=" * 50)
 
 def list_operation_check(): Unit =
   final case class MultBySumIO(a: UInt, b: UInt, sum: Seq[UInt]) extends Bundle[MultBySumIO]

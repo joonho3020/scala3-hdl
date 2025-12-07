@@ -6,7 +6,7 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
 import scala.util.hashing.MurmurHash3
-import scala.compiletime.summonInline
+import scala.compiletime.{summonInline, summonFrom}
 
 final case class ElaboratedDesign(name: String, ports: Seq[String], body: Seq[String])
 
@@ -45,6 +45,15 @@ final class ModuleBuilder(val moduleBaseName: String):
       case InstEntry(n, k, b) => s"inst $n of ${instLabels.getOrElse(k, b)}"
     }
     ElaboratedDesign(label, ports.toSeq, renderedBody.toSeq)
+
+  def hashSignature: String =
+    val sb = new StringBuilder
+    ports.foreach(p => sb.append("p:").append(p).append(";"))
+    body.foreach {
+      case LineEntry(t) => sb.append("l:").append(t).append(";")
+      case InstEntry(n, k, b) => sb.append("i:").append(n).append("@").append(k).append(":").append(b).append(";")
+    }
+    sb.toString
 
 trait WalkHW[T]:
   def apply(x: T, path: String)(f: (HWData, String) => Unit): Unit
@@ -140,12 +149,16 @@ object Module:
       .filter(f => !java.lang.reflect.Modifier.isStatic(f.getModifiers))
       .filter(f => !f.isSynthetic)
     val sb = new StringBuilder
+    sb.append("class=").append(cls.getName).append(";")
     fields.sortBy(_.getName).foreach { f =>
       f.setAccessible(true)
       val v = try f.get(mod) catch case _: Throwable => "<?>"
       sb.append(f.getName).append("=").append(Option(v).map(_.toString).getOrElse("null")).append(";")
     }
-    MurmurHash3.stringHash(sb.toString).toString
+    sb.append("builder=").append(mod.getBuilder.hashSignature)
+    val h = MurmurHash3.stringHash(sb.toString).toString
+    println(s"paramHash ${mod.moduleName} signature=${sb.toString} hash=$h")
+    h
 
 private[hdl] object ModuleOps:
   def io[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
