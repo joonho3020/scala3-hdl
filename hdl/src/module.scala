@@ -10,15 +10,25 @@ import scala.compiletime.{summonInline, summonFrom}
 
 final case class ElaboratedDesign(name: String, ports: Seq[String], body: Seq[String])
 
-private sealed trait BodyEntry
-private final case class InstEntry(instName: String, elabKey: String, baseModule: String) extends BodyEntry
-private final case class LineEntry(text: String) extends BodyEntry
+private sealed trait BodyEntry:
+  def indent: Int
+private final case class InstEntry(instName: String, elabKey: String, baseModule: String, indent: Int) extends BodyEntry
+private final case class LineEntry(text: String, indent: Int) extends BodyEntry
 
 final class ModuleBuilder(val moduleBaseName: String):
   private val ports = mutable.ArrayBuffer.empty[String]
   private val body = mutable.ArrayBuffer.empty[BodyEntry]
   private val usedNames = mutable.Set.empty[String]
   private var tempCounter = 0
+  private var indentLevel = 0
+
+  private def currentIndentLevel: Int = indentLevel
+  private def indentString(n: Int): String = "  " * n
+
+  def withIndent[T](thunk: => T): T =
+    indentLevel += 1
+    try thunk
+    finally indentLevel -= 1
 
   def freshName(prefix: String): String =
     tempCounter += 1
@@ -35,14 +45,14 @@ final class ModuleBuilder(val moduleBaseName: String):
     }.getOrElse(freshName(prefix))
 
   def addPort(stmt: String): Unit = ports += stmt
-  def addBody(stmt: String): Unit = body += LineEntry(stmt)
+  def addBody(stmt: String): Unit = body += LineEntry(stmt, currentIndentLevel)
   def addInst(name: String, elabKey: String, base: String): Unit =
-    body += InstEntry(name, elabKey, base)
+    body += InstEntry(name, elabKey, base, currentIndentLevel)
 
   def snapshot(label: String, instLabels: Map[String, String]): ElaboratedDesign =
     val renderedBody = body.map {
-      case LineEntry(t)     => t
-      case InstEntry(n, k, b) => s"inst $n of ${instLabels.getOrElse(k, b)}"
+      case LineEntry(t, ind)     => s"${indentString(ind)}$t"
+      case InstEntry(n, k, b, ind) => s"${indentString(ind)}inst $n of ${instLabels.getOrElse(k, b)}"
     }
     ElaboratedDesign(label, ports.toSeq, renderedBody.toSeq)
 
@@ -50,8 +60,8 @@ final class ModuleBuilder(val moduleBaseName: String):
     val sb = new StringBuilder
     ports.foreach(p => sb.append("p:").append(p).append(";"))
     body.foreach {
-      case LineEntry(t) => sb.append("l:").append(t).append(";")
-      case InstEntry(n, k, b) => sb.append("i:").append(n).append("@").append(k).append(":").append(b).append(";")
+      case LineEntry(t, ind) => sb.append("l:").append(ind).append(":").append(t).append(";")
+      case InstEntry(n, k, b, ind) => sb.append("i:").append(ind).append(":").append(n).append("@").append(k).append(":").append(b).append(";")
     }
     sb.toString
 
@@ -127,6 +137,11 @@ abstract class Module:
   protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T])(using WalkHW[T]): T =
     ${ ModuleMacros.litImpl('t, 'payload, 'this) }
 
+  protected inline def when(cond: Bool)(block: => Unit)(using m: Module): WhenDSL =
+    ModuleOps.when(cond, summon[Module]) {
+      block
+    }
+
 object Module:
   inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
     ${ ModuleMacros.moduleInstImpl('gen, 'parent) }
@@ -193,6 +208,14 @@ private[hdl] object ModuleOps:
     val lhs = refFor(dst, mod)
     val rhs = refFor(src, mod)
     mod.getBuilder.addBody(s"connect $lhs, $rhs")
+
+  def when(cond: Bool, mod: Module)(block: => Unit): WhenDSL =
+    val condRef = refFor(cond, mod)
+    mod.getBuilder.addBody(s"when $condRef:")
+    mod.getBuilder.withIndent {
+      block
+    }
+    new WhenDSL(mod)
 
   def add(lhs: UInt, rhs: UInt, mod: Module): UInt =
     val resWidth = math.max(lhs.w.value, rhs.w.value)
@@ -265,6 +288,20 @@ extension [T <: HWData](dst: T)
 extension (lhs: UInt)
   def +(rhs: UInt)(using m: Module): UInt =
     ModuleOps.add(lhs, rhs, m)
+
+final class WhenDSL(private val mod: Module):
+  def elsewhen(cond: Bool)(block: => Unit): WhenDSL =
+    mod.getBuilder.addBody(s"else when ${ModuleOps.refFor(cond, mod)}:")
+    mod.getBuilder.withIndent {
+      block
+    }
+    this
+
+  def otherwise(block: => Unit): Unit =
+    mod.getBuilder.addBody("otherwise:")
+    mod.getBuilder.withIndent {
+      block
+    }
 
 object ModuleMacros:
   import scala.quoted.*

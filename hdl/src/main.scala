@@ -457,6 +457,62 @@ def conditional_generation_check(): Unit =
   println(elaborator.emitAll(design_false))
   println("=" * 50)
 
+def when_behavior_check(): Unit =
+  final case class WhenIO(
+    sel: Bool, sel2: Bool, sel3: Bool, in: UInt, alt: UInt, out: UInt) extends Bundle[WhenIO]
+
+  class WhenModule extends Module:
+    given Module = this
+    val io = IO(WhenIO(
+      sel = Input(Bool()),
+      sel2 = Input(Bool()),
+      sel3 = Input(Bool()),
+      in = Input(UInt(Width(4))),
+      alt = Input(UInt(Width(4))),
+      out = Output(UInt(Width(4)))
+    ))
+    when(io.sel) {
+      io.out := io.in
+    }.otherwise {
+      io.out := io.alt
+    }
+
+  class WhenElseModule extends Module:
+    given Module = this
+    val io = IO(WhenIO(
+      sel = Input(Bool()),
+      sel2 = Input(Bool()),
+      sel3 = Input(Bool()),
+      in = Input(UInt(Width(4))),
+      alt = Input(UInt(Width(4))),
+      out = Output(UInt(Width(4)))
+    ))
+    when(io.sel) {
+      io.out := io.in
+    }.elsewhen(io.sel2) {
+      when (io.sel3) {
+        io.out := io.alt
+      } .otherwise {
+        io.out := io.in
+      }
+    }.otherwise {
+      io.out := io.in + io.alt
+    }
+
+  val elaborator = new Elaborator
+  val m1 = new WhenModule
+  val d1 = elaborator.elaborate(m1)
+  println("=" * 50)
+  println("When/Otherwise Check:")
+  println(elaborator.emitAll(d1))
+
+  val elaborator2 = new Elaborator
+  val m2 = new WhenElseModule
+  val d2 = elaborator2.elaborate(m2)
+  println("When/Elsewhen/Otherwise Check:")
+  println(elaborator2.emitAll(d2))
+  println("=" * 50)
+
 def optional_io_check(): Unit =
    class A(debug: Boolean, w: Int) extends Module:
      given Module = this
@@ -581,6 +637,7 @@ def parameter_sweep_check(): Unit =
   inheritance_check()
   type_parameterization_check()
   conditional_generation_check()
+  when_behavior_check()
   optional_io_check()
   nested_seq_generation_check()
   optional_and_map_check()
