@@ -320,13 +320,13 @@ def simple_module_test(): Unit =
   println("=" * 50)
 
 def list_operation_check(): Unit =
-  final case class MultBySumIO(a: UInt, b: UInt, sum: UInt) extends Bundle[MultBySumIO]
+  final case class MultBySumIO(a: UInt, b: UInt, sum: Seq[UInt]) extends Bundle[MultBySumIO]
   object MultBySumIO:
     def apply(w: Int): MultBySumIO =
       MultBySumIO(
         a = Input(UInt(Width(w))),
         b = Input(UInt(Width(w))),
-        sum = Output(UInt(Width(w)))
+        sum = Seq.fill(3)(Output(UInt(Width(w)))),
       )
 
   class MultBySum(width: Int, maxMult: Int) extends Module:
@@ -335,7 +335,8 @@ def list_operation_check(): Unit =
     val wires = Seq.fill(maxMult)(Wire(UInt(Width(width))))
     wires.foreach(_ := io.a)
     wires(0) := wires(1) + Lit(UInt(Width(width)))(3)
-    io.sum := wires.reduce(_ + _)
+    io.sum(0) := wires.reduce(_ + _)
+    io.sum(1) := wires.reduce(_ + _)
 
   val top = new MultBySum(4, 3)
   val elaborator = new Elaborator
@@ -384,92 +385,103 @@ def nested_module_check(): Unit =
   println(elaborator.emit(design))
   println("=" * 50)
 
-// def inheritance_check(): Unit =
-// class Abstract extends Module:
-// given Module = this
-// val io = IO(
-// SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4))))
-// )
-// io.out := io.in
+def inheritance_check(): Unit =
+  class Abstract extends Module:
+    given Module = this
+    val io = IO(
+      SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4))))
+    )
+    io.out := io.in
 
-// class Concrete extends Abstract:
-// val add_result = io.in + io.in + io.in
-// io.out := add_result
+  class Concrete extends Abstract:
+    val add_result = io.in + io.in + io.in
+    io.out := add_result
 
-// val elaborator = new Elaborator
-// val concrete = new Concrete
-// val design = elaborator.elaborate(concrete)
-// println("=" * 50)
-// println("Inheritance Check:")
-// println(elaborator.emit(design))
-// println("=" * 50)
+  val elaborator = new Elaborator
+  val concrete = new Concrete
+  val design = elaborator.elaborate(concrete)
+  println("=" * 50)
+  println("Inheritance Check:")
+  println(elaborator.emit(design))
+  println("=" * 50)
 
-// def type_parameterization_check(): Unit =
-// final case class SimpleIOT[T <: ValueType](in: T, out: T) extends Bundle
-// class TypeParamModule[T <: ValueType](
-// val t: T
-// )(
-// using DirLike[T]
-// ) extends Module:
-// given Module = this
-// val io = IO(SimpleIOT[T](
-// in = Input(t),
-// out = Output(t)
-// ))
-// io.out := io.in
+def type_parameterization_check(): Unit =
+  final case class SimpleIOT[T <: HWData](in: T, out: T)
+    extends Bundle[SimpleIOT[T]]
 
-// val elaborator = new Elaborator
-// val tp = new TypeParamModule(t = UInt(Width(3)))
-// val design = elaborator.elaborate(tp)
-// println("=" * 50)
-// println("Type Parameterization Check:")
-// println(elaborator.emit(design))
-// println("=" * 50)
+  class TypeParamModule[T <: HWData](
+    val t: T
+  ) extends Module:
+    given Module = this
+    val io = IO(SimpleIOT[T](
+      in = Input(t),
+      out = Output(t)
+    ))
+    io.out := io.in
 
-// def conditional_generation_check(): Unit =
-// class A(add: Boolean) extends Module:
-// given Module = this
-// val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
-// if (add)
-// io.out := io.in + io.in
-// else
-// io.out := io.in
+  val elaborator = new Elaborator
+  val tp = new TypeParamModule(t = UInt(Width(3)))
+  val design = elaborator.elaborate(tp)
+  println("=" * 50)
+  println("Type Parameterization Check: UInt(Width(3))")
+  println(elaborator.emit(design))
 
-// val elaborator = new Elaborator
-// val add_true = new A(add = true)
-// val design = elaborator.elaborate(add_true)
-// println(elaborator.emit(design))
+  val tp2 = new TypeParamModule(t = Bool())
+  val design2 = elaborator.elaborate(tp2)
+  println("Type Parameterization Check: Bool")
+  println(elaborator.emit(design2))
+  println("=" * 50)
 
-// val add_false = new A(add = false)
-// val design_false = elaborator.elaborate(add_false)
-// println(elaborator.emit(design_false))
+def conditional_generation_check(): Unit =
+  class A(add: Boolean) extends Module:
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+    if (add)
+      io.out := io.in + io.in
+    else
+      io.out := io.in
 
-// def optional_io_check(): Unit =
-//    class A(debug: Boolean, w: Int) extends Module:
-//      given Module = this
-//      case class MyBundleIf(
-//        a: Option[UInt],
-//        b: UInt,
-//        c: UInt) extends Bundle
-// 
-//      val io = IO(MyBundleIf(
-//        a = if (debug) Some(Input(UInt(Width(w)))) else None,
-//        b = Input(UInt(Width(w))),
-//        c = Output(UInt(Width(w + 1)))
-//      ))
-//      io.c := io.b
-//      io.a.map(x => {
-//        io.c := x + io.b
-//      })
-// 
-//    val elaborator = new Elaborator
-//    val add_true = new A(debug = true, w = 2)
-//    val design = elaborator.elaborate(add_true)
-//    println(elaborator.emit(design))
-// 
-//    val add_false = new A(debug = false, w = 2)
-//    val design_2 = elaborator.elaborate(add_false)
-//    println(elaborator.emit(design_2))
+  val elaborator = new Elaborator
+  val add_true = new A(add = true)
+  val design = elaborator.elaborate(add_true)
+
+  println("=" * 50)
+  println("Conditional generational check: add = true")
+  println(elaborator.emit(design))
+
+  val add_false = new A(add = false)
+  val design_false = elaborator.elaborate(add_false)
+
+  println("Conditional generational check: add = false")
+  println(elaborator.emit(design_false))
+  println("=" * 50)
+
+def optional_io_check(): Unit =
+   class A(debug: Boolean, w: Int) extends Module:
+     given Module = this
+     case class MyBundleIf(
+       a: Option[UInt],
+       b: UInt,
+       c: UInt) extends Bundle[MyBundleIf]
+
+     val io = IO(MyBundleIf(
+       a = if (debug) Some(Input(UInt(Width(w)))) else None,
+       b = Input(UInt(Width(w))),
+       c = Output(UInt(Width(w + 1)))
+     ))
+     io.c := io.b
+     io.a.map(x => {
+       io.c := x + io.b
+     })
+
+   val elaborator = new Elaborator
+   val add_true = new A(debug = true, w = 2)
+   val design = elaborator.elaborate(add_true)
+   println(elaborator.emit(design))
+
+   val add_false = new A(debug = false, w = 2)
+   val design_2 = elaborator.elaborate(add_false)
+   println(elaborator.emit(design_2))
 
 @main def demo(): Unit =
   instantiation_check()
@@ -481,7 +493,7 @@ def nested_module_check(): Unit =
   simple_module_test()
   list_operation_check()
   nested_module_check()
-// inheritance_check()
-// type_parameterization_check()
-// conditional_generation_check()
-// optional_io_check()
+  inheritance_check()
+  type_parameterization_check()
+  conditional_generation_check()
+  optional_io_check()

@@ -22,12 +22,11 @@ sealed class Width(val value: Int):
 object Width:
   def apply(x: Int): Width = new Width(x)
 
-sealed trait HasDirectionality:
+sealed trait HWData:
   var dir: Direction = Direction.Default
   def flip: Unit =
     this.dir = Direction.flip(this.dir)
 
-sealed trait HWData:
   var literal: Option[Any] = None
   var kind: NodeKind = NodeKind.Unset
   var ref: Option[String] = None
@@ -43,7 +42,7 @@ sealed trait HWData:
 
 sealed class UInt(
   val w: Width
-) extends HWData with HasDirectionality:
+) extends HWData:
 
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[UInt]])
@@ -58,7 +57,7 @@ sealed class UInt(
 object UInt:
   def apply(w: Width): UInt = new UInt(w)
 
-sealed class Bool extends HWData with HasDirectionality:
+sealed class Bool extends HWData:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[Bool]])
 
@@ -85,7 +84,7 @@ type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] = (Labels,
 
 // NOTE: Literals assume that the BundleIf is pure. That is, all fields are of HWData
 // and there is no mixing with Scala's library types such as Option, Seq, List
-trait Bundle[T] extends Selectable with HWData with HasDirectionality { self: T =>
+trait Bundle[T] extends Selectable with HWData { self: T =>
   type FieldToNode[X] = X match
     case _           => X
 
@@ -129,14 +128,14 @@ trait Bundle[T] extends Selectable with HWData with HasDirectionality { self: T 
 }
 
 object Input:
-  def apply[T <: HasDirectionality](t: T): T =
+  def apply[T <: HWData](t: T): T =
     t.flip
     t
 
 object Output:
-  def apply[T <: HasDirectionality](t: T): T =
+  def apply[T <: HWData](t: T): T =
     t
 
 object Flipped:
-  def apply[T <: HasDirectionality](t: T): T =
+  def apply[T <: HWData](t: T): T =
     Input(t)

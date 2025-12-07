@@ -30,92 +30,16 @@ final class ModuleBuilder(val moduleName: String):
   def addBody(stmt: String): Unit = body += stmt
   def snapshot: ElaboratedDesign = ElaboratedDesign(moduleName, ports.toSeq, body.toSeq)
 
-abstract class Module:
-  private val _builder = new ModuleBuilder(moduleName)
-  private val _children = mutable.ArrayBuffer.empty[Module]
-  private var _elabKey: Option[String] = None
-  private var _instanceName: Option[String] = None
-
-  def moduleName: String = getClass.getSimpleName.stripSuffix("$")
-  def elaborationKey: String = _elabKey.getOrElse(Module.autoElaborationKey(this))
-  private[hdl] def setElabKey(k: String): Unit = _elabKey = Some(k)
-  private[hdl] def setInstanceName(n: String): Unit = _instanceName = Some(n)
-  private[hdl] def instanceName: Option[String] = _instanceName
-  private[hdl] def addChild(m: Module): Unit = _children += m
-  private[hdl] def children: Seq[Module] = _children.toSeq
-  private[hdl] def getBuilder: ModuleBuilder = _builder
-  private[hdl] def register(data: HWData, ref: Option[String]): Unit =
-    ModuleUtils.assignOwner(data, this)
-    ref.foreach(r => ModuleUtils.assignRefs(data, r))
-
-  protected inline def IO[T <: HWData](inline t: T): T =
-    ${ ModuleMacros.ioImpl('t, 'this) }
-
-  protected inline def Wire[T <: HWData](inline t: T): T =
-    ${ ModuleMacros.wireImpl('t, 'this) }
-
-  protected inline def Reg[T <: HWData](inline t: T): T =
-    ${ ModuleMacros.regImpl('t, 'this) }
-
-  protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T]): T =
-    ${ ModuleMacros.litImpl('t, 'payload, 'this) }
-
-object Module:
-  inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
-    ${ ModuleMacros.moduleInstImpl('gen, 'parent) }
-
+object ModuleBuilder:
   def instantiate[M <: hdl.Module](gen: => M, parent: hdl.Module, name: Option[String]): M =
     val sub = gen
     val instName = parent.getBuilder.allocateName(name, "inst")
     sub.setInstanceName(instName)
-    sub.setElabKey(autoElaborationKey(sub))
+    sub.setElabKey(ModuleBuilder.autoElaborationKey(sub))
     parent.addChild(sub)
     parent.getBuilder.addBody(s"inst $instName of ${sub.moduleName}")
     sub
 
-  private def autoElaborationKey(mod: Module): String =
-    s"${mod.moduleName}@${System.identityHashCode(mod)}"
-
-private[hdl] object ModuleUtils:
-  def assignOwner(value: Any, mod: Module): Unit =
-    value match
-      case h: HWData =>
-        h.setOwner(mod)
-        h match
-          case b: Bundle[?] =>
-            val p = b.asInstanceOf[Product]
-            (0 until p.productArity).foreach(i => assignOwner(p.productElement(i), mod))
-          case _ =>
-      case Some(v) =>
-        assignOwner(v, mod)
-      case seq: Seq[?] =>
-        seq.foreach(elem => assignOwner(elem, mod))
-      case _ =>
-
-  def assignRefs(value: Any, base: String): Unit =
-    value match
-      case h: HWData =>
-        h.setRef(base)
-        h match
-          case b: Bundle[?] =>
-            val p = b.asInstanceOf[Product]
-            (0 until p.productArity).foreach { i =>
-              val fieldName = p.productElementName(i)
-              p.productElement(i) match
-                case hd: HWData => assignRefs(hd, s"$base.$fieldName")
-                case Some(hd: HWData) => assignRefs(hd, s"$base.$fieldName")
-                case seq: Seq[?] =>
-                  seq.zipWithIndex.foreach {
-                    case (hd: HWData, idx) => assignRefs(hd, s"$base.$fieldName[$idx]")
-                    case (Some(hd: HWData), idx) => assignRefs(hd, s"$base.$fieldName[$idx]")
-                    case _ =>
-                  }
-                case _ =>
-            }
-          case _ =>
-      case _ =>
-
-private[hdl] object ModuleOps:
   def io[T <: HWData](t: T, name: Option[String], mod: Module): T =
     val baseName = mod.getBuilder.allocateName(name, "io")
     t.setNodeKind(NodeKind.IO)
@@ -160,6 +84,44 @@ private[hdl] object ModuleOps:
     val rhsRef = refFor(rhs, mod)
     mod.getBuilder.addBody(s"node $name = add($lhsRef, $rhsRef)")
     result
+
+  def assignOwner(value: Any, mod: Module): Unit =
+    value match
+      case h: HWData =>
+        h.setOwner(mod)
+        h match
+          case b: Bundle[?] =>
+            val p = b.asInstanceOf[Product]
+            (0 until p.productArity).foreach(i => assignOwner(p.productElement(i), mod))
+          case _ =>
+      case Some(v) =>
+        assignOwner(v, mod)
+      case seq: Seq[?] =>
+        seq.foreach(elem => assignOwner(elem, mod))
+      case _ =>
+
+  def assignRefs(value: Any, base: String): Unit =
+    value match
+      case h: HWData =>
+        h.setRef(base)
+        h match
+          case b: Bundle[?] =>
+            val p = b.asInstanceOf[Product]
+            (0 until p.productArity).foreach { i =>
+              val fieldName = p.productElementName(i)
+              p.productElement(i) match
+                case hd: HWData => assignRefs(hd, s"$base.$fieldName")
+                case Some(hd: HWData) => assignRefs(hd, s"$base.$fieldName")
+                case seq: Seq[?] =>
+                  seq.zipWithIndex.foreach {
+                    case (hd: HWData, idx) => assignRefs(hd, s"$base.$fieldName[$idx]")
+                    case (Some(hd: HWData), idx) => assignRefs(hd, s"$base.$fieldName[$idx]")
+                    case _ =>
+                  }
+                case _ =>
+            }
+          case _ =>
+      case _ =>
 
   def refFor(data: HWData, current: Module): String =
     val base = data.getRef
@@ -229,17 +191,54 @@ private[hdl] object ModuleOps:
     case _: Bool => s"Bool($value)"
     case _ => value.toString
 
-  private def dirPrefixOf(h: HWData): String = h match
-    case hd: HasDirectionality if hd.dir == Direction.In => "flip "
-    case _ => ""
+  def dirPrefixOf(h: HWData): String =
+    if (h.dir == Direction.In) "flip " else ""
+
+  def autoElaborationKey(mod: Module): String =
+    s"${mod.moduleName}@${System.identityHashCode(mod)}"
+
+abstract class Module:
+  private val _builder = new ModuleBuilder(moduleName)
+  private val _children = mutable.ArrayBuffer.empty[Module]
+  private var _elabKey: Option[String] = None
+  private var _instanceName: Option[String] = None
+
+  def moduleName: String = getClass.getSimpleName.stripSuffix("$")
+  def elaborationKey: String = _elabKey.getOrElse(ModuleBuilder.autoElaborationKey(this))
+  private[hdl] def setElabKey(k: String): Unit = _elabKey = Some(k)
+  private[hdl] def setInstanceName(n: String): Unit = _instanceName = Some(n)
+  private[hdl] def instanceName: Option[String] = _instanceName
+  private[hdl] def addChild(m: Module): Unit = _children += m
+  private[hdl] def children: Seq[Module] = _children.toSeq
+  private[hdl] def getBuilder: ModuleBuilder = _builder
+  private[hdl] def register(data: HWData, ref: Option[String]): Unit =
+    ModuleBuilder.assignOwner(data, this)
+    ref.foreach(r => ModuleBuilder.assignRefs(data, r))
+
+  protected inline def IO[T <: HWData](inline t: T): T =
+    ${ ModuleMacros.ioImpl('t, 'this) }
+
+  protected inline def Wire[T <: HWData](inline t: T): T =
+    ${ ModuleMacros.wireImpl('t, 'this) }
+
+  protected inline def Reg[T <: HWData](inline t: T): T =
+    ${ ModuleMacros.regImpl('t, 'this) }
+
+  protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T]): T =
+    ${ ModuleMacros.litImpl('t, 'payload, 'this) }
+
+
+object Module:
+  inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
+    ${ ModuleMacros.moduleInstImpl('gen, 'parent) }
 
 extension [T <: HWData](dst: T)
   def :=(src: T)(using m: Module): Unit =
-    ModuleOps.connect(dst, src, m)
+    ModuleBuilder.connect(dst, src, m)
 
 extension (lhs: UInt)
   def +(rhs: UInt)(using m: Module): UInt =
-    ModuleOps.add(lhs, rhs, m)
+    ModuleBuilder.add(lhs, rhs, m)
 
 object ModuleMacros:
   import scala.quoted.*
@@ -254,23 +253,23 @@ object ModuleMacros:
 
   def ioImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
-    '{ ModuleOps.io($t, ${Expr(nameOpt)}, $mod) }
+    '{ ModuleBuilder.io($t, ${Expr(nameOpt)}, $mod) }
 
   def wireImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
-    '{ ModuleOps.wire($t, ${Expr(nameOpt)}, $mod) }
+    '{ ModuleBuilder.wire($t, ${Expr(nameOpt)}, $mod) }
 
   def regImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
-    '{ ModuleOps.reg($t, ${Expr(nameOpt)}, $mod) }
+    '{ ModuleBuilder.reg($t, ${Expr(nameOpt)}, $mod) }
 
   def litImpl[T <: HWData: Type](t: Expr[T], payload: Expr[HostTypeOf[T]], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
-    '{ ModuleOps.lit($t, $payload, ${Expr(nameOpt)}, $mod) }
+    '{ ModuleBuilder.lit($t, $payload, ${Expr(nameOpt)}, $mod) }
 
   def moduleInstImpl[M <: Module: Type](gen: Expr[M], parent: Expr[Module])(using Quotes): Expr[M] =
     val nameOpt = findEnclosingValName
-    '{ Module.instantiate($gen, $parent, ${Expr(nameOpt)}) }
+    '{ ModuleBuilder.instantiate($gen, $parent, ${Expr(nameOpt)}) }
 
 final class Elaborator:
   private implicit val ec: ExecutionContext = ExecutionContext.global
