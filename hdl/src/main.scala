@@ -348,29 +348,29 @@ def list_operation_check(): Unit =
   println("=" * 50)
 
 def nested_module_check(): Unit =
-  class A extends Module:
+  class A(w: Int) extends Module:
     given Module = this
-    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+    val io = IO(SimpleIO(Input(UInt(Width(w))), Output(UInt(Width(w)))))
     io.out := io.in
 
-  class C extends Module:
+  class C(w: Int) extends Module:
     given Module = this
-    val io = IO(SimpleIO(Input(UInt(Width(5))), Output(UInt(Width(5)))))
+    val io = IO(SimpleIO(Input(UInt(Width(w))), Output(UInt(Width(w)))))
     io.out := io.in
 
-  class B extends Module:
+  class B(w1: Int, w2: Int) extends Module:
     given Module = this
-    val io = IO(SimpleIO(Input(UInt(Width(6))), Output(UInt(Width(6)))))
-    val c = Module(new C)
+    val io = IO(SimpleIO(Input(UInt(Width(w1))), Output(UInt(Width(w1)))))
+    val c = Module(new C(w2))
     c.io.in := io.in
     io.out := c.io.out
 
   class Top extends Module:
     given Module = this
     val io = IO(SimpleIO(Input(UInt(Width(7))), Output(UInt(Width(7)))))
-    val a0 = Module(new A)
-    val a1 = Module(new A)
-    val b = Module(new B)
+    val a0 = Module(new A(2))
+    val a1 = Module(new A(3))
+    val b = Module(new B(4, 5))
     a0.io.in := io.in
     a1.io.in := io.in
     b.io.in := io.in

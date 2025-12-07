@@ -2,25 +2,29 @@ package hdl
 
 import scala.collection.mutable
 import scala.collection.concurrent.TrieMap
-import scala.compiletime.*
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
-import scala.deriving.Mirror
-import scala.util.NotGiven
+import scala.util.hashing.MurmurHash3
+import scala.compiletime.summonInline
 
 final case class ElaboratedDesign(name: String, ports: Seq[String], body: Seq[String])
 
+private sealed trait BodyEntry
+private final case class InstEntry(instName: String, elabKey: String, baseModule: String) extends BodyEntry
+private final case class LineEntry(text: String) extends BodyEntry
+
 final class ModuleBuilder(val moduleBaseName: String):
   private val ports = mutable.ArrayBuffer.empty[String]
-  private val body = mutable.ArrayBuffer.empty[String]
+  private val body = mutable.ArrayBuffer.empty[BodyEntry]
   private val usedNames = mutable.Set.empty[String]
   private var tempCounter = 0
 
   def freshName(prefix: String): String =
     tempCounter += 1
     val candidate = s"${prefix}_$tempCounter"
-    if usedNames.contains(candidate) then freshName(prefix) else
+    if usedNames.contains(candidate) then freshName(prefix)
+    else
       usedNames += candidate
       candidate
 
@@ -31,8 +35,16 @@ final class ModuleBuilder(val moduleBaseName: String):
     }.getOrElse(freshName(prefix))
 
   def addPort(stmt: String): Unit = ports += stmt
-  def addBody(stmt: String): Unit = body += stmt
-  def snapshot(label: String): ElaboratedDesign = ElaboratedDesign(label, ports.toSeq, body.toSeq)
+  def addBody(stmt: String): Unit = body += LineEntry(stmt)
+  def addInst(name: String, elabKey: String, base: String): Unit =
+    body += InstEntry(name, elabKey, base)
+
+  def snapshot(label: String, instLabels: Map[String, String]): ElaboratedDesign =
+    val renderedBody = body.map {
+      case LineEntry(t)     => t
+      case InstEntry(n, k, b) => s"inst $n of ${instLabels.getOrElse(k, b)}"
+    }
+    ElaboratedDesign(label, ports.toSeq, renderedBody.toSeq)
 
 trait WalkHW[T]:
   def apply(x: T, path: String)(f: (HWData, String) => Unit): Unit
@@ -43,7 +55,7 @@ object WalkHW:
       case h: HWData =>
         f(h, path)
         x match
-          case p: Product => walkProduct(p, path, f)
+          case p: Product    => walkProduct(p, path, f)
           case it: IterableOnce[?] => walkIterable(it, path, f)
           case _ => ()
       case it: IterableOnce[?] =>
@@ -82,6 +94,7 @@ abstract class Module:
   private var _instanceName: Option[String] = None
 
   def moduleName: String = getClass.getSimpleName.stripSuffix("$")
+  protected def elaborationParamHash: String = Module.paramHash(this)
   def elaborationKey: String = _elabKey.getOrElse(Module.autoElaborationKey(this))
   private[hdl] def setElabKey(k: String): Unit = _elabKey = Some(k)
   private[hdl] def setInstanceName(n: String): Unit = _instanceName = Some(n)
@@ -90,32 +103,20 @@ abstract class Module:
   private[hdl] def children: Seq[Module] = _children.toSeq
   private[hdl] def getBuilder: ModuleBuilder = _builder
   private[hdl] def register[T](data: T, ref: Option[String])(using WalkHW[T]): Unit =
-    ModuleUtils.assignOwner(data, this)
-    ref.foreach(r => ModuleUtils.assignRefs(data, r))
+    ModuleOps.assignOwner(data, this)
+    ref.foreach(r => ModuleOps.assignRefs(data, r))
 
   protected inline def IO[T <: HWData](inline t: T)(using WalkHW[T]): T =
     ${ ModuleMacros.ioImpl('t, 'this) }
 
-  protected inline def IO[T <: HWData](inline t: T, name: String)(using WalkHW[T]): T =
-    ${ ModuleMacros.ioWithNameImpl('t, 'name, 'this) }
-
   protected inline def Wire[T <: HWData](inline t: T)(using WalkHW[T]): T =
     ${ ModuleMacros.wireImpl('t, 'this) }
-
-  protected inline def Wire[T <: HWData](inline t: T, name: String)(using WalkHW[T]): T =
-    ${ ModuleMacros.wireWithNameImpl('t, 'name, 'this) }
 
   protected inline def Reg[T <: HWData](inline t: T)(using WalkHW[T]): T =
     ${ ModuleMacros.regImpl('t, 'this) }
 
-  protected inline def Reg[T <: HWData](inline t: T, name: String)(using WalkHW[T]): T =
-    ${ ModuleMacros.regWithNameImpl('t, 'name, 'this) }
-
   protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T])(using WalkHW[T]): T =
     ${ ModuleMacros.litImpl('t, 'payload, 'this) }
-
-  protected inline def Lit[T <: HWData](inline t: T, name: String)(inline payload: HostTypeOf[T])(using WalkHW[T]): T =
-    ${ ModuleMacros.litWithNameImpl('t, 'payload, 'name, 'this) }
 
 object Module:
   inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
@@ -127,18 +128,24 @@ object Module:
     sub.setInstanceName(instName)
     sub.setElabKey(autoElaborationKey(sub))
     parent.addChild(sub)
-    parent.getBuilder.addBody(s"inst $instName of ${sub.moduleName}")
+    parent.getBuilder.addInst(instName, sub.elaborationKey, sub.moduleName)
     sub
 
   private def autoElaborationKey(mod: Module): String =
-    s"${mod.moduleName}@${System.identityHashCode(mod)}"
+    s"${mod.moduleName}#${mod.elaborationParamHash}"
 
-private[hdl] object ModuleUtils:
-  def assignOwner[T](value: T, mod: Module)(using w: WalkHW[T]): Unit =
-    w(value, "")((h, _) => h.setOwner(mod))
-
-  def assignRefs[T](value: T, base: String)(using w: WalkHW[T]): Unit =
-    w(value, base)((h, path) => h.setRef(path))
+  private def paramHash(mod: Module): String =
+    val cls = mod.getClass
+    val fields = cls.getDeclaredFields
+      .filter(f => !java.lang.reflect.Modifier.isStatic(f.getModifiers))
+      .filter(f => !f.isSynthetic)
+    val sb = new StringBuilder
+    fields.sortBy(_.getName).foreach { f =>
+      f.setAccessible(true)
+      val v = try f.get(mod) catch case _: Throwable => "<?>"
+      sb.append(f.getName).append("=").append(Option(v).map(_.toString).getOrElse("null")).append(";")
+    }
+    MurmurHash3.stringHash(sb.toString).toString
 
 private[hdl] object ModuleOps:
   def io[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
@@ -232,6 +239,12 @@ private[hdl] object ModuleOps:
   private def dirPrefixOf(h: HWData): String =
     if h.dir == Direction.In then "flip " else ""
 
+  def assignOwner[T](value: T, mod: Module)(using w: WalkHW[T]): Unit =
+    w(value, "")((h, _) => h.setOwner(mod))
+
+  def assignRefs[T](value: T, base: String)(using w: WalkHW[T]): Unit =
+    w(value, base)((h, path) => h.setRef(path))
+
 extension [T <: HWData](dst: T)
   def :=(src: T)(using m: Module): Unit =
     ModuleOps.connect(dst, src, m)
@@ -257,20 +270,10 @@ object ModuleMacros:
       ModuleOps.io($t, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
     }
 
-  def ioWithNameImpl[T <: HWData: Type](t: Expr[T], name: Expr[String], mod: Expr[Module])(using Quotes): Expr[T] =
-    '{
-      ModuleOps.io($t, Some($name), $mod)(using summonInline[WalkHW[T]])
-    }
-
   def wireImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
     '{
       ModuleOps.wire($t, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
-    }
-
-  def wireWithNameImpl[T <: HWData: Type](t: Expr[T], name: Expr[String], mod: Expr[Module])(using Quotes): Expr[T] =
-    '{
-      ModuleOps.wire($t, Some($name), $mod)(using summonInline[WalkHW[T]])
     }
 
   def regImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
@@ -279,17 +282,7 @@ object ModuleMacros:
       ModuleOps.reg($t, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
     }
 
-  def regWithNameImpl[T <: HWData: Type](t: Expr[T], name: Expr[String], mod: Expr[Module])(using Quotes): Expr[T] =
-    '{
-      ModuleOps.reg($t, Some($name), $mod)(using summonInline[WalkHW[T]])
-    }
-
   def litImpl[T <: HWData: Type](t: Expr[T], payload: Expr[HostTypeOf[T]], mod: Expr[Module])(using Quotes): Expr[T] =
-    '{
-      ModuleOps.lit($t, $payload, $mod)(using summonInline[WalkHW[T]])
-    }
-
-  def litWithNameImpl[T <: HWData: Type](t: Expr[T], payload: Expr[HostTypeOf[T]], name: Expr[String], mod: Expr[Module])(using Quotes): Expr[T] =
     '{
       ModuleOps.lit($t, $payload, $mod)(using summonInline[WalkHW[T]])
     }
@@ -300,26 +293,26 @@ object ModuleMacros:
 
 final class Elaborator:
   private implicit val ec: ExecutionContext = ExecutionContext.global
-  private val elaborated = TrieMap.empty[String, Future[(String, ElaboratedDesign)]]
+  private val designs = TrieMap.empty[String, Future[ElaboratedDesign]]
+  private val labels = TrieMap.empty[String, String]
   private val nameCounters = TrieMap.empty[String, Int]
 
   def elaborate(top: Module): Seq[ElaboratedDesign] =
-    val topDesign = Await.result(elaborateAsync(top, None), Duration.Inf)._2
-    val rest = elaborated.values.map(f => Await.result(f, Duration.Inf)._2).toSeq
-    (topDesign +: rest.filterNot(_.eq(topDesign))).distinct
+    val _ = Await.result(elaborateAsync(top), Duration.Inf)
+    designs.values.map(f => Await.result(f, Duration.Inf)).toSeq
 
   private def nextModuleLabel(base: String): String =
-    val n = nameCounters.getOrElseUpdate(base, 0) + 1
+    val n = nameCounters.getOrElse(base, 0) + 1
     nameCounters.update(base, n)
     if n == 1 then base else s"${base}_$n"
 
-  private def elaborateAsync(mod: Module, forcedLabel: Option[String]): Future[(String, ElaboratedDesign)] =
+  private def elaborateAsync(mod: Module): Future[ElaboratedDesign] =
     val key = mod.elaborationKey
-    elaborated.getOrElseUpdate(key, Future:
-      val label = forcedLabel.getOrElse(nextModuleLabel(mod.moduleName))
-      mod.children.foreach(child => Await.result(elaborateAsync(child, None), Duration.Inf))
-      val design = mod.getBuilder.snapshot(label)
-      label -> design
+    val label = labels.getOrElseUpdate(key, nextModuleLabel(mod.moduleName))
+    designs.getOrElseUpdate(key, Future:
+      mod.children.foreach(child => Await.result(elaborateAsync(child), Duration.Inf))
+      val instLabelMap = labels.toMap
+      mod.getBuilder.snapshot(label, instLabelMap)
     )
 
   def emit(design: ElaboratedDesign): String =
