@@ -111,7 +111,6 @@ object WalkHW:
     def apply(x: T, path: String)(f: (HWData, String) => Unit): Unit =
       walkAny(x, path, f)
 
-
 abstract class Module:
   private val _builder = new ModuleBuilder(moduleName)
   private val _children = mutable.ArrayBuffer.empty[Module]
@@ -161,6 +160,7 @@ object Module:
     ${ ModuleMacros.moduleInstImpl('gen, 'parent) }
 
   def instantiate[M <: hdl.Module](gen: => M, parent: hdl.Module, name: Option[String]): M =
+    println(s"instantiate ${name}")
     val sub = gen
     val instName = parent.getBuilder.allocateName(name, "inst")
     sub.setInstanceName(instName)
@@ -173,15 +173,19 @@ object Module:
     mod.elaborationParamHash
 
   private def paramHash(mod: Module): String =
-    mod match
+    val ret = mod match
       case m: CacheableModule =>
         import m.given
         val digest = MessageDigest.getInstance("SHA-256")
-        digest.update(codeIdentity(mod.getClass))
+        digest.update(codeIdentity(mod.getClass)) // FIXME: persistent across runs?
+        println(s"cacheable module with params ${m.elabParams}")
         StableHash.hashInto(digest, m.elabParams)
         StableHash.hex(digest.digest())
       case _ =>
+        println("Non cacheable module")
         UUID.randomUUID().toString
+    println(s"paramHash ${ret}")
+    ret
 
   private def codeIdentity(cls: Class[?]): Array[Byte] =
     classHashCache.getOrElseUpdate(cls, sha256(classBytes(cls)))
@@ -437,14 +441,17 @@ final class Elaborator extends ElaboratorStats:
         key
 
   private def elaborateAsync(mod: Module): Future[ElaboratedDesign] =
+    println("Elaborate Async")
     val key = ensureUniqueKey(mod)
     mod.setElabKey(key)
     val label = labels.getOrElseUpdate(key, nextModuleLabel(mod.moduleName))
     val existingDesign = designs.get(key)
     if existingDesign.isDefined then
+      println("Cache hit")
       _cacheHits.incrementAndGet()
       existingDesign.get
     else
+      println("Cache miss")
       _cacheMisses.incrementAndGet()
       designs.getOrElseUpdate(key, Future:
         mod.children.foreach(child => Await.result(elaborateAsync(child), Duration.Inf))
