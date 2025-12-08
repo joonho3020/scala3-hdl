@@ -54,13 +54,6 @@ final class ModuleBuilder(val moduleBaseName: String):
   def addInst(name: String, elabKey: String, base: String): Unit =
     body += InstEntry(name, elabKey, base, currentIndentLevel)
 
-  def snapshot(label: String, instLabels: Map[String, String]): ElaboratedDesign =
-    val renderedBody = body.map {
-      case LineEntry(t, ind)     => s"${indentString(ind)}$t"
-      case InstEntry(n, k, b, ind) => s"${indentString(ind)}inst $n of ${instLabels.getOrElse(k, b)}"
-    }
-    ElaboratedDesign(label, ports.toSeq, renderedBody.toSeq)
-
   def hashSignature: String =
     val sb = new StringBuilder
     ports.foreach(p => sb.append("p:").append(p).append(";"))
@@ -119,8 +112,6 @@ abstract class Module:
   private lazy val _elabParamHash = Module.paramHash(this)
 
   def moduleName: String = getClass.getSimpleName.stripSuffix("$")
-  protected def elaborationParamHash: String = _elabParamHash
-  def elaborationKey: String = _elabKey.getOrElse(Module.autoElaborationKey(this))
   private[hdl] def setElabKey(k: String): Unit = _elabKey = Some(k)
   private[hdl] def setInstanceName(n: String): Unit = _instanceName = Some(n)
   private[hdl] def instanceName: Option[String] = _instanceName
@@ -155,7 +146,6 @@ trait CacheableModule:
   def elabParams: ElabParams
 
 object Module:
-  private val classHashCache = TrieMap.empty[Class[?], Array[Byte]]
   inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
     ${ ModuleMacros.moduleInstImpl('gen, 'parent) }
 
@@ -164,48 +154,9 @@ object Module:
     val sub = gen
     val instName = parent.getBuilder.allocateName(name, "inst")
     sub.setInstanceName(instName)
-    sub.setElabKey(autoElaborationKey(sub))
     parent.addChild(sub)
     parent.getBuilder.addInst(instName, sub.elaborationKey, sub.moduleName)
     sub
-
-  private def autoElaborationKey(mod: Module): String =
-    mod.elaborationParamHash
-
-  private def paramHash(mod: Module): String =
-    val ret = mod match
-      case m: CacheableModule =>
-        import m.given
-        val digest = MessageDigest.getInstance("SHA-256")
-        digest.update(codeIdentity(mod.getClass)) // FIXME: persistent across runs?
-        println(s"cacheable module with params ${m.elabParams}")
-        StableHash.hashInto(digest, m.elabParams)
-        StableHash.hex(digest.digest())
-      case _ =>
-        println("Non cacheable module")
-        UUID.randomUUID().toString
-    println(s"paramHash ${ret}")
-    ret
-
-  private def codeIdentity(cls: Class[?]): Array[Byte] =
-    classHashCache.getOrElseUpdate(cls, sha256(classBytes(cls)))
-
-  private def classBytes(cls: Class[?]): Array[Byte] =
-    val path = cls.getName.replace('.', '/') + ".class"
-    val stream =
-      Option(cls.getClassLoader).flatMap(cl => Option(cl.getResourceAsStream(path)))
-        .orElse(Option(ClassLoader.getSystemResourceAsStream(path)))
-    stream match
-      case Some(is) =>
-        try is.readAllBytes()
-        finally is.close()
-      case None =>
-        cls.getName.getBytes(StandardCharsets.UTF_8)
-
-  private def sha256(bytes: Array[Byte]): Array[Byte] =
-    val md = MessageDigest.getInstance("SHA-256")
-    md.update(bytes)
-    md.digest()
 
 private[hdl] object ModuleOps:
   def io[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
@@ -401,71 +352,3 @@ object ModuleMacros:
   def moduleInstImpl[M <: Module: Type](gen: Expr[M], parent: Expr[Module])(using Quotes): Expr[M] =
     val nameOpt = findEnclosingValName
     '{ Module.instantiate($gen, $parent, ${Expr(nameOpt)}) }
-
-trait ElaboratorStats:
-  def cacheHits: Int
-  def cacheMisses: Int
-  def totalModules: Int
-  def hitRate: Double = if totalModules == 0 then 0.0 else cacheHits.toDouble / totalModules
-
-final class Elaborator extends ElaboratorStats:
-  private implicit val ec: ExecutionContext = ExecutionContext.global
-  private val designs = TrieMap.empty[String, Future[ElaboratedDesign]]
-  private val labels = TrieMap.empty[String, String]
-  private val nameCounters = TrieMap.empty[String, Int]
-  private val usedKeys = TrieMap.empty[String, Unit]
-  private val _cacheHits = java.util.concurrent.atomic.AtomicInteger(0)
-  private val _cacheMisses = java.util.concurrent.atomic.AtomicInteger(0)
-
-  def cacheHits: Int = _cacheHits.get()
-  def cacheMisses: Int = _cacheMisses.get()
-  def totalModules: Int = cacheHits + cacheMisses
-
-  def elaborate(top: Module): Seq[ElaboratedDesign] =
-    val _ = Await.result(elaborateAsync(top), Duration.Inf)
-    designs.values.map(f => Await.result(f, Duration.Inf)).toSeq
-
-  private def nextModuleLabel(base: String): String =
-    val n = nameCounters.getOrElse(base, 0) + 1
-    nameCounters.update(base, n)
-    if n == 1 then base else s"${base}_$n"
-
-  private def ensureUniqueKey(mod: Module): String =
-    mod match
-      case _: CacheableModule =>
-        mod.elaborationKey
-      case _ =>
-        var key = mod.elaborationKey
-        while usedKeys.putIfAbsent(key, ()).isDefined do
-          key = java.util.UUID.randomUUID().toString
-        key
-
-  private def elaborateAsync(mod: Module): Future[ElaboratedDesign] =
-    println("Elaborate Async")
-    val key = ensureUniqueKey(mod)
-    mod.setElabKey(key)
-    val label = labels.getOrElseUpdate(key, nextModuleLabel(mod.moduleName))
-    val existingDesign = designs.get(key)
-    if existingDesign.isDefined then
-      println("Cache hit")
-      _cacheHits.incrementAndGet()
-      existingDesign.get
-    else
-      println("Cache miss")
-      _cacheMisses.incrementAndGet()
-      designs.getOrElseUpdate(key, Future:
-        mod.children.foreach(child => Await.result(elaborateAsync(child), Duration.Inf))
-        val instLabelMap = labels.toMap
-        mod.getBuilder.snapshot(label, instLabelMap)
-      )
-
-  def emit(design: ElaboratedDesign): String =
-    val sb = new StringBuilder
-    sb.append(s"module ${design.name}:\n")
-    design.ports.foreach(p => sb.append(s"  $p\n"))
-    if design.body.nonEmpty then sb.append("\n")
-    design.body.foreach(s => sb.append(s"  $s\n"))
-    sb.toString
-
-  def emitAll(designs: Seq[ElaboratedDesign]): String =
-    designs.map(emit).mkString("\n")
