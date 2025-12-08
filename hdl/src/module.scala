@@ -205,9 +205,19 @@ private[hdl] object ModuleOps:
     t
 
   def connect[T <: HWData](dst: T, src: T, mod: Module): Unit =
-    val lhs = refFor(dst, mod)
-    val rhs = refFor(src, mod)
-    mod.getBuilder.addBody(s"connect $lhs, $rhs")
+    (dst, src) match
+      case (dv: Vec[?], sv: Vec[?]) =>
+        val dElems = dv.elems
+        val sElems = sv.elems
+        val len = math.min(dElems.length, sElems.length)
+        var i = 0
+        while i < len do
+          connect(dElems(i).asInstanceOf[HWData], sElems(i).asInstanceOf[HWData], mod)
+          i += 1
+      case _ =>
+        val lhs = refFor(dst, mod)
+        val rhs = refFor(src, mod)
+        mod.getBuilder.addBody(s"connect $lhs, $rhs")
 
   def when(cond: Bool, mod: Module)(block: => Unit): WhenDSL =
     val condRef = refFor(cond, mod)
@@ -227,6 +237,22 @@ private[hdl] object ModuleOps:
     val rhsRef = refFor(rhs, mod)
     mod.getBuilder.addBody(s"node $name = add($lhsRef, $rhsRef)")
     result
+
+  private def cmp[T <: HWData](op: String, lhs: T, rhs: T, mod: Module): Bool =
+    val result = Bool()
+    result.setNodeKind(NodeKind.PrimOp)
+    val name = mod.getBuilder.allocateName(None, op)
+    mod.register(result, Some(name))
+    val lhsRef = refFor(lhs, mod)
+    val rhsRef = refFor(rhs, mod)
+    mod.getBuilder.addBody(s"node $name = $op($lhsRef, $rhsRef)")
+    result
+
+  def eq[T <: HWData](lhs: T, rhs: T, mod: Module): Bool =
+    cmp("eq", lhs, rhs, mod)
+
+  def neq[T <: HWData](lhs: T, rhs: T, mod: Module): Bool =
+    cmp("neq", lhs, rhs, mod)
 
   def refFor(data: HWData, current: Module): String =
     if data.kind == NodeKind.Lit then formatLiteral(data, data.literal.getOrElse(""))
@@ -254,6 +280,9 @@ private[hdl] object ModuleOps:
   def formatType(tpe: HWData): String = tpe match
     case u: UInt => s"UInt<${u.w.value}>"
     case _: Bool => "Bool"
+    case v: Vec[?] =>
+      val elemStr = v.elems.headOption.map(e => formatType(e)).getOrElse("?")
+      s"Vec<${v.length}, $elemStr>"
     case bundle: Bundle[?] =>
       val p = bundle.asInstanceOf[Product]
       val fields = (0 until p.productArity).flatMap { i =>
@@ -288,6 +317,16 @@ extension [T <: HWData](dst: T)
 extension (lhs: UInt)
   def +(rhs: UInt)(using m: Module): UInt =
     ModuleOps.add(lhs, rhs, m)
+  def ===(rhs: UInt)(using m: Module): Bool =
+    ModuleOps.eq(lhs, rhs, m)
+  def =/=(rhs: UInt)(using m: Module): Bool =
+    ModuleOps.neq(lhs, rhs, m)
+
+extension (lhs: Bool)
+  def ===(rhs: Bool)(using m: Module): Bool =
+    ModuleOps.eq(lhs, rhs, m)
+  def =/=(rhs: Bool)(using m: Module): Bool =
+    ModuleOps.neq(lhs, rhs, m)
 
 final class WhenDSL(private val mod: Module):
   def elsewhen(cond: Bool)(block: => Unit): WhenDSL =

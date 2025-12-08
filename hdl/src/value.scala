@@ -72,9 +72,32 @@ object Bool:
   def apply(): Bool = new Bool
   def apply(u: Unit): Bool = new Bool
 
+sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnce[T]:
+  def iterator: Iterator[T] = elems.iterator
+  def length: Int = elems.length
+  def apply(i: Int): T = elems(i)
+  override def flip: Unit =
+    dir = Direction.flip(dir)
+    elems.foreach(_.flip)
+  def setLitVal(payload: Any): Unit =
+    val seq = payload.asInstanceOf[Seq[HostTypeOf[T]]]
+    elems.zip(seq).foreach((e, v) => e.setLitVal(v))
+    literal = Some(seq)
+  def getLitVal: HostTypeOf[Vec[T]] =
+    literal match
+      case Some(v) => v.asInstanceOf[HostTypeOf[Vec[T]]]
+      case None    => throw new NoSuchElementException("Vec does not carry a literal value")
+  override def toString(): String = s"Vec(${elems.mkString(",")}, $dir)"
+
+object Vec:
+  def apply[T <: HWData](elems: Seq[T]): Vec[T] = new Vec[T](elems)
+  def tabulate[T <: HWData](n: Int)(gen: Int => T): Vec[T] = Vec(Seq.tabulate(n)(gen))
+  def fill[T <: HWData](n: Int)(gen: => T): Vec[T] = Vec(Seq.fill(n)(gen))
+
 type HostTypeOf[T] = T match
   case UInt  => BigInt
   case Bool  => Boolean
+  case Vec[t] => Seq[HostTypeOf[t]]
   case _     => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X]]
 
 type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] = (Labels, Elems) match

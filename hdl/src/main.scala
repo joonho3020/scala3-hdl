@@ -513,6 +513,41 @@ def when_behavior_check(): Unit =
   println(elaborator2.emitAll(d2))
   println("=" * 50)
 
+def comparison_operator_check(): Unit =
+  final case class CmpIO(in: UInt, thresh: UInt, flag: Bool) extends Bundle[CmpIO]
+  class Cmp extends Module:
+    given Module = this
+    val io = IO(CmpIO(
+      in = Input(UInt(Width(4))),
+      thresh = Input(UInt(Width(4))),
+      flag = Output(Bool())
+    ))
+    io.flag := io.in === io.thresh
+
+  final case class CmpBoolIO(a: Bool, b: Bool, out: Bool) extends Bundle[CmpBoolIO]
+  class CmpBool extends Module:
+    given Module = this
+    val io = IO(CmpBoolIO(
+      a = Input(Bool()),
+      b = Input(Bool()),
+      out = Output(Bool())
+    ))
+    io.out := io.a =/= io.b
+
+  val elaborator = new Elaborator
+  val m1 = new Cmp
+  val d1 = elaborator.elaborate(m1)
+  println("=" * 50)
+  println("Comparison Operator Check (UInt):")
+  println(elaborator.emitAll(d1))
+
+  val elaborator2 = new Elaborator
+  val m2 = new CmpBool
+  val d2 = elaborator2.elaborate(m2)
+  println("Comparison Operator Check (Bool):")
+  println(elaborator2.emitAll(d2))
+  println("=" * 50)
+
 def optional_io_check(): Unit =
    class A(debug: Boolean, w: Int) extends Module:
      given Module = this
@@ -624,6 +659,36 @@ def parameter_sweep_check(): Unit =
   println(elaborator.emitAll(designs))
   println("=" * 50)
 
+def vec_check(): Unit =
+  case class TableIO(entries: Vec[Vec[UInt]]) extends Bundle[TableIO]
+  case class ModuleIO(in: TableIO, reduce_idx: UInt, out: UInt) extends Bundle[ModuleIO]
+
+  case class VectorParams(w_in: Int, rows: Int, cols: Int)
+
+  object ModuleIO:
+    def apply(p: VectorParams): ModuleIO =
+      val log2_rows = p.rows
+      ModuleIO(
+        in = Input(TableIO(
+          entries = Vec(Seq.fill(p.rows)(Vec(Seq.fill(p.cols)(UInt(Width(p.w_in))))))
+          )),
+        reduce_idx = Input(UInt(Width(log2_rows))),
+        out = Output(UInt(Width(p.w_in))))
+
+  class VectorTest(p: VectorParams) extends Module:
+    given Module = this
+    val io = IO(ModuleIO(p))
+// io.out := io.in.entries(io.reduce_idx).reduce(_ + _)
+
+  val elaborator = new Elaborator
+  val m = new VectorTest(VectorParams(2, 3, 4))
+  val d = elaborator.elaborate(m)
+  println("=" * 50)
+  println("Vec Check:")
+  println(elaborator.emitAll(d))
+  println("=" * 50)
+
+
 @main def demo(): Unit =
   instantiation_check()
   hosttype_check()
@@ -637,9 +702,11 @@ def parameter_sweep_check(): Unit =
   inheritance_check()
   type_parameterization_check()
   conditional_generation_check()
-  when_behavior_check()
   optional_io_check()
   nested_seq_generation_check()
   optional_and_map_check()
   module_array_generation_check()
   parameter_sweep_check()
+  when_behavior_check()
+  comparison_operator_check()
+  vec_check()

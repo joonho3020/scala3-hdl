@@ -1,31 +1,50 @@
 # Yet Another HDL Attempt
 
-## Modules
-
-### Goals
+## Implementation details
 
 - Connection operations between hardware components should perform type checking (e.g. don't want to allow connecting `UInt` to `Bool`)
 - Want to use Scala's built-in metaprogramming features as much as possible, especially regarding list operations
     - `reduce` `foreach` operations for hardware constructs should work
 - Inheritance btw modules. Subclass module should contain HW logic created in the parent class and should be able to add logic
 - Bundles, Modules should allow type parameterization
-- Elaboration of modules should allow parallel execution across threads. Also, should be able to serialize modules and check whether it hits a cache. If a module is instantiated with different parameters, this should elaborate each instance separately
+- Module elaboration must happen in parallel (i.e. it should be multithreaded) and should be able to reuse cached artifacts from previous builds
+    - When a single Module is instantiated multiple times *with the same parameters (or argument values)*, it reuse the previously computed result
+    - When a single Module is instantiated multiple times *with different parameters*, it should elaborate the design with the new parameter values
+    - In the build-cache, when there is a Module that has the same bytecode as well as the same instantiation parameters, it should reuse the value in the cache instead of performing elaboration again
+- Bundles should not be structural types. Rather, we want to have Bundles as case classes so that we can derive various Bundle definitions (e.g. Literals) from the case class
+- We want to preserve the strong metaprogramming experience that Chisel provides:
+    - Must be able to mix in Scala datastructures (e.g. Seq, Option, List, ...) with the hardware description
+    - Use Module inheritance to share common logic across slightly different modules
+    - Parameterize Modules, Bundles, etc using type parameters (e.g. `Queue[T <: HWData]` where T can be a primitive HW type or a Bundle)
+- The element names in the elaborated output should resemble that of the Scala source as much as possible. This can be achieved by using macros like this:
 
-### Implementation details
-
-- Want to capture the scala variable names as macros and use that to set IR node names as much as possible.
-
-### IO Bundles
+```scala
+  private def findEnclosingValName(using Quotes): Option[String] =
+    import quotes.reflect.*
+    def loop(sym: Symbol): Option[String] =
+      if sym.isNoSymbol then None
+      else if sym.isValDef && !sym.flags.is(Flags.Synthetic) && !sym.flags.is(Flags.Artifact) then Some(sym.name)
+      else loop(sym.owner)
+    loop(Symbol.spliceOwner)
+```
 
 - IO bundles should encode directionality
-- IO bundles should be able to support ad-hoc field additions (not just some case class), perhaps this can be achieved by named-tuples
+- ~~IO bundles should be able to support ad-hoc field additions (not just some case class), perhaps this can be achieved by named-tuples~~
+    - Currently we are passing the `case class` as a type parameter to a `Bundle` trait. It would be nice if we can define anonymous bundles using named-tuples, but it seems like there is no good way of passing the shape of these as type parameters
 
 ## TODO
 
-- more operators
-- vectors and heterogenous vectors
-- behavioral statements
-- memories
+- [x] behavioral statements
+- [ ] vectors and heterogeneous vectors
+    - How are vectors supported in Chisel?
+    - Should support indexing of vector structures using hardware types...?
+    - Emission shouldn't flatten these structures
+- [ ] memories
+    - Make the port API explicit (no inferred ports)
+- [ ] proper IR emission
+- [ ] parallel elaboration & caching support
+- [ ] lazy elaboration (diplomacy like 2-step elaboration)
+- [ ] more operators
 
 ## Misc Notes
 
