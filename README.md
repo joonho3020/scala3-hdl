@@ -49,6 +49,7 @@
 ## Misc Notes
 
 - Better enum support?
+    - https://github.com/chipsalliance/chisel/issues/927
 
 ## Some Commands
 
