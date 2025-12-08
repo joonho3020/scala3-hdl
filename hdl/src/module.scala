@@ -1,12 +1,14 @@
 package hdl
 
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.util.UUID
 import scala.collection.mutable
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
-import scala.util.hashing.MurmurHash3
-import scala.compiletime.{summonInline, summonFrom}
+import scala.compiletime.summonInline
 
 final case class ElaboratedDesign(name: String, ports: Seq[String], body: Seq[String])
 
@@ -109,14 +111,16 @@ object WalkHW:
     def apply(x: T, path: String)(f: (HWData, String) => Unit): Unit =
       walkAny(x, path, f)
 
+
 abstract class Module:
   private val _builder = new ModuleBuilder(moduleName)
   private val _children = mutable.ArrayBuffer.empty[Module]
   private var _elabKey: Option[String] = None
   private var _instanceName: Option[String] = None
+  private lazy val _elabParamHash = Module.paramHash(this)
 
   def moduleName: String = getClass.getSimpleName.stripSuffix("$")
-  protected def elaborationParamHash: String = Module.paramHash(this)
+  protected def elaborationParamHash: String = _elabParamHash
   def elaborationKey: String = _elabKey.getOrElse(Module.autoElaborationKey(this))
   private[hdl] def setElabKey(k: String): Unit = _elabKey = Some(k)
   private[hdl] def setInstanceName(n: String): Unit = _instanceName = Some(n)
@@ -145,7 +149,14 @@ abstract class Module:
       block
     }
 
+trait CacheableModule:
+  this: Module =>
+  type ElabParams
+  given stableHashElabParams: StableHash[ElabParams]
+  def elabParams: ElabParams
+
 object Module:
+  private val classHashCache = TrieMap.empty[Class[?], Array[Byte]]
   inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
     ${ ModuleMacros.moduleInstImpl('gen, 'parent) }
 
@@ -159,24 +170,38 @@ object Module:
     sub
 
   private def autoElaborationKey(mod: Module): String =
-    s"${mod.moduleName}#${mod.elaborationParamHash}"
+    mod.elaborationParamHash
 
   private def paramHash(mod: Module): String =
-    val cls = mod.getClass
-    val fields = cls.getDeclaredFields
-      .filter(f => !java.lang.reflect.Modifier.isStatic(f.getModifiers))
-      .filter(f => !f.isSynthetic)
-    val sb = new StringBuilder
-    sb.append("class=").append(cls.getName).append(";")
-    fields.sortBy(_.getName).foreach { f =>
-      f.setAccessible(true)
-      val v = try f.get(mod) catch case _: Throwable => "<?>"
-      sb.append(f.getName).append("=").append(Option(v).map(_.toString).getOrElse("null")).append(";")
-    }
-    sb.append("builder=").append(mod.getBuilder.hashSignature)
-    val h = MurmurHash3.stringHash(sb.toString).toString
-    println(s"paramHash ${mod.moduleName} signature=${sb.toString} hash=$h")
-    h
+    mod match
+      case m: CacheableModule =>
+        import m.given
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update(codeIdentity(mod.getClass))
+        StableHash.hashInto(digest, m.elabParams)
+        StableHash.hex(digest.digest())
+      case _ =>
+        UUID.randomUUID().toString
+
+  private def codeIdentity(cls: Class[?]): Array[Byte] =
+    classHashCache.getOrElseUpdate(cls, sha256(classBytes(cls)))
+
+  private def classBytes(cls: Class[?]): Array[Byte] =
+    val path = cls.getName.replace('.', '/') + ".class"
+    val stream =
+      Option(cls.getClassLoader).flatMap(cl => Option(cl.getResourceAsStream(path)))
+        .orElse(Option(ClassLoader.getSystemResourceAsStream(path)))
+    stream match
+      case Some(is) =>
+        try is.readAllBytes()
+        finally is.close()
+      case None =>
+        cls.getName.getBytes(StandardCharsets.UTF_8)
+
+  private def sha256(bytes: Array[Byte]): Array[Byte] =
+    val md = MessageDigest.getInstance("SHA-256")
+    md.update(bytes)
+    md.digest()
 
 private[hdl] object ModuleOps:
   def io[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
@@ -373,11 +398,24 @@ object ModuleMacros:
     val nameOpt = findEnclosingValName
     '{ Module.instantiate($gen, $parent, ${Expr(nameOpt)}) }
 
-final class Elaborator:
+trait ElaboratorStats:
+  def cacheHits: Int
+  def cacheMisses: Int
+  def totalModules: Int
+  def hitRate: Double = if totalModules == 0 then 0.0 else cacheHits.toDouble / totalModules
+
+final class Elaborator extends ElaboratorStats:
   private implicit val ec: ExecutionContext = ExecutionContext.global
   private val designs = TrieMap.empty[String, Future[ElaboratedDesign]]
   private val labels = TrieMap.empty[String, String]
   private val nameCounters = TrieMap.empty[String, Int]
+  private val usedKeys = TrieMap.empty[String, Unit]
+  private val _cacheHits = java.util.concurrent.atomic.AtomicInteger(0)
+  private val _cacheMisses = java.util.concurrent.atomic.AtomicInteger(0)
+
+  def cacheHits: Int = _cacheHits.get()
+  def cacheMisses: Int = _cacheMisses.get()
+  def totalModules: Int = cacheHits + cacheMisses
 
   def elaborate(top: Module): Seq[ElaboratedDesign] =
     val _ = Await.result(elaborateAsync(top), Duration.Inf)
@@ -388,14 +426,31 @@ final class Elaborator:
     nameCounters.update(base, n)
     if n == 1 then base else s"${base}_$n"
 
+  private def ensureUniqueKey(mod: Module): String =
+    mod match
+      case _: CacheableModule =>
+        mod.elaborationKey
+      case _ =>
+        var key = mod.elaborationKey
+        while usedKeys.putIfAbsent(key, ()).isDefined do
+          key = java.util.UUID.randomUUID().toString
+        key
+
   private def elaborateAsync(mod: Module): Future[ElaboratedDesign] =
-    val key = mod.elaborationKey
+    val key = ensureUniqueKey(mod)
+    mod.setElabKey(key)
     val label = labels.getOrElseUpdate(key, nextModuleLabel(mod.moduleName))
-    designs.getOrElseUpdate(key, Future:
-      mod.children.foreach(child => Await.result(elaborateAsync(child), Duration.Inf))
-      val instLabelMap = labels.toMap
-      mod.getBuilder.snapshot(label, instLabelMap)
-    )
+    val existingDesign = designs.get(key)
+    if existingDesign.isDefined then
+      _cacheHits.incrementAndGet()
+      existingDesign.get
+    else
+      _cacheMisses.incrementAndGet()
+      designs.getOrElseUpdate(key, Future:
+        mod.children.foreach(child => Await.result(elaborateAsync(child), Duration.Inf))
+        val instLabelMap = labels.toMap
+        mod.getBuilder.snapshot(label, instLabelMap)
+      )
 
   def emit(design: ElaboratedDesign): String =
     val sb = new StringBuilder
