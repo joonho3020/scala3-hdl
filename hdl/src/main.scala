@@ -384,6 +384,26 @@ def nested_module_check(): Unit =
   println(elaborator.emitAll(designs))
   println("=" * 50)
 
+def nested_bundle_check(): Unit =
+  case class ABundle(x: UInt, y: UInt) extends Bundle[ABundle]
+  case class BBundle(z: ABundle, w: ABundle) extends Bundle[BBundle]
+
+  class NestedBundleModule extends Module:
+    given Module = this
+    val io = IO(BBundle(
+      z = Input(ABundle(x = UInt(Width(1)), y = UInt(Width(2)))),
+      w = Output(ABundle(x = UInt(Width(1)), y = UInt(Width(2))))))
+
+    io.w := Reg(io.z)
+
+  val elaborator = new Elaborator
+  val top = new NestedBundleModule
+  val designs = elaborator.elaborate(top)
+  println("=" * 50)
+  println("Nested Bundle Check:")
+  println(elaborator.emitAll(designs))
+  println("=" * 50)
+
 def inheritance_check(): Unit =
   class Abstract extends Module:
     given Module = this
@@ -660,7 +680,8 @@ def parameter_sweep_check(): Unit =
   println("=" * 50)
 
 def vec_check(): Unit =
-  case class TableIO(entries: Vec[Vec[UInt]]) extends Bundle[TableIO]
+  case class Entry(a: UInt, b: UInt) extends Bundle[Entry]
+  case class TableIO(entries: Vec[Vec[Entry]]) extends Bundle[TableIO]
   case class ModuleIO(in: TableIO, reduce_idx: UInt, out: UInt) extends Bundle[ModuleIO]
 
   case class VectorParams(w_in: Int, rows: Int, cols: Int)
@@ -670,7 +691,10 @@ def vec_check(): Unit =
       val log2_rows = p.rows
       ModuleIO(
         in = Input(TableIO(
-          entries = Vec(Seq.fill(p.rows)(Vec(Seq.fill(p.cols)(UInt(Width(p.w_in))))))
+          entries = Vec(Seq.fill(p.rows)(Vec(Seq.fill(p.cols)(Entry(
+            a = UInt(Width(p.w_in)),
+            b = UInt(Width(p.w_in))
+            )))))
           )),
         reduce_idx = Input(UInt(Width(log2_rows))),
         out = Output(UInt(Width(p.w_in))))
@@ -699,6 +723,7 @@ def vec_check(): Unit =
   simple_module_test()
   list_operation_check()
   nested_module_check()
+  nested_bundle_check()
   inheritance_check()
   type_parameterization_check()
   conditional_generation_check()

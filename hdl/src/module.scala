@@ -38,8 +38,11 @@ final class ModuleBuilder(val moduleBaseName: String):
       usedNames += candidate
       candidate
 
+  private def isSaneName(n: String): Boolean =
+    n.nonEmpty && n.matches("^[A-Za-z_][A-Za-z0-9_]*$")
+
   def allocateName(name: Option[String], prefix: String): String =
-    name.filter(n => n.nonEmpty && !usedNames.contains(n)).map { n =>
+    name.filter(n => isSaneName(n) && !usedNames.contains(n)).map { n =>
       usedNames += n
       n
     }.getOrElse(freshName(prefix))
@@ -264,18 +267,8 @@ private[hdl] object ModuleOps:
         case _ => base
 
   def emitPortDecl[T <: HWData](name: String, tpe: T)(using w: WalkHW[T]): Seq[String] =
-    val buf = mutable.ArrayBuffer.empty[String]
-    w(tpe, name) { (h, path) =>
-      h match
-        case u: UInt =>
-          val dirStr = if u.dir == Direction.In then "input" else "output"
-          buf += s"$dirStr $path : UInt<${u.w.value}>"
-        case b: Bool =>
-          val dirStr = if b.dir == Direction.In then "input" else "output"
-          buf += s"$dirStr $path : Bool"
-        case _ =>
-    }
-    buf.toSeq
+    val dirStr = if tpe.dir == Direction.In then "input" else "output"
+    Seq(s"$dirStr $name : ${formatType(tpe)}")
 
   def formatType(tpe: HWData): String = tpe match
     case u: UInt => s"UInt<${u.w.value}>"
