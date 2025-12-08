@@ -712,26 +712,128 @@ def vec_check(): Unit =
   println(elaborator.emitAll(d))
   println("=" * 50)
 
+def cacheable_module_check(): Unit =
+  case class AdderParams(width: Int) derives StableHash
+
+  final case class AdderIO(a: UInt, b: UInt, sum: UInt) extends Bundle[AdderIO]
+
+  class CacheableAdder(val params: AdderParams) extends Module with CacheableModule[AdderParams]:
+    given Module = this
+    given stableHashElabParams: StableHash[AdderParams] = StableHash.derived[AdderParams]
+    def elabParams: AdderParams = params
+
+    val io = IO(AdderIO(
+      a = Input(UInt(Width(params.width))),
+      b = Input(UInt(Width(params.width))),
+      sum = Output(UInt(Width(params.width + 1)))
+    ))
+    io.sum := io.a + io.b
+
+  object CacheableAdder extends CacheableModuleCompanion[AdderParams, CacheableAdder]:
+    def moduleName: String = "CacheableAdder"
+    def moduleClass: Class[?] = classOf[CacheableAdder]
+    def construct(p: AdderParams): CacheableAdder = new CacheableAdder(p)
+
+  class TopWithCaching extends Module:
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(8))), Output(UInt(Width(8)))))
+
+    val adder1 = Module(new CacheableAdder(AdderParams(8)))
+    val adder2 = Module(new CacheableAdder(AdderParams(8)))
+    val adder3 = Module(new CacheableAdder(AdderParams(16)))
+
+    adder1.io.a := io.in
+    adder1.io.b := io.in
+    adder2.io.a := adder1.io.sum
+    adder2.io.b := io.in
+    adder3.io.a := adder2.io.sum
+    adder3.io.b := adder2.io.sum
+    io.out := adder3.io.sum
+
+  println("=" * 50)
+  println("Cacheable Module Check:")
+
+  val elaborator = new Elaborator
+  val top = new TopWithCaching
+  val designs = elaborator.elaborate(top)
+  println(elaborator.emitAll(designs))
+  val (hits, misses) = elaborator.stats
+  println(s"Cache stats: hits=$hits, misses=$misses")
+  println("=" * 50)
+
+def query_based_elaboration_check(): Unit =
+  case class PassthroughParams(width: Int) derives StableHash
+
+  final case class PassthroughIO(in: UInt, out: UInt) extends Bundle[PassthroughIO]
+
+  class QueryPassthrough(
+    val params: PassthroughParams
+  ) extends Module with CacheableModule[PassthroughParams]:
+
+    given Module = this
+    given stableHashElabParams: StableHash[PassthroughParams] =
+      StableHash.derived[PassthroughParams]
+    def elabParams: PassthroughParams = params
+
+    val io = IO(PassthroughIO(
+      in = Input(UInt(Width(params.width))),
+      out = Output(UInt(Width(params.width)))
+    ))
+    io.out := io.in
+
+  object QueryPassthrough extends
+    CacheableModuleCompanion[PassthroughParams, QueryPassthrough]:
+    def moduleName: String = "QueryPassthrough"
+    def moduleClass: Class[?] = classOf[QueryPassthrough]
+    def construct(p: PassthroughParams): QueryPassthrough = new QueryPassthrough(p)
+
+  println("=" * 50)
+  println("Query-Based Elaboration Check:")
+
+  val elaborator = new Elaborator
+
+  val q1 = QueryPassthrough.query(PassthroughParams(8))
+  val q2 = QueryPassthrough.query(PassthroughParams(8))
+  val q3 = QueryPassthrough.query(PassthroughParams(16))
+
+  println(s"q1.key = ${q1.key}")
+  println(s"q2.key = ${q2.key}")
+  println(s"q3.key = ${q3.key}")
+  println(s"q1.key.fullKey = ${q1.key.fullKey}")
+  println(s"q1.key == q2.key: ${q1.key == q2.key}")
+  println(s"q1.key == q3.key: ${q1.key == q3.key}")
+
+  val d1 = elaborator.elaborate(q1)
+  val d2 = elaborator.elaborate(q2)
+  val d3 = elaborator.elaborate(q3)
+
+  val (hits, misses) = elaborator.stats
+  println(s"Cache stats after 3 queries: hits=$hits, misses=$misses")
+  println("(Expected: 1 hit from q2, 2 misses from q1 and q3)")
+  println(elaborator.emitAll(d1 ++ d2 ++ d3))
+  println("=" * 50)
 
 @main def demo(): Unit =
-  instantiation_check()
-  hosttype_check()
-  literal_check()
-  directionality_check()
-  optional_io_directionality_check()
-  parameterized_bundle_check()
-  simple_module_test()
-  list_operation_check()
-  nested_module_check()
-  nested_bundle_check()
-  inheritance_check()
-  type_parameterization_check()
-  conditional_generation_check()
-  optional_io_check()
-  nested_seq_generation_check()
-  optional_and_map_check()
-  module_array_generation_check()
-  parameter_sweep_check()
-  when_behavior_check()
-  comparison_operator_check()
-  vec_check()
+// instantiation_check()
+// hosttype_check()
+// literal_check()
+// directionality_check()
+// optional_io_directionality_check()
+// parameterized_bundle_check()
+// simple_module_test()
+// list_operation_check()
+// nested_module_check()
+// nested_bundle_check()
+// inheritance_check()
+// type_parameterization_check()
+// conditional_generation_check()
+// optional_io_check()
+// nested_seq_generation_check()
+// optional_and_map_check()
+// module_array_generation_check()
+// parameter_sweep_check()
+// when_behavior_check()
+// comparison_operator_check()
+// vec_check()
+  cacheable_module_check()
+  query_based_elaboration_check()
