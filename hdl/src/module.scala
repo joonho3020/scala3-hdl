@@ -7,7 +7,7 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
 import scala.compiletime.summonInline
 
-final case class ElaboratedDesign(name: String, ports: Seq[String], body: Seq[String])
+final case class ElaboratedDesign(name: String, ports: Seq[String], body: Seq[String]) extends Serializable
 
 private sealed trait BodyEntry:
   def indent: Int
@@ -57,6 +57,12 @@ final class ModuleBuilder(val moduleBaseName: String):
       case InstEntry(n, m, b, ind) => s"${indentString(ind)}inst $n of ${instLabels.getOrElse(m, b)}"
     }
     ElaboratedDesign(label, ports.toSeq, renderedBody.toSeq)
+
+trait CacheableModule:
+  this: Module =>
+  type ElabParams
+  given stableHashElabParams: StableHash[ElabParams]
+  def elabParams: ElabParams
 
 abstract class Module:
   private val _builder = new ModuleBuilder(moduleName)
@@ -316,9 +322,12 @@ final class Elaborator:
   private implicit val ec: ExecutionContext = ExecutionContext.global
   private val nameCounters = TrieMap.empty[String, Int]
   private val labels = TrieMap.empty[Module, String]
+  private val memoized = TrieMap.empty[String, Seq[ElaboratedDesign]]
+  private val inProgress = TrieMap.empty[String, Future[Seq[ElaboratedDesign]]]
+  private val cache = BuildCache.default
 
   def elaborate(top: Module): Seq[ElaboratedDesign] =
-    Await.result(elaborateModule(top), Duration.Inf)
+    Await.result(elaborateModule(top), Duration.Inf).distinctBy(_.name)
 
   private def nextModuleLabel(base: String): String =
     nameCounters.synchronized:
@@ -326,19 +335,42 @@ final class Elaborator:
       nameCounters.update(base, n)
       if n == 1 then base else s"${base}_$n"
 
-  private def assignLabel(mod: Module): String =
+  private def assignLabel(mod: Module, key: ModuleKey): String =
     labels.synchronized:
-      labels.getOrElseUpdate(mod, nextModuleLabel(mod.moduleName))
+      if key.cacheable then labels.getOrElseUpdate(mod, key.label)
+      else labels.getOrElseUpdate(mod, nextModuleLabel(mod.moduleName))
 
   private def elaborateModule(mod: Module): Future[Seq[ElaboratedDesign]] =
-    Future(mod.runBody()).flatMap { _ =>
-      val label = assignLabel(mod)
-      val childFutures = mod.children.map(elaborateModule)
-      Future.sequence(childFutures).map(_.flatten).map { childDesigns =>
-        val instLabelMap = labels.synchronized { labels.toMap }
-        childDesigns :+ mod.getBuilder.snapshot(label, instLabelMap)
+    val key = ModuleKey(mod)
+    val label = assignLabel(mod, key)
+    memoized.get(key.value) match
+      case Some(designs) =>
+        Future.successful(designs)
+      case None =>
+        if key.cacheable then
+          cache.get(key.value) match
+            case Some(hit) =>
+              val designs = hit.designs.distinctBy(_.name)
+              memoized.putIfAbsent(key.value, designs)
+              Future.successful(designs)
+            case None =>
+              startElaboration(mod, key, label)
+        else startElaboration(mod, key, label)
+
+  private def startElaboration(mod: Module, key: ModuleKey, label: String): Future[Seq[ElaboratedDesign]] =
+    inProgress.getOrElseUpdate(key.value,
+      Future(mod.runBody()).flatMap { _ =>
+        val childFutures = mod.children.map(elaborateModule)
+        Future.sequence(childFutures).map(_.flatten).map { childDesigns =>
+          val instLabelMap = labels.synchronized { labels.toMap }
+          val design = mod.getBuilder.snapshot(label, instLabelMap)
+          val result = (childDesigns :+ design).distinctBy(_.name)
+          memoized.putIfAbsent(key.value, result)
+          if key.cacheable then cache.put(key.value, CachedArtifact(result.toVector))
+          result
+        }
       }
-    }
+    )
 
   def emit(design: ElaboratedDesign): String =
     val sb = new StringBuilder
