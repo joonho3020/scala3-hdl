@@ -1,8 +1,5 @@
 package hdl
 
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
-import java.util.UUID
 import scala.collection.mutable
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{Await, Future}
@@ -14,7 +11,7 @@ final case class ElaboratedDesign(name: String, ports: Seq[String], body: Seq[St
 
 private sealed trait BodyEntry:
   def indent: Int
-private final case class InstEntry(instName: String, elabKey: String, baseModule: String, indent: Int) extends BodyEntry
+private final case class InstEntry(instName: String, mod: Module, baseModule: String, indent: Int) extends BodyEntry
 private final case class LineEntry(text: String, indent: Int) extends BodyEntry
 
 final class ModuleBuilder(val moduleBaseName: String):
@@ -51,26 +48,24 @@ final class ModuleBuilder(val moduleBaseName: String):
 
   def addPort(stmt: String): Unit = ports += stmt
   def addBody(stmt: String): Unit = body += LineEntry(stmt, currentIndentLevel)
-  def addInst(name: String, elabKey: String, base: String): Unit =
-    body += InstEntry(name, elabKey, base, currentIndentLevel)
+  def addInst(name: String, mod: Module, base: String): Unit =
+    body += InstEntry(name, mod, base, currentIndentLevel)
 
-  def snapshot(label: String, instLabels: Map[String, String]): ElaboratedDesign =
+  def snapshot(label: String, instLabels: Map[Module, String]): ElaboratedDesign =
     val renderedBody = body.map {
       case LineEntry(t, ind) => s"${indentString(ind)}$t"
-      case InstEntry(n, k, b, ind) => s"${indentString(ind)}inst $n of ${instLabels.getOrElse(k, b)}"
+      case InstEntry(n, m, b, ind) => s"${indentString(ind)}inst $n of ${instLabels.getOrElse(m, b)}"
     }
     ElaboratedDesign(label, ports.toSeq, renderedBody.toSeq)
 
 abstract class Module:
   private val _builder = new ModuleBuilder(moduleName)
   private val _children = mutable.ArrayBuffer.empty[Module]
-  private var _elabKey: Option[String] = None
   private var _instanceName: Option[String] = None
   private var _bodyFn: Option[Module ?=> Unit] = None
   private var _bodyRan = false
 
   def moduleName: String = getClass.getSimpleName.stripSuffix("$")
-  private[hdl] def setElabKey(k: String): Unit = _elabKey = Some(k)
   private[hdl] def setInstanceName(n: String): Unit = _instanceName = Some(n)
   private[hdl] def instanceName: Option[String] = _instanceName
   private[hdl] def addChild(m: Module): Unit = _children += m
@@ -115,7 +110,7 @@ object Module:
     val instName = parent.getBuilder.allocateName(name, "inst")
     sub.setInstanceName(instName)
     parent.addChild(sub)
-    parent.getBuilder.addInst(instName, "", sub.moduleName)
+    parent.getBuilder.addInst(instName, sub, sub.moduleName)
     sub
 
 private[hdl] object ModuleOps:
@@ -317,57 +312,33 @@ object ModuleMacros:
     val nameOpt = findEnclosingValName
     '{ Module.instantiate($gen, $parent, ${Expr(nameOpt)}) }
 
-trait ElaboratorStats:
-  def cacheHits: Int
-  def cacheMisses: Int
-  def totalModules: Int
-  def hitRate: Double = if totalModules == 0 then 0.0 else cacheHits.toDouble / totalModules
-
-final class Elaborator extends ElaboratorStats:
+final class Elaborator:
   private implicit val ec: ExecutionContext = ExecutionContext.global
-  private val designs = TrieMap.empty[String, Future[ElaboratedDesign]]
-  private val labels = TrieMap.empty[String, String]
   private val nameCounters = TrieMap.empty[String, Int]
-  private val usedKeys = TrieMap.empty[String, Unit]
-  private val _cacheHits = java.util.concurrent.atomic.AtomicInteger(0)
-  private val _cacheMisses = java.util.concurrent.atomic.AtomicInteger(0)
-
-  def cacheHits: Int = _cacheHits.get()
-  def cacheMisses: Int = _cacheMisses.get()
-  def totalModules: Int = cacheHits + cacheMisses
+  private val labels = TrieMap.empty[Module, String]
 
   def elaborate(top: Module): Seq[ElaboratedDesign] =
-    val _ = Await.result(elaborateAsync(top), Duration.Inf)
-    designs.values.map(f => Await.result(f, Duration.Inf)).toSeq
+    Await.result(elaborateModule(top), Duration.Inf)
 
   private def nextModuleLabel(base: String): String =
-    val n = nameCounters.getOrElse(base, 0) + 1
-    nameCounters.update(base, n)
-    if n == 1 then base else s"${base}_$n"
+    nameCounters.synchronized:
+      val n = nameCounters.getOrElse(base, 0) + 1
+      nameCounters.update(base, n)
+      if n == 1 then base else s"${base}_$n"
 
-  private def ensureUniqueKey(mod: Module): String =
-    var key = ""
-    while usedKeys.putIfAbsent(key, ()).isDefined do
-      key = UUID.randomUUID().toString
-    key
+  private def assignLabel(mod: Module): String =
+    labels.synchronized:
+      labels.getOrElseUpdate(mod, nextModuleLabel(mod.moduleName))
 
-  private def elaborateAsync(mod: Module): Future[ElaboratedDesign] =
-    val key = ensureUniqueKey(mod)
-    mod.setElabKey(key)
-    val label = labels.getOrElseUpdate(key, nextModuleLabel(mod.moduleName))
-    designs.get(key) match
-      case Some(existingDesign) =>
-        _cacheHits.incrementAndGet()
-        existingDesign
-      case None =>
-        designs.getOrElseUpdate(key, Future:
-          _cacheMisses.incrementAndGet()
-          mod.runBody()
-          val childFutures = mod.children.map(child => elaborateAsync(child))
-          childFutures.foreach(f => Await.result(f, Duration.Inf))
-          val instLabelMap = labels.toMap
-          mod.getBuilder.snapshot(label, instLabelMap)
-        )
+  private def elaborateModule(mod: Module): Future[Seq[ElaboratedDesign]] =
+    Future(mod.runBody()).flatMap { _ =>
+      val label = assignLabel(mod)
+      val childFutures = mod.children.map(elaborateModule)
+      Future.sequence(childFutures).map(_.flatten).map { childDesigns =>
+        val instLabelMap = labels.synchronized { labels.toMap }
+        childDesigns :+ mod.getBuilder.snapshot(label, instLabelMap)
+      }
+    }
 
   def emit(design: ElaboratedDesign): String =
     val sb = new StringBuilder
