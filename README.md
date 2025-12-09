@@ -34,7 +34,7 @@
 
 ## TODO
 
-- [ ] parallel elaboration & caching support
+- [x] parallel elaboration & caching support
 - [ ] behavioral statements
 - [ ] vectors and heterogeneous vectors
     - How are vectors supported in Chisel?
