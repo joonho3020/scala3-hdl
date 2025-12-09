@@ -10,6 +10,12 @@ final case class CachedArtifact(designs: Seq[ElaboratedDesign]) extends Serializ
 
 final case class ModuleKey(value: String, cacheable: Boolean, label: String)
 
+trait CacheableModule:
+  this: Module =>
+  type ElabParams
+  given stableHashElabParams: StableHash[ElabParams]
+  def elabParams: ElabParams
+
 object ModuleKey:
   private def updateInt(md: MessageDigest, i: Int): Unit =
     md.update(((i >>> 24) & 0xff).toByte)
@@ -25,7 +31,7 @@ object ModuleKey:
     }
     md.digest()
 
-  private def bytecodeHash(cls: Class[?]): Array[Byte] =
+  private def bytecodeHash(cls: Class[?]): Option[Array[Byte]] =
     val resourcePath = "/" + cls.getName.replace('.', '/') + ".class"
     val stream =
       Option(cls.getResourceAsStream(resourcePath))
@@ -39,20 +45,28 @@ object ModuleKey:
           while read != -1 do
             md.update(buf, 0, read)
             read = s.read(buf)
-          md.digest()
-        finally s.close()
+          Some(md.digest())
+        finally
+          s.close()
       case None =>
-        StableHash.digest(cls.getName)
+        None
 
   def apply(mod: Module): ModuleKey =
     mod match
       case c: CacheableModule =>
-        val codeHash = bytecodeHash(mod.getClass)
+        val codeHashOpt = bytecodeHash(mod.getClass)
         val paramHash = StableHash.digest(c.elabParams)(using c.stableHashElabParams)
-        val merged = merge(Seq(codeHash, paramHash))
-        val hex = StableHash.hex(merged)
-        val label = s"${mod.moduleName}_${hex.take(8)}"
-        ModuleKey(s"cached:${mod.getClass.getName}:$hex", true, label)
+        codeHashOpt match
+          case Some(codeHash) =>
+            val merged = merge(Seq(codeHash, paramHash))
+            val hex = StableHash.hex(merged)
+            val label = s"${mod.moduleName}_${hex.take(8)}"
+            ModuleKey(s"cached:${mod.getClass.getName}:$hex", true, label)
+          case None =>
+            val cls = mod.getClass
+            throw new IllegalStateException(
+              s"Unable to locate classfile for ${cls.getName} (loader=${Option(cls.getClassLoader).getOrElse("<bootstrap>")})"
+            )
       case _ =>
         val salt = s"${mod.getClass.getName}:${System.identityHashCode(mod)}"
         val hex = StableHash.hex(StableHash.digest(salt))
