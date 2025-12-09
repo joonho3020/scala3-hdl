@@ -25,6 +25,10 @@ sealed class Width(val value: Int):
 object Width:
   def apply(x: Int): Width = new Width(x)
 
+extension (n: Int)
+  def W: Width =
+    Width(n)
+
 sealed trait HWData:
   var dir: Direction = Direction.Default
   def flip: Unit =

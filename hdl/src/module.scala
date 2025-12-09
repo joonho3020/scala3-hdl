@@ -9,26 +9,25 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
 import scala.compiletime.summonInline
+import scala.compiletime.uninitialized
 
-final case class ElaboratedDesign(name: String, ports: Seq[String], body: Seq[String])
+final case class ElaboratedDesign(name: Option[String], ports: Seq[String], body: Seq[String])
+
+class ElabContext:
+  private var design: ElaboratedDesign = ElaboratedDesign(
+    name = None,
+    ports = Seq(),
+    body = Seq())
 
 abstract class Module:
-  private val _children = mutable.ArrayBuffer.empty[Module]
-  private var _elabKey: Option[String] = None
-  private var _instanceName: Option[String] = None
+  private var _bodyFn: ElabContext ?=> Unit = uninitialized
 
-  private[hdl] def register[T](data: T, ref: Option[String])(using WalkHW[T]): Unit =
-    ModuleOps.assignOwner(data, this)
-    ref.foreach(r => ModuleOps.assignRefs(data, r))
+  protected final def body(f: ElabContext ?=> Unit): Unit =
+    _bodyFn = f
 
-  protected inline def IO[T <: HWData](inline t: T)(using WalkHW[T]): T =
-    ${ ModuleMacros.ioImpl('t, 'this) }
-
-  protected inline def Wire[T <: HWData](inline t: T)(using WalkHW[T]): T =
-    ${ ModuleMacros.wireImpl('t, 'this) }
-
-  protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T])(using WalkHW[T]): T =
-    ${ ModuleMacros.litImpl('t, 'payload, 'this) }
+  // Called by the elaboration engine when it actually wants to elaborate this module
+  private[hdl] def runBody(using ctx: ElabContext): Unit =
+    _bodyFn
 
 object Module:
   inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
@@ -38,6 +37,70 @@ object Module:
     println(s"instantiate ${name}")
     val sub = gen
     sub
+
+inline def IO[T <: HWData](inline t: T)(using WalkHW[T]): T =
+  ${ ModuleMacros.ioImpl('t) }
+
+inline def Wire[T <: HWData](inline t: T)(using WalkHW[T]): T =
+  ${ ModuleMacros.wireImpl('t) }
+
+inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T])(using WalkHW[T]): T =
+  ${ ModuleMacros.litImpl('t)('payload) }
+
+private[hdl] object ModuleOps:
+  def io[T <: HWData](t: T, name: Option[String])(using WalkHW[T]): T =
+    println(s"io ${t} ${name}")
+    t.setNodeKind(NodeKind.IO)
+    t
+
+  def wire[T <: HWData](t: T, name: Option[String])(using WalkHW[T]): T =
+    println(s"wire ${t} ${name}")
+    t.setNodeKind(NodeKind.Wire)
+    t
+
+  def lit[T <: HWData](t: T, payload: HostTypeOf[T])(using WalkHW[T]): T =
+    t.setNodeKind(NodeKind.Lit)
+    t.setLitVal(payload)
+    t
+
+object ModuleMacros:
+  import scala.quoted.*
+
+  private def findEnclosingValName(using Quotes): Option[String] =
+    import quotes.reflect.*
+    def loop(sym: Symbol): Option[String] =
+      if sym.isNoSymbol then None
+      else if sym.isValDef && !sym.flags.is(Flags.Synthetic) && !sym.flags.is(Flags.Artifact) then Some(sym.name)
+      else loop(sym.owner)
+    loop(Symbol.spliceOwner)
+
+  def ioImpl[T <: HWData: Type](t: Expr[T])(using Quotes): Expr[T] =
+    val nameOpt = findEnclosingValName
+    '{
+      ModuleOps.io($t, ${Expr(nameOpt)})(using summonInline[WalkHW[T]])
+    }
+
+  def wireImpl[T <: HWData: Type](t: Expr[T])(using Quotes): Expr[T] =
+    val nameOpt = findEnclosingValName
+    '{
+      ModuleOps.wire($t, ${Expr(nameOpt)})(using summonInline[WalkHW[T]])
+    }
+
+  def litImpl[T <: HWData: Type](
+    t: Expr[T]
+  )(
+    payload: Expr[HostTypeOf[T]]
+  )(using Quotes): Expr[T] =
+    '{
+      ModuleOps.lit($t, $payload)(using summonInline[WalkHW[T]])
+    }
+
+  def moduleInstImpl[M <: Module: Type](gen: Expr[M], parent: Expr[Module])(using Quotes): Expr[M] =
+    val nameOpt = findEnclosingValName
+    '{ Module.instantiate($gen, $parent, ${Expr(nameOpt)}) }
+
+
+
 
 //   private val classHashCache = TrieMap.empty[Class[?], Array[Byte]]
 // 
@@ -61,89 +124,3 @@ object Module:
 //     md.update(bytes)
 //     md.digest()
 
-private[hdl] object ModuleOps:
-  def io[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
-    println(s"io ${t} ${name} ${mod}")
-    t.setNodeKind(NodeKind.IO)
-    t
-
-  def wire[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
-    println(s"wire ${t} ${name} ${mod}")
-    t.setNodeKind(NodeKind.Wire)
-    t
-
-  def lit[T <: HWData](t: T, payload: HostTypeOf[T], mod: Module)(using WalkHW[T]): T =
-    println(s"lit ${t} ${payload} ${mod}")
-    t.setNodeKind(NodeKind.Lit)
-    t.setLitVal(payload)
-    mod.register(t, None)
-    t
-
-  def emitPortDecl[T <: HWData](name: String, tpe: T)(using w: WalkHW[T]): Seq[String] =
-    val dirStr = if tpe.dir == Direction.In then "input" else "output"
-    Seq(s"$dirStr $name : ${formatType(tpe)}")
-
-  def formatType(tpe: HWData): String = tpe match
-    case u: UInt => s"UInt<${u.w.value}>"
-    case _: Bool => "Bool"
-    case v: Vec[?] =>
-      val elemStr = v.elems.headOption.map(e => formatType(e)).getOrElse("?")
-      s"Vec<${v.length}, $elemStr>"
-    case bundle: Bundle[?] =>
-      val p = bundle.asInstanceOf[Product]
-      val fields = (0 until p.productArity).flatMap { i =>
-        val fieldName = p.productElementName(i)
-        p.productElement(i) match
-          case hd: HWData =>
-            val dirPrefix = dirPrefixOf(hd)
-            Some(s"$dirPrefix$fieldName : ${formatType(hd)}")
-          case _ => Nil
-      }
-      s"{ ${fields.mkString(", ")} }"
-    case _ => tpe.toString
-
-  def formatLiteral(tpe: HWData, value: Any): String = tpe match
-    case u: UInt => s"UInt<${u.w.value}>($value)"
-    case _: Bool => s"Bool($value)"
-    case _ => value.toString
-
-  private def dirPrefixOf(h: HWData): String =
-    if h.dir == Direction.In then "flip " else ""
-
-  def assignOwner[T](value: T, mod: Module)(using w: WalkHW[T]): Unit =
-    w(value, "")((h, _) => h.setOwner(mod))
-
-  def assignRefs[T](value: T, base: String)(using w: WalkHW[T]): Unit =
-    w(value, base)((h, path) => h.setRef(path))
-
-object ModuleMacros:
-  import scala.quoted.*
-
-  private def findEnclosingValName(using Quotes): Option[String] =
-    import quotes.reflect.*
-    def loop(sym: Symbol): Option[String] =
-      if sym.isNoSymbol then None
-      else if sym.isValDef && !sym.flags.is(Flags.Synthetic) && !sym.flags.is(Flags.Artifact) then Some(sym.name)
-      else loop(sym.owner)
-    loop(Symbol.spliceOwner)
-
-  def ioImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
-    val nameOpt = findEnclosingValName
-    '{
-      ModuleOps.io($t, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
-    }
-
-  def wireImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
-    val nameOpt = findEnclosingValName
-    '{
-      ModuleOps.wire($t, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
-    }
-
-  def litImpl[T <: HWData: Type](t: Expr[T], payload: Expr[HostTypeOf[T]], mod: Expr[Module])(using Quotes): Expr[T] =
-    '{
-      ModuleOps.lit($t, $payload, $mod)(using summonInline[WalkHW[T]])
-    }
-
-  def moduleInstImpl[M <: Module: Type](gen: Expr[M], parent: Expr[Module])(using Quotes): Expr[M] =
-    val nameOpt = findEnclosingValName
-    '{ Module.instantiate($gen, $parent, ${Expr(nameOpt)}) }
