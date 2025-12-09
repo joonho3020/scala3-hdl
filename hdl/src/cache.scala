@@ -94,6 +94,8 @@ final class BuildCache private (path: Path):
   def get(key: String): Option[CachedArtifact] = data.get(key)
 
   def put(key: String, artifact: CachedArtifact): Unit =
+    // Need to hold a lock to prevent race conditions.
+    // Otherwise can lead corrupted buildcache files.
     lock.synchronized:
       data.update(key, CachedArtifact(artifact.designs.toVector))
       persist()

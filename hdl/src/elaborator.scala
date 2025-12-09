@@ -34,6 +34,7 @@ final class Elaborator:
     val label = assignLabel(mod, key)
     memoized.get(key.value) match
       case Some(designs) =>
+        // Found identical instance, reuse it
         Future.successful(designs)
       case None =>
         if key.cacheable then
@@ -52,8 +53,11 @@ final class Elaborator:
 
   private def startElaboration(mod: Module, key: ModuleKey, label: String): Future[Seq[ElaboratedDesign]] =
     inProgress.getOrElseUpdate(key.value,
+      // Submit `mod.runBody` to the execution pool
       Future(mod.runBody()).flatMap { _ =>
         val childFutures = mod.children.map(elaborateModule)
+
+        // Submit all child `elaborateModule` to the execution pool
         Future.sequence(childFutures).map(_.flatten).map { childDesigns =>
           val instLabelMap = labels.synchronized { labels.toMap }
           val design = mod.getBuilder.snapshot(label, instLabelMap)
@@ -75,4 +79,3 @@ final class Elaborator:
 
   def emitAll(designs: Seq[ElaboratedDesign]): String =
     designs.map(emit).mkString("\n")
-
