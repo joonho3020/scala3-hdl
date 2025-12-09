@@ -20,13 +20,13 @@ class ElabContext:
     body = Seq())
 
 abstract class Module:
-  private var _bodyFn: ElabContext ?=> Unit = uninitialized
+  private var _bodyFn: Module ?=> ElabContext ?=> Unit = uninitialized
 
-  protected final def body(f: ElabContext ?=> Unit): Unit =
+  protected final def body(f: Module ?=> ElabContext ?=> Unit): Unit =
     _bodyFn = f
 
-  // Called by the elaboration engine when it actually wants to elaborate this module
   private[hdl] def runBody(using ctx: ElabContext): Unit =
+    given Module = this
     _bodyFn
 
 object Module:
