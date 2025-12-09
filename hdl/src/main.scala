@@ -4,6 +4,10 @@ import scala.compiletime.testing.*
 
 final case class SimpleIO(in: UInt, out: UInt) extends Bundle[SimpleIO]
 
+// Notes:
+// - IO ports are elaborated eagerly while the body is evaluated lazily
+// - Elaborating ports are cheap and by lazily evaluating the module body,
+// we can integrate it with caching to achieve high elaboration performance
 def nested_module_check(): Unit =
   class A(w: Int) extends Module:
     val io = IO(SimpleIO(Input(UInt(w.W)), Output(UInt(w.W))))
@@ -36,26 +40,16 @@ def nested_module_check(): Unit =
       val a3 = Module(new A(3))
       val b = Module(new B(4))
       val c = Module(new C(1, 2))
+      val w = Wire(UInt(10.W))
 
-  val a = new A(1)
-  val b = new B(2)
-  val c = new C(1, 2)
-  val top = new Top
-
-  println("Before runBody")
-
+  println("------------- Start --------------")
   given ElabContext = new ElabContext
-  println("a")
-  a.runBody
+  val top = new Top
+  println("------------- Before runBody --------------")
 
-  println("b")
-  b.runBody
-
-  println("c")
-  c.runBody
-
-  println("top")
-  top.runBody
+  val topDesign = top.runBody
+  println("------------- After runBody --------------")
+  println(topDesign)
 
 @main def demo(): Unit =
   nested_module_check()
