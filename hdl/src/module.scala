@@ -71,6 +71,10 @@ abstract class Module:
     ModuleOps.assignOwner(data, this)
     ref.foreach(r => ModuleOps.assignRefs(data, r))
 
+  // Storing the module body as a thunk is required in order to achieve
+  // lazy elaboration.
+  // If the module body is elaborated eagerly, there is no point in
+  // incremental elaboration and caching.
   protected final def body(f: Module ?=> Unit): Unit =
     _bodyFn = Some(f)
 

@@ -50,6 +50,42 @@ final class CacheTop(nonWidth: Int) extends Module:
     val right = Module(new CacheBranch(nonWidth + 1, 1))
     io.out := io.in
 
+final case class SimpleParams(width: Int) derives StableHash
+
+final class CacheableOne(p: SimpleParams) extends Module with CacheableModule:
+  override def moduleName: String = "MutableLeaf"
+  type ElabParams = SimpleParams
+  given stableHashElabParams: StableHash[SimpleParams] = summon[StableHash[SimpleParams]]
+  def elabParams: SimpleParams = p
+  val io = IO(SimpleIO(Input(UInt(p.width.W)), Output(UInt(p.width.W))))
+  body:
+    val w = Wire(UInt(p.width.W))
+    w := io.in
+    io.out := w
+
+final class CacheableTwo(p: SimpleParams) extends Module with CacheableModule:
+  override def moduleName: String = "MutableLeaf"
+  type ElabParams = SimpleParams
+  given stableHashElabParams: StableHash[SimpleParams] = summon[StableHash[SimpleParams]]
+  def elabParams: SimpleParams = p
+  val io = IO(SimpleIO(Input(UInt(p.width.W)), Output(UInt(p.width.W))))
+  body:
+    val r = Reg(UInt(p.width.W))
+    r := io.in
+    io.out := r
+
+final class CacheableOneTop(p: SimpleParams) extends Module:
+  val io = IO(SimpleIO(Input(UInt(p.width.W)), Output(UInt(p.width.W))))
+  body:
+    val leaf = Module(new CacheableOne(p))
+    io.out := io.in
+
+final class CacheableTwoTop(p: SimpleParams) extends Module:
+  val io = IO(SimpleIO(Input(UInt(p.width.W)), Output(UInt(p.width.W))))
+  body:
+    val leaf = Module(new CacheableTwo(p))
+    io.out := io.in
+
 object ElaborationCacheSpec extends TestSuite:
   private def newCachePath(prefix: String): Path =
     Files.createTempDirectory(prefix).resolve("elab-cache.bin")
@@ -59,11 +95,8 @@ object ElaborationCacheSpec extends TestSuite:
     val ps = new PrintStream(out)
     val start = System.nanoTime()
     try
-      Console.withOut(ps) {
-// val elaborator = new Elaborator(BuildCache.at(cachePath))
-        val elaborator = new Elaborator
-        elaborator.elaborate(top)
-      }
+      val elaborator = new Elaborator(BuildCache.at(cachePath), s => ps.println(s))
+      elaborator.elaborate(top)
     finally
       ps.close()
     val elapsed = System.nanoTime() - start
@@ -89,7 +122,38 @@ object ElaborationCacheSpec extends TestSuite:
       assert(count(warm._1, "Cache Hit")  == cacheableInsts)
       assert(count(warm._1, "Cache Miss") == 0)
 
-      println(s"cold run time ${cold}")
-      println(s"warm run time ${warm}")
+      val ns_to_us = 1000
+      println(s"cold run time ${cold._2.floatValue / ns_to_us.floatValue} us")
+      println(s"warm run time ${warm._2.floatValue / ns_to_us.floatValue} us")
+    }
+
+    test("unchanged module hits cache on warm run") {
+      val cachePath = newCachePath("hdl-cache-unchanged")
+      val p = SimpleParams(4)
+
+      val cold = capture(new CacheableOneTop(p), cachePath)
+      assert(count(cold._1, "Cache Hit") == 0)
+      assert(count(cold._1, "Cache Miss") == 1)
+
+      val warm = capture(new CacheableOneTop(p), cachePath)
+      assert(count(warm._1, "Cache Hit") == 1)
+      assert(count(warm._1, "Cache Miss") == 0)
+    }
+
+    test("same module with different parameters misses the cache") {
+      val cachePath = newCachePath("hdl-cache-changed-body")
+      val p = SimpleParams(5)
+
+      val first = capture(new CacheableOneTop(p), cachePath)
+      assert(count(first._1, "Cache Hit") == 0)
+      assert(count(first._1, "Cache Miss") == 1)
+
+      val changed = capture(new CacheableTwoTop(p), cachePath)
+      assert(count(changed._1, "Cache Hit") == 0)
+      assert(count(changed._1, "Cache Miss") == 1)
+
+      val changedWarm = capture(new CacheableTwoTop(p), cachePath)
+      assert(count(changedWarm._1, "Cache Hit") == 1)
+      assert(count(changedWarm._1, "Cache Miss") == 0)
     }
   }

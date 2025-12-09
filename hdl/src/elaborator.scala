@@ -5,7 +5,7 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.Duration
 
-final class Elaborator(buildCache: BuildCache = BuildCache.default):
+final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String => Unit = println):
   private implicit val ec: ExecutionContext = ExecutionContext.global
 
   private val labels = TrieMap.empty[Module, String]
@@ -32,21 +32,21 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default):
     val label = assignLabel(mod, key)
     memoized.get(key.value) match
       case Some(designs) =>
-        // Found identical instance, reuse it
+        log(s"Cache Hit ${mod.getClass.getName} ${key} ${label}")
         Future.successful(designs)
       case None =>
         if key.cacheable then
           buildCache.get(key.value) match
             case Some(hit) =>
-              println(s"Cache Hit ${mod.getClass.getName} ${key} ${label}")
+              log(s"Cache Hit ${mod.getClass.getName} ${key} ${label}")
               val designs = hit.designs.distinctBy(_.name)
               memoized.putIfAbsent(key.value, designs)
               Future.successful(designs)
             case None =>
-              println(s"Cache Miss ${mod.getClass.getName} ${key} ${label}")
+              log(s"Cache Miss ${mod.getClass.getName} ${key} ${label}")
               startElaboration(mod, key, label)
         else
-          println(s"NonCacheable ${mod.getClass.getName} ${key} ${label}")
+          log(s"NonCacheable ${mod.getClass.getName} ${key} ${label}")
           startElaboration(mod, key, label)
 
   private def startElaboration(mod: Module, key: ModuleKey, label: String): Future[Seq[ElaboratedDesign]] =
