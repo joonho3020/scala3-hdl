@@ -68,6 +68,9 @@ object ModuleKey:
               s"Unable to locate classfile for ${cls.getName} (loader=${Option(cls.getClassLoader).getOrElse("<bootstrap>")})"
             )
       case _ =>
+        // `identityHashCode` provides a different hash per class instance.
+        // The hash value is different regardless of the parameters passed
+        // on to a Module
         val salt = s"${mod.getClass.getName}:${System.identityHashCode(mod)}"
         val hex = StableHash.hex(StableHash.digest(salt))
         ModuleKey(s"uncached:${mod.getClass.getName}:$hex", false, "")
@@ -109,4 +112,5 @@ final class BuildCache private (path: Path):
 
 object BuildCache:
   private val defaultPath = Paths.get(".hdl-cache", "elab-cache.bin")
+  def at(path: Path): BuildCache = new BuildCache(path)
   lazy val default: BuildCache = new BuildCache(defaultPath)

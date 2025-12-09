@@ -5,13 +5,11 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.Duration
 
-final class Elaborator:
+final class Elaborator(buildCache: BuildCache = BuildCache.default):
   private implicit val ec: ExecutionContext = ExecutionContext.global
 
   private val labels = TrieMap.empty[Module, String]
   private val nameCounters = TrieMap.empty[String, Int]
-
-  private val buildCache = BuildCache.default
   private val memoized = TrieMap.empty[String, Seq[ElaboratedDesign]]
   private val inProgress = TrieMap.empty[String, Future[Seq[ElaboratedDesign]]]
 
