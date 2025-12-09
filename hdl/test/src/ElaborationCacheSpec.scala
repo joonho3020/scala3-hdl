@@ -86,6 +86,39 @@ final class CacheableTwoTop(p: SimpleParams) extends Module:
     val leaf = Module(new CacheableTwo(p))
     io.out := io.in
 
+final class CacheBranchV1(nonWidth: Int, id: Int) extends Module:
+  override def moduleName: String = "CacheBranch"
+  val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+  body:
+    val cacheA  = Module(new CacheableLeaf(LeafParams(8  + id, 64)))
+    val cacheB  = Module(new CacheableLeaf(LeafParams(10 + id, 64)))
+    val cacheA2 = Module(new CacheableLeaf(LeafParams(8  + id, 64)))
+    val non     = Module(new NonCacheableLeaf(nonWidth + id, 48))
+    io.out := io.in
+
+final class CacheBranchV2(nonWidth: Int, id: Int) extends Module:
+  override def moduleName: String = "CacheBranch"
+  val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+  body:
+    val cacheA  = Module(new CacheableLeaf(LeafParams(8  + id + 1, 64))) // miss
+    val cacheB  = Module(new CacheableLeaf(LeafParams(10 + id, 64)))     // hit
+    val cacheB2 = Module(new CacheableLeaf(LeafParams(10 + id + 1, 64))) // miss
+    val cacheA2 = Module(new CacheableLeaf(LeafParams(8  + id, 64)))     // hit
+    val non     = Module(new NonCacheableLeaf(nonWidth + id, 48))        // miss (non-cacheable)
+    io.out := io.in + io.in
+
+final class CacheBranchV1Top(nonWidth: Int) extends Module:
+  val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+  body:
+    val branch = Module(new CacheBranchV1(nonWidth, 0))
+    io.out := io.in
+
+final class CacheBranchV2Top(nonWidth: Int) extends Module:
+  val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+  body:
+    val branch = Module(new CacheBranchV2(nonWidth, 0))
+    io.out := io.in
+
 object ElaborationCacheSpec extends TestSuite:
   private def newCachePath(prefix: String): Path =
     Files.createTempDirectory(prefix).resolve("elab-cache.bin")
@@ -108,6 +141,12 @@ object ElaborationCacheSpec extends TestSuite:
   private def runTop(cachePath: Path, nonWidth: Int): (String, Long) =
     capture(new CacheTop(nonWidth), cachePath)
 
+  def printTime(times: Seq[Long]): Unit =
+      val ns_to_us = 1000
+      times.zipWithIndex.foreach( (t, i) =>
+        println(s"$i th run ${t.floatValue / ns_to_us.floatValue} us")
+      )
+
   def tests = Tests {
     test("cold run then warm run uses cache hits and warm is faster") {
       val cacheableInsts = CacheTop.cacheableInstanceCount
@@ -122,9 +161,7 @@ object ElaborationCacheSpec extends TestSuite:
       assert(count(warm._1, "Cache Hit")  == cacheableInsts)
       assert(count(warm._1, "Cache Miss") == 0)
 
-      val ns_to_us = 1000
-      println(s"cold run time ${cold._2.floatValue / ns_to_us.floatValue} us")
-      println(s"warm run time ${warm._2.floatValue / ns_to_us.floatValue} us")
+      printTime(Seq(cold._2, warm._2))
     }
 
     test("unchanged module hits cache on warm run") {
@@ -138,6 +175,8 @@ object ElaborationCacheSpec extends TestSuite:
       val warm = capture(new CacheableOneTop(p), cachePath)
       assert(count(warm._1, "Cache Hit") == 1)
       assert(count(warm._1, "Cache Miss") == 0)
+
+      printTime(Seq(cold._2, warm._2))
     }
 
     test("same module with different parameters misses the cache") {
@@ -155,5 +194,20 @@ object ElaborationCacheSpec extends TestSuite:
       val changedWarm = capture(new CacheableTwoTop(p), cachePath)
       assert(count(changedWarm._1, "Cache Hit") == 1)
       assert(count(changedWarm._1, "Cache Miss") == 0)
+
+      printTime(Seq(first._2, changed._2, changedWarm._2))
+    }
+
+    test("structural changes within branch give mixed hits and misses") {
+      val cachePath = newCachePath("hdl-cache-branch-change")
+      val cold = capture(new CacheBranchV1Top(9), cachePath)
+      assert(count(cold._1, "Cache Hit") == 0)
+      assert(count(cold._1, "Cache Miss") == 3)
+
+      val warm = capture(new CacheBranchV2Top(9), cachePath)
+      assert(count(warm._1, "Cache Hit") == 2)
+      assert(count(warm._1, "Cache Miss") == 2)
+
+      printTime(Seq(cold._2, warm._2))
     }
   }
