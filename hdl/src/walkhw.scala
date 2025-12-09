@@ -18,7 +18,11 @@ object WalkHW:
         walkProduct(p, path, f)
       case _ => ()
 
-  private def walkIterable(it: IterableOnce[?], path: String, f: (HWData, String) => Unit): Unit =
+  private def walkIterable(
+    it: IterableOnce[?],
+    path: String,
+    f: (HWData, String) => Unit
+  ): Unit =
     val iter = it.iterator
     var idx = 0
     while iter.hasNext do
@@ -26,7 +30,11 @@ object WalkHW:
       walkAny(iter.next(), n, f)
       idx += 1
 
-  private def walkProduct(p: Product, path: String, f: (HWData, String) => Unit): Unit =
+  private def walkProduct(
+    p: Product,
+    path: String,
+    f: (HWData, String) => Unit
+  ): Unit =
     val arity = p.productArity
     var i = 0
     while i < arity do
