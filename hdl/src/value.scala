@@ -6,6 +6,9 @@ import scala.NamedTuple
 import scala.util.NotGiven
 import scala.quoted.*
 
+enum NodeKind:
+  case Reg, Wire, IO, PrimOp, Lit, Unset
+
 enum Direction:
   case Default, Flipped
 
