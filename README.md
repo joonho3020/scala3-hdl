@@ -35,16 +35,17 @@
 ## TODO
 
 - [x] parallel elaboration & caching support
-- [ ] behavioral statements
-- [ ] vectors and heterogeneous vectors
+- [x] behavioral statements
+- [x] proper IR emission
+- [x] vectors
     - How are vectors supported in Chisel?
     - Should support indexing of vector structures using hardware types...?
     - Emission shouldn't flatten these structures
-- [ ] memories
+- [ ] Mixed vectors
+- [ ] Memories
     - Make the port API explicit (no inferred ports)
-- [ ] proper IR emission
-- [ ] lazy elaboration (diplomacy like 2-step elaboration)
-- [ ] more operators
+- [ ] Lazy elaboration (diplomacy like 2-step elaboration)
+- [ ] More operators
 
 ## Misc Notes
 
