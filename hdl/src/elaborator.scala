@@ -97,6 +97,9 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
   private def emitExpr(e: IR.Expr): String = e match
     case IR.Ref(name)       => name
     case IR.Literal(value)  => value
+    case IR.SubIndex(expr, value) => s"${emitExpr(expr)}[$value]"
+    case IR.SubAccess(expr, index) => s"${emitExpr(expr)}[${emitExpr(index)}]"
+    case IR.SubField(expr, field) => s"${emitExpr(expr)}.$field"
     case IR.DoPrim(op, args) => s"${op.opName}(${args.map(emitExpr).mkString(", ")})"
 
   private def emitStmt(stmt: IR.Stmt, indent: Int, sb: StringBuilder): Unit =

@@ -409,7 +409,9 @@ def vec_check(): Unit =
   class VectorTest(p: VectorParams) extends Module:
     given Module = this
     val io = IO(ModuleIO(p))
-// io.out := io.in.entries(io.reduce_idx).reduce(_ + _)
+    val row = io.in.entries(io.reduce_idx)
+    val sums = row.elems.map(e => e.a + e.b)
+    io.out := sums.reduce(_ + _)
 
   val elaborator = new Elaborator
   val m = new VectorTest(VectorParams(2, 3, 4))

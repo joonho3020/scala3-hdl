@@ -17,6 +17,9 @@ object IR:
   final case class Ref(name: String) extends Expr
   final case class Literal(value: String) extends Expr
   final case class DoPrim(op: PrimOp, args: Seq[Expr]) extends Expr
+  final case class SubIndex(expr: Expr, value: Int) extends Expr
+  final case class SubAccess(expr: Expr, index: Expr) extends Expr
+  final case class SubField(expr: Expr, field: String) extends Expr
 
   sealed trait Stmt extends Serializable
   final case class Wire(name: String, tpe: Type) extends Stmt

@@ -182,9 +182,9 @@ private[hdl] object ModuleOps:
           connect(dElems(i).asInstanceOf[HWData], sElems(i).asInstanceOf[HWData], mod)
           i += 1
       case _ =>
-        val lhs = refFor(dst, mod)
+        val lhs = locFor(dst, mod)
         val rhs = exprFor(src, mod)
-        mod.getBuilder.addStmt(IR.Connect(IR.Ref(lhs), rhs))
+        mod.getBuilder.addStmt(IR.Connect(lhs, rhs))
 
   def when(cond: Bool, mod: Module)(block: => Unit): WhenDSL =
     val condExpr = exprFor(cond, mod)
@@ -234,6 +234,9 @@ private[hdl] object ModuleOps:
       case Some(owner) if owner.ne(current) =>
         owner.instanceName.map(prefix => s"$prefix.$base").getOrElse(base)
       case _ => base
+
+  private def locFor(data: HWData, current: Module): IR.Expr =
+    data.getIRExpr.getOrElse(IR.Ref(refFor(data, current)))
 
   def exprFor(data: HWData, current: Module): IR.Expr =
     if data.kind == NodeKind.Lit then IR.Literal(formatLiteral(data, data.literal.getOrElse("")))

@@ -87,6 +87,12 @@ sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnc
   def iterator: Iterator[T] = elems.iterator
   def length: Int = elems.length
   def apply(i: Int): T = elems(i)
+  def apply(i: UInt)(using m: Module): T =
+    val proto = elems.headOption.getOrElse(throw new IllegalArgumentException("Cannot index empty Vec"))
+    val baseExpr = ModuleOps.exprFor(this, m)
+    val idxExpr = ModuleOps.exprFor(i, m)
+    val accessExpr = IR.SubAccess(baseExpr, idxExpr)
+    HWDataRebinder.rebind(proto, accessExpr)
   override def flip: Unit =
     dir = Direction.flip(dir)
     elems.foreach(_.flip)
@@ -160,6 +166,64 @@ trait Bundle[T] extends Selectable with HWData { self: T =>
       case Some(v) => v.asInstanceOf[HostTypeOf[T]]
       case None    => throw new NoSuchElementException("Node does not carry a literal value")
 }
+
+private object HWDataRebinder:
+  private def copyCommon(from: HWData, to: HWData): Unit =
+    to.dir = from.dir
+    to.kind = from.kind
+    to.literal = from.literal
+    from.getOwner.foreach(to.setOwner)
+
+  def rebind[T <: HWData](template: T, expr: IR.Expr): T =
+    val rebound = template match
+      case u: UInt =>
+        val n = UInt(u.w)
+        copyCommon(u, n)
+        n.setIRExpr(expr)
+        n.asInstanceOf[T]
+      case b: Bool =>
+        val n = Bool()
+        copyCommon(b, n)
+        n.setIRExpr(expr)
+        n.asInstanceOf[T]
+      case v: Vec[t] =>
+        val elems = v.elems.zipWithIndex.map { case (e, idx) =>
+          rebind(e, IR.SubIndex(expr, idx)).asInstanceOf[t]
+        }
+        val nv = Vec(elems)
+        copyCommon(v, nv)
+        nv.setIRExpr(expr)
+        nv.asInstanceOf[T]
+      case b: Bundle[bt] =>
+        val prod = b.asInstanceOf[Product]
+        val arity = prod.productArity
+        val values = Array.ofDim[Any](arity)
+        var i = 0
+        while i < arity do
+          val fieldName = prod.productElementName(i)
+          val value = prod.productElement(i) match
+            case h: HWData =>
+              rebind(h, IR.SubField(expr, fieldName))
+            case other => other
+          values(i) = value
+          i += 1
+        val cls = b.getClass
+        val ctor = cls.getConstructors.find(_.getParameterCount == values.length)
+        val args = values.map(_.asInstanceOf[AnyRef])
+        val rebuilt = ctor
+          .map(_.newInstance(args*))
+          .getOrElse {
+            val companionCls = Class.forName(s"${cls.getName}$$")
+            val module = companionCls.getField("MODULE$").get(null)
+            val apply = module.getClass.getMethods.find(m => m.getName == "apply" && m.getParameterCount == values.length)
+              .getOrElse(throw new IllegalArgumentException(s"No apply method for ${cls.getName}"))
+            apply.invoke(module, args*)
+          }
+        val nb = rebuilt.asInstanceOf[Bundle[bt]]
+        copyCommon(b, nb)
+        nb.setIRExpr(expr)
+        nb.asInstanceOf[T]
+    rebound
 
 object Input:
   def apply[T <: HWData](t: T): T =
