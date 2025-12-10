@@ -209,7 +209,6 @@ private[hdl] object ModuleOps:
     val args = addOperands(lhs, mod) ++ addOperands(rhs, mod)
     val expr = IR.DoPrim(IR.PrimOp.Add, args)
     result.setIRExpr(expr)
-    mod.getBuilder.addStmt(IR.DefNode(name, expr))
     result
 
   private def cmp[T <: HWData](op: IR.PrimOp, lhs: T, rhs: T, mod: Module): Bool =
@@ -221,7 +220,6 @@ private[hdl] object ModuleOps:
     val rhsRef = exprFor(rhs, mod)
     val expr = IR.DoPrim(op, Seq(lhsRef, rhsRef))
     result.setIRExpr(expr)
-    mod.getBuilder.addStmt(IR.DefNode(name, expr))
     result
 
   def eq[T <: HWData](lhs: T, rhs: T, mod: Module): Bool =
@@ -239,7 +237,7 @@ private[hdl] object ModuleOps:
 
   def exprFor(data: HWData, current: Module): IR.Expr =
     if data.kind == NodeKind.Lit then IR.Literal(formatLiteral(data, data.literal.getOrElse("")))
-    else IR.Ref(refFor(data, current))
+    else data.getIRExpr.getOrElse(IR.Ref(refFor(data, current)))
 
   def emitPortDecl[T <: HWData](name: String, tpe: T)(using w: WalkHW[T]): Seq[IR.Port] =
     val dir = if tpe.dir == Direction.In then Direction.In else Direction.Out
