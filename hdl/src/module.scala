@@ -3,27 +3,19 @@ package hdl
 import scala.collection.mutable
 import scala.compiletime.summonInline
 
-final case class ElaboratedDesign(name: String, ports: Seq[String], body: Seq[String]) extends Serializable
+final case class ElaboratedDesign(name: String, ir: IR.Module) extends Serializable
 
-private sealed trait BodyEntry:
-  def indent: Int
-private final case class InstEntry(instName: String, mod: Module, baseModule: String, indent: Int) extends BodyEntry
-private final case class LineEntry(text: String, indent: Int) extends BodyEntry
+private sealed trait RawStmt
+private final case class RawInst(instName: String, mod: Module, baseModule: String) extends RawStmt
+private final case class RawWhen(cond: IR.Expr, conseq: Seq[RawStmt], var alt: Seq[RawStmt]) extends RawStmt
+private final case class RawLeaf(stmt: IR.Stmt) extends RawStmt
 
 final class ModuleBuilder(val moduleBaseName: String):
-  private val ports = mutable.ArrayBuffer.empty[String]
-  private val body = mutable.ArrayBuffer.empty[BodyEntry]
+  private val ports = mutable.ArrayBuffer.empty[IR.Port]
   private val usedNames = mutable.Set.empty[String]
+  private val bodyStack = mutable.Stack[mutable.ArrayBuffer[RawStmt]]()
+  bodyStack.push(mutable.ArrayBuffer.empty[RawStmt])
   private var tempCounter = 0
-  private var indentLevel = 0
-
-  private def currentIndentLevel: Int = indentLevel
-  private def indentString(n: Int): String = "  " * n
-
-  def withIndent[T](thunk: => T): T =
-    indentLevel += 1
-    try thunk
-    finally indentLevel -= 1
 
   def freshName(prefix: String): String =
     tempCounter += 1
@@ -42,17 +34,37 @@ final class ModuleBuilder(val moduleBaseName: String):
       n
     }.getOrElse(freshName(prefix))
 
-  def addPort(stmt: String): Unit = ports += stmt
-  def addBody(stmt: String): Unit = body += LineEntry(stmt, currentIndentLevel)
+  def addPort(port: IR.Port): Unit = ports += port
+  private def currentBody: mutable.ArrayBuffer[RawStmt] = bodyStack.head
+
+  def addRaw(stmt: RawStmt): Unit = currentBody += stmt
+  def addStmt(stmt: IR.Stmt): Unit = addRaw(RawLeaf(stmt))
   def addInst(name: String, mod: Module, base: String): Unit =
-    body += InstEntry(name, mod, base, currentIndentLevel)
+    addRaw(RawInst(name, mod, base))
+
+  def captureBody(thunk: => Unit): Seq[RawStmt] =
+    val buf = mutable.ArrayBuffer.empty[RawStmt]
+    bodyStack.push(buf)
+    try
+      thunk
+      buf.toSeq
+    finally
+      bodyStack.pop()
 
   def snapshot(label: String, instLabels: Map[Module, String]): ElaboratedDesign =
-    val renderedBody = body.map {
-      case LineEntry(t, ind) => s"${indentString(ind)}$t"
-      case InstEntry(n, m, b, ind) => s"${indentString(ind)}inst $n of ${instLabels.getOrElse(m, b)}"
-    }
-    ElaboratedDesign(label, ports.toSeq, renderedBody.toSeq)
+    val body = currentBody.toSeq.map(rawToIR(_, instLabels))
+    val mod = IR.Module(label, ports.toSeq, body)
+    ElaboratedDesign(label, mod)
+
+  private def rawToIR(rs: RawStmt, instLabels: Map[Module, String]): IR.Stmt = rs match
+    case RawLeaf(s) => s
+    case RawInst(name, m, base) =>
+      val target = instLabels.getOrElse(m, base)
+      IR.Inst(name, target)
+    case w: RawWhen =>
+      val conseq = w.conseq.map(rawToIR(_, instLabels))
+      val alt = w.alt.map(rawToIR(_, instLabels))
+      IR.When(w.cond, conseq, alt)
 
 abstract class Module:
   private val _builder = new ModuleBuilder(moduleName)
@@ -114,8 +126,24 @@ object Module:
     sub
 
 private[hdl] object ModuleOps:
+  private def irTypeOf(tpe: HWData): IR.Type = tpe match
+    case u: UInt => IR.UIntType(u.w.value)
+    case _: Bool => IR.BoolType
+    case v: Vec[?] =>
+      val elemType = v.elems.headOption.map(irTypeOf).getOrElse(IR.BoolType)
+      IR.VecType(v.length, elemType)
+    case bundle: Bundle[?] =>
+      val p = bundle.asInstanceOf[Product]
+      val fields = (0 until p.productArity).flatMap { i =>
+        p.productElement(i) match
+          case hd: HWData =>
+            val dirFlip = hd.dir == Direction.In
+            Some(IR.BundleField(p.productElementName(i), dirFlip, irTypeOf(hd)))
+          case _ => Nil
+      }
+      IR.BundleType(fields.toSeq)
+
   def io[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
-// println(s"ModuleOps.io ${t} ${name} ${mod}")
     val baseName = mod.getBuilder.allocateName(name, "io")
     t.setNodeKind(NodeKind.IO)
     mod.register(t, Some(baseName))
@@ -124,23 +152,20 @@ private[hdl] object ModuleOps:
     t
 
   def wire[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
-// println(s"ModuleOps.wire ${t} ${name} ${mod}")
     val wireName = mod.getBuilder.allocateName(name, "wire")
     t.setNodeKind(NodeKind.Wire)
     mod.register(t, Some(wireName))
-    mod.getBuilder.addBody(s"wire $wireName : ${formatType(t)}")
+    mod.getBuilder.addStmt(IR.Wire(wireName, irTypeOf(t)))
     t
 
   def reg[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
-// println(s"ModuleOps.reg ${t} ${name} ${mod}")
     val regName = mod.getBuilder.allocateName(name, "reg")
     t.setNodeKind(NodeKind.Reg)
     mod.register(t, Some(regName))
-    mod.getBuilder.addBody(s"reg $regName : ${formatType(t)}, clock")
+    mod.getBuilder.addStmt(IR.Reg(regName, irTypeOf(t)))
     t
 
   def lit[T <: HWData](t: T, payload: HostTypeOf[T], mod: Module)(using WalkHW[T]): T =
-// println(s"ModuleOps.lit ${t} ${payload} ${mod}")
     t.setNodeKind(NodeKind.Lit)
     t.setLitVal(payload)
     mod.register(t, None)
@@ -158,16 +183,22 @@ private[hdl] object ModuleOps:
           i += 1
       case _ =>
         val lhs = refFor(dst, mod)
-        val rhs = refFor(src, mod)
-        mod.getBuilder.addBody(s"connect $lhs, $rhs")
+        val rhs = exprFor(src, mod)
+        mod.getBuilder.addStmt(IR.Connect(IR.Ref(lhs), rhs))
 
   def when(cond: Bool, mod: Module)(block: => Unit): WhenDSL =
-    val condRef = refFor(cond, mod)
-    mod.getBuilder.addBody(s"when $condRef:")
-    mod.getBuilder.withIndent {
+    val condExpr = exprFor(cond, mod)
+    val conseq = mod.getBuilder.captureBody {
       block
     }
-    new WhenDSL(mod)
+    val raw = RawWhen(condExpr, conseq, Seq.empty)
+    mod.getBuilder.addRaw(raw)
+    new WhenDSL(mod, raw)
+
+  private def addOperands(v: HWData, mod: Module): Seq[IR.Expr] =
+    v.getIRExpr match
+      case Some(IR.DoPrim(IR.PrimOp.Add, args)) => args
+      case _ => Seq(exprFor(v, mod))
 
   def add(lhs: UInt, rhs: UInt, mod: Module): UInt =
     val resWidth = math.max(lhs.w.value, rhs.w.value)
@@ -175,39 +206,44 @@ private[hdl] object ModuleOps:
     result.setNodeKind(NodeKind.PrimOp)
     val name = mod.getBuilder.allocateName(None, "add")
     mod.register(result, Some(name))
-    val lhsRef = refFor(lhs, mod)
-    val rhsRef = refFor(rhs, mod)
-    mod.getBuilder.addBody(s"node $name = add($lhsRef, $rhsRef)")
+    val args = addOperands(lhs, mod) ++ addOperands(rhs, mod)
+    val expr = IR.DoPrim(IR.PrimOp.Add, args)
+    result.setIRExpr(expr)
+    mod.getBuilder.addStmt(IR.DefNode(name, expr))
     result
 
-  private def cmp[T <: HWData](op: String, lhs: T, rhs: T, mod: Module): Bool =
+  private def cmp[T <: HWData](op: IR.PrimOp, lhs: T, rhs: T, mod: Module): Bool =
     val result = Bool()
     result.setNodeKind(NodeKind.PrimOp)
-    val name = mod.getBuilder.allocateName(None, op)
+    val name = mod.getBuilder.allocateName(None, op.opName)
     mod.register(result, Some(name))
-    val lhsRef = refFor(lhs, mod)
-    val rhsRef = refFor(rhs, mod)
-    mod.getBuilder.addBody(s"node $name = $op($lhsRef, $rhsRef)")
+    val lhsRef = exprFor(lhs, mod)
+    val rhsRef = exprFor(rhs, mod)
+    val expr = IR.DoPrim(op, Seq(lhsRef, rhsRef))
+    result.setIRExpr(expr)
+    mod.getBuilder.addStmt(IR.DefNode(name, expr))
     result
 
   def eq[T <: HWData](lhs: T, rhs: T, mod: Module): Bool =
-    cmp("eq", lhs, rhs, mod)
+    cmp(IR.PrimOp.Eq, lhs, rhs, mod)
 
   def neq[T <: HWData](lhs: T, rhs: T, mod: Module): Bool =
-    cmp("neq", lhs, rhs, mod)
+    cmp(IR.PrimOp.Neq, lhs, rhs, mod)
 
-  def refFor(data: HWData, current: Module): String =
-    if data.kind == NodeKind.Lit then formatLiteral(data, data.literal.getOrElse(""))
-    else
-      val base = data.getRef.getOrElse(data.toString)
-      data.getOwner match
-        case Some(owner) if owner.ne(current) =>
-          owner.instanceName.map(prefix => s"$prefix.$base").getOrElse(base)
-        case _ => base
+  private def refFor(data: HWData, current: Module): String =
+    val base = data.getRef.getOrElse(data.toString)
+    data.getOwner match
+      case Some(owner) if owner.ne(current) =>
+        owner.instanceName.map(prefix => s"$prefix.$base").getOrElse(base)
+      case _ => base
 
-  def emitPortDecl[T <: HWData](name: String, tpe: T)(using w: WalkHW[T]): Seq[String] =
-    val dirStr = if tpe.dir == Direction.In then "input" else "output"
-    Seq(s"$dirStr $name : ${formatType(tpe)}")
+  def exprFor(data: HWData, current: Module): IR.Expr =
+    if data.kind == NodeKind.Lit then IR.Literal(formatLiteral(data, data.literal.getOrElse("")))
+    else IR.Ref(refFor(data, current))
+
+  def emitPortDecl[T <: HWData](name: String, tpe: T)(using w: WalkHW[T]): Seq[IR.Port] =
+    val dir = if tpe.dir == Direction.In then Direction.In else Direction.Out
+    Seq(IR.Port(name, dir, irTypeOf(tpe)))
 
   def formatType(tpe: HWData): String = tpe match
     case u: UInt => s"UInt<${u.w.value}>"
@@ -260,17 +296,17 @@ extension (lhs: Bool)
   def =/=(rhs: Bool)(using m: Module): Bool =
     ModuleOps.neq(lhs, rhs, m)
 
-final class WhenDSL(private val mod: Module):
+final class WhenDSL(private val mod: Module, private val current: RawWhen):
   def elsewhen(cond: Bool)(block: => Unit): WhenDSL =
-    mod.getBuilder.addBody(s"else when ${ModuleOps.refFor(cond, mod)}:")
-    mod.getBuilder.withIndent {
+    val body = mod.getBuilder.captureBody {
       block
     }
-    this
+    val nested = RawWhen(ModuleOps.exprFor(cond, mod), body, Seq.empty)
+    current.alt = Seq(nested)
+    new WhenDSL(mod, nested)
 
   def otherwise(block: => Unit): Unit =
-    mod.getBuilder.addBody("otherwise:")
-    mod.getBuilder.withIndent {
+    current.alt = mod.getBuilder.captureBody {
       block
     }
 

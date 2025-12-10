@@ -38,6 +38,7 @@ sealed trait HWData:
   var kind: NodeKind = NodeKind.Unset
   var ref: Option[String] = None
   private var owner: Option[Module] = None
+  private var irExpr: Option[IR.Expr] = None
 
   def setNodeKind(kind: NodeKind) = this.kind = kind
   def setLitVal(payload: Any): Unit
@@ -46,6 +47,9 @@ sealed trait HWData:
   def getRef: Option[String] = ref
   def setOwner(m: Module): Unit = owner = Some(m)
   def getOwner: Option[Module] = owner
+  def setIRExpr(expr: IR.Expr): Unit = irExpr = Some(expr)
+  def clearIRExpr(): Unit = irExpr = None
+  def getIRExpr: Option[IR.Expr] = irExpr
 
 sealed class UInt(
   val w: Width

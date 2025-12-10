@@ -347,16 +347,19 @@ def optional_and_map_check(): Unit =
 
 def module_array_generation_check(): Unit =
   final case class FanIO(in: UInt, out: UInt) extends Bundle[FanIO]
+
   class Leaf(offset: Int) extends Module:
     given Module = this
     val io = IO(FanIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
     io.out := io.in + Lit(UInt(Width(4)))(offset)
+
   class Fanout(count: Int) extends Module:
     given Module = this
     val io = IO(FanIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
     val leaves = Seq.tabulate(count)(i => Module(new Leaf(i)))
     leaves.foreach(_.io.in := io.in)
     io.out := leaves.map(_.io.out).reduce(_ + _)
+
   val elaborator = new Elaborator
   val top = new Fanout(3)
   val designs = elaborator.elaborate(top)

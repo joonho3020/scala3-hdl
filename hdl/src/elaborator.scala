@@ -68,12 +68,53 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     )
 
   def emit(design: ElaboratedDesign): String =
+    val m = design.ir
     val sb = new StringBuilder
-    sb.append(s"module ${design.name}:\n")
-    design.ports.foreach(p => sb.append(s"  $p\n"))
-    if design.body.nonEmpty then sb.append("\n")
-    design.body.foreach(s => sb.append(s"  $s\n"))
+    sb.append(s"module ${m.name}:\n")
+    m.ports.foreach(p => sb.append(s"  ${emitPort(p)}\n"))
+    if m.body.nonEmpty then sb.append("\n")
+    m.body.foreach(stmt => emitStmt(stmt, indent = 1, sb))
     sb.toString
 
   def emitAll(designs: Seq[ElaboratedDesign]): String =
     designs.map(emit).mkString("\n")
+
+  private def emitPort(p: IR.Port): String =
+    val dirStr = if p.direction == Direction.In then "input" else "output"
+    s"$dirStr ${p.name} : ${emitType(p.tpe)}"
+
+  private def emitType(t: IR.Type): String = t match
+    case IR.UIntType(w) => s"UInt<$w>"
+    case IR.BoolType    => "Bool"
+    case IR.VecType(len, elem) => s"Vec<$len, ${emitType(elem)}>"
+    case IR.BundleType(fields) =>
+      val inner = fields.map { f =>
+        val dirPrefix = if f.flipped then "flip " else ""
+        s"$dirPrefix${f.name} : ${emitType(f.tpe)}"
+      }.mkString(", ")
+      s"{ $inner }"
+
+  private def emitExpr(e: IR.Expr): String = e match
+    case IR.Ref(name)       => name
+    case IR.Literal(value)  => value
+    case IR.DoPrim(op, args) => s"${op.opName}(${args.map(emitExpr).mkString(", ")})"
+
+  private def emitStmt(stmt: IR.Stmt, indent: Int, sb: StringBuilder): Unit =
+    val prefix = "  " * indent
+    stmt match
+      case IR.Wire(name, tpe) =>
+        sb.append(s"${prefix}wire $name : ${emitType(tpe)}\n")
+      case IR.Reg(name, tpe) =>
+        sb.append(s"${prefix}reg $name : ${emitType(tpe)}, clock\n")
+      case IR.DefNode(name, value) =>
+        sb.append(s"${prefix}node $name = ${emitExpr(value)}\n")
+      case IR.Connect(loc, expr) =>
+        sb.append(s"${prefix}connect ${emitExpr(loc)}, ${emitExpr(expr)}\n")
+      case IR.When(cond, conseq, alt) =>
+        sb.append(s"${prefix}when ${emitExpr(cond)}:\n")
+        conseq.foreach(s => emitStmt(s, indent + 1, sb))
+        if alt.nonEmpty then
+          sb.append(s"${prefix}otherwise:\n")
+          alt.foreach(s => emitStmt(s, indent + 1, sb))
+      case IR.Inst(name, module) =>
+        sb.append(s"${prefix}inst $name of $module\n")
