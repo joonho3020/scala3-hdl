@@ -32,22 +32,10 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     val label = assignLabel(mod, key)
     memoized.get(key.value) match
       case Some(designs) =>
-        log(s"Cache Hit ${mod.getClass.getName} ${key} ${label}")
+        log(s"Memoized Hit ${mod.getClass.getName} ${key} ${label}")
         Future.successful(designs)
       case None =>
-        if key.cacheable then
-          buildCache.get(key.value) match
-            case Some(hit) =>
-              log(s"Cache Hit ${mod.getClass.getName} ${key} ${label}")
-              val designs = hit.designs.distinctBy(_.name)
-              memoized.putIfAbsent(key.value, designs)
-              Future.successful(designs)
-            case None =>
-              log(s"Cache Miss ${mod.getClass.getName} ${key} ${label}")
-              startElaboration(mod, key, label)
-        else
-          log(s"NonCacheable ${mod.getClass.getName} ${key} ${label}")
-          startElaboration(mod, key, label)
+        startElaboration(mod, key, label)
 
   private def startElaboration(mod: Module, key: ModuleKey, label: String): Future[Seq[ElaboratedDesign]] =
     inProgress.getOrElseUpdate(key.value,
@@ -57,11 +45,29 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
 
         // Submit all child `elaborateModule` to the execution pool
         Future.sequence(childFutures).map(_.flatten).map { childDesigns =>
-          val instLabelMap = labels.synchronized { labels.toMap }
-          val design = mod.getBuilder.snapshot(label, instLabelMap)
+          val childKeys = mod.children.map(m => ModuleKey(m).value)
+
+          val cachedDesign: Option[ElaboratedDesign] =
+            if key.cacheable then
+              buildCache.get(key.value) match
+                case Some(hit) =>
+                  log(s"Cache Hit ${mod.getClass.getName} ${key} ${label}")
+                  Some(hit.design)
+                case None =>
+                  log(s"Cache Miss ${mod.getClass.getName} ${key} ${label}")
+                  None
+            else
+              log(s"NonCacheable ${mod.getClass.getName} ${key} ${label}")
+              None
+
+          val design = cachedDesign.getOrElse {
+            val instLabelMap = labels.synchronized { labels.toMap }
+            mod.getBuilder.snapshot(label, instLabelMap)
+          }
+
           val result = (childDesigns :+ design).distinctBy(_.name)
           memoized.putIfAbsent(key.value, result)
-          if key.cacheable then buildCache.put(key.value, CachedArtifact(result.toVector))
+          if key.cacheable && cachedDesign.isEmpty then buildCache.put(key.value, CachedArtifact(design))
           result
         }
       }

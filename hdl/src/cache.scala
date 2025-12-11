@@ -6,7 +6,7 @@ import java.security.MessageDigest
 import scala.collection.concurrent.TrieMap
 import scala.util.control.NonFatal
 
-final case class CachedArtifact(designs: Seq[ElaboratedDesign]) extends Serializable
+final case class CachedArtifact(design: ElaboratedDesign) extends Serializable
 
 final case class ModuleKey(value: String, cacheable: Boolean, label: String)
 
@@ -100,7 +100,7 @@ final class BuildCache private (path: Path):
     // Need to hold a lock to prevent race conditions.
     // Otherwise can lead corrupted buildcache files.
     lock.synchronized:
-      data.update(key, CachedArtifact(artifact.designs.toVector))
+      data.update(key, CachedArtifact(artifact.design))
       persist()
 
   private def persist(): Unit =
