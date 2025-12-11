@@ -10,6 +10,7 @@ final class CacheableLeaf(p: LeafParams) extends Module with CacheableModule:
   type ElabParams = LeafParams
   given stableHashElabParams: StableHash[LeafParams] = summon[StableHash[LeafParams]]
   def elabParams: LeafParams = p
+  def codeHash = ModuleCodeHash.astHash[this.type]
 
   val io = IO(SimpleIO(Input(UInt(p.width.W)), Output(UInt(p.width.W))))
   body:
@@ -65,6 +66,8 @@ final class CacheableOne(p: SimpleParams) extends Module with CacheableModule:
   type ElabParams = SimpleParams
   given stableHashElabParams: StableHash[SimpleParams] = summon[StableHash[SimpleParams]]
   def elabParams: SimpleParams = p
+  def codeHash = ModuleCodeHash.astHash[this.type]
+
   val io = IO(SimpleIO(Input(UInt(p.width.W)), Output(UInt(p.width.W))))
   body:
     val w = Wire(UInt(p.width.W))
@@ -76,6 +79,8 @@ final class CacheableTwo(p: SimpleParams) extends Module with CacheableModule:
   type ElabParams = SimpleParams
   given stableHashElabParams: StableHash[SimpleParams] = summon[StableHash[SimpleParams]]
   def elabParams: SimpleParams = p
+  def codeHash = ModuleCodeHash.astHash[this.type]
+
   val io = IO(SimpleIO(Input(UInt(p.width.W)), Output(UInt(p.width.W))))
   body:
     val r = Reg(UInt(p.width.W))
