@@ -15,7 +15,6 @@ trait CacheableModule:
   type ElabParams
   given stableHashElabParams: StableHash[ElabParams]
   def elabParams: ElabParams
-  def codeHash: String
 
 object ModuleKey:
   private def updateInt(md: MessageDigest, i: Int): Unit =
@@ -55,13 +54,19 @@ object ModuleKey:
   def apply(mod: Module): ModuleKey =
     mod match
       case c: CacheableModule =>
-        val codeHash = c.codeHash.getBytes
-        println(s"codeHash for ${mod} ${codeHash}")
+        val codeHashOpt = bytecodeHash(mod.getClass)
         val paramHash = StableHash.digest(c.elabParams)(using c.stableHashElabParams)
-        val merged = merge(Seq(codeHash, paramHash))
-        val hex = StableHash.hex(merged)
-        val label = s"${mod.moduleName}_${hex.take(8)}"
-          ModuleKey(s"cached:${mod.getClass.getName}:$hex", true, label)
+        codeHashOpt match
+          case Some(codeHash) =>
+            val merged = merge(Seq(codeHash, paramHash))
+            val hex = StableHash.hex(merged)
+            val label = s"${mod.moduleName}_${hex.take(8)}"
+            ModuleKey(s"cached:${mod.getClass.getName}:$hex", true, label)
+          case None =>
+            val cls = mod.getClass
+            throw new IllegalStateException(
+              s"Unable to locate classfile for ${cls.getName} (loader=${Option(cls.getClassLoader).getOrElse("<bootstrap>")})"
+            )
       case _ =>
         // `identityHashCode` provides a different hash per class instance.
         // The hash value is different regardless of the parameters passed
