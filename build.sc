@@ -11,3 +11,8 @@ object hdl extends ScalaModule {
     def testFramework = "utest.runner.Framework"
   }
 }
+
+object examples extends ScalaModule {
+  def scalaVersion = SCALAVERSION
+  override def moduleDeps = Seq(hdl)
+}
