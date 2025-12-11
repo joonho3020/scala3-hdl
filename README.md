@@ -41,12 +41,23 @@
     - How are vectors supported in Chisel?
     - Should support indexing of vector structures using hardware types...?
     - Emission shouldn't flatten these structures
+- [x] log2Ceil on integer operations for calculating widths
+- [x] Clock and Reset types
+- [x] Connect Reg to implicit clock signals
+- [x] RegInit, WireInit support (connect to reset)
+- [x] Add support for UInt without width (so that we can defer width determination during width inference pass)
+- [x] Operators
+    - [x] on two hardware data : add, subtract, mult, division, remainder, less than, less or equal to, greater than, greater or equal to, equal, not equal, dynamic shift left, dynamic shift right, and, or, xor, concatentate
+    - [x] on one hardware data and one integer: pad, shift left, shift right, head, tail
+    - [x] on one hardware data and two integers: bits
+    - [ ] Concatenation, bitwire or/and reduction
 - [ ] Memories
     - Make the port API explicit (no inferred ports)
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
 - [ ] Unknown width support
-- [ ] More operators
 - [ ] Mixed vectors
+- [ ] Per-class caching??
+    - Currently, the caching is on a file basis as we are relying on hasing classfiles. Although this is robust, we can achieve finer-grained incrementalism by other methods
 
 ## Misc Notes
 
@@ -778,18 +789,6 @@ Another caveat of this `Literal` approach is that the `Bundle`s that define lite
 In theory, we can add support for important Scala library types in the future for derivation, but we should leave this as is for now.
 
 ---
-
-Things to add
-
-- log2Ceil on integer operations for calculating widths
-- Clock and Reset types
-- Connect Reg to implicit clock signals
-- RegInit, WireInit support (connect to reset)
-- Add support for UInt without width (so that we can defer width determination during width inference pass)
-- Operators
-    - on two hardware data:                 add, subtract, mult, division, remainder, less than, less or equal to, greater than, greater or equal to, equal, not equal, dynamic shift left, dynamic shift right, and, or, xor, concatentate
-    - on one hardware data and one integer: pad, shift left, shift right, head, tail
-    - on one hardware data and two integers: bits
 
 ---
 

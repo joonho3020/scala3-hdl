@@ -90,8 +90,10 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     s"$dirStr ${p.name} : ${emitType(p.tpe)}"
 
   private def emitType(t: IR.Type): String = t match
-    case IR.UIntType(w) => s"UInt<$w>"
+    case IR.UIntType(w) => w.map(v => s"UInt<$v>").getOrElse("UInt")
     case IR.BoolType    => "Bool"
+    case IR.ClockType   => "Clock"
+    case IR.ResetType   => "Reset"
     case IR.VecType(len, elem) => s"Vec<$len, ${emitType(elem)}>"
     case IR.BundleType(fields) =>
       val inner = fields.map { f =>
@@ -106,15 +108,19 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     case IR.SubIndex(expr, value) => s"${emitExpr(expr)}[$value]"
     case IR.SubAccess(expr, index) => s"${emitExpr(expr)}[${emitExpr(index)}]"
     case IR.SubField(expr, field) => s"${emitExpr(expr)}.$field"
-    case IR.DoPrim(op, args) => s"${op.opName}(${args.map(emitExpr).mkString(", ")})"
+    case IR.DoPrim(op, args, consts) =>
+      val parts = args.map(emitExpr) ++ consts.map(_.toString)
+      s"${op.opName}(${parts.mkString(", ")})"
 
   private def emitStmt(stmt: IR.Stmt, indent: Int, sb: StringBuilder): Unit =
     val prefix = "  " * indent
     stmt match
       case IR.Wire(name, tpe) =>
         sb.append(s"${prefix}wire $name : ${emitType(tpe)}\n")
-      case IR.Reg(name, tpe) =>
-        sb.append(s"${prefix}reg $name : ${emitType(tpe)}, clock\n")
+      case IR.Reg(name, tpe, clock) =>
+        sb.append(s"${prefix}reg $name : ${emitType(tpe)}, ${emitExpr(clock)}\n")
+      case IR.RegInit(name, tpe, clock, reset, init) =>
+        sb.append(s"${prefix}reg $name : ${emitType(tpe)}, ${emitExpr(clock)} with reset : ${emitExpr(reset)} init : ${emitExpr(init)}\n")
       case IR.DefNode(name, value) =>
         sb.append(s"${prefix}node $name = ${emitExpr(value)}\n")
       case IR.Connect(loc, expr) =>

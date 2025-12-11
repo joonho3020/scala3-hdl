@@ -73,6 +73,22 @@ abstract class Module:
   private var _bodyFn: Option[Module ?=> Unit] = None
   private var _bodyRan = false
 
+  private var _implicitClock: Clock =
+    val name = this.getBuilder.allocateName(Some("clock"), "clock")
+    val clk = Input(Clock())
+    clk.setNodeKind(NodeKind.IO)
+    this.register(clk, Some(name))
+    this.getBuilder.addPort(IR.Port(name, Direction.In, IR.ResetType))
+    clk
+
+  private var _implicitReset: Reset =
+    val name = this.getBuilder.allocateName(Some("reset"), "reset")
+    val reset = Input(Reset())
+    reset.setNodeKind(NodeKind.IO)
+    this.register(reset, Some(name))
+    this.getBuilder.addPort(IR.Port(name, Direction.In, IR.ResetType))
+    reset
+
   def moduleName: String = getClass.getSimpleName.stripSuffix("$")
   private[hdl] def setInstanceName(n: String): Unit = _instanceName = Some(n)
   private[hdl] def instanceName: Option[String] = _instanceName
@@ -82,6 +98,8 @@ abstract class Module:
   private[hdl] def register[T](data: T, ref: Option[String])(using WalkHW[T]): Unit =
     ModuleOps.assignOwner(data, this)
     ref.foreach(r => ModuleOps.assignRefs(data, r))
+  private[hdl] def getImplicitClock: Clock = _implicitClock
+  private[hdl] def getImplicitReset: Reset = _implicitReset
 
   // Storing the module body as a thunk is required in order to achieve
   // lazy elaboration.
@@ -105,6 +123,12 @@ abstract class Module:
   protected inline def Reg[T <: HWData](inline t: T)(using WalkHW[T]): T =
     ${ ModuleMacros.regImpl('t, 'this) }
 
+  protected inline def RegInit[T <: HWData](inline t: T)(inline init: T)(using WalkHW[T]): T =
+    ${ ModuleMacros.regInitImpl('t, 'init, 'this) }
+
+  protected inline def WireInit[T <: HWData](inline t: T)(inline init: T)(using WalkHW[T]): T =
+    ${ ModuleMacros.wireInitImpl('t, 'init, 'this) }
+
   protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T])(using WalkHW[T]): T =
     ${ ModuleMacros.litImpl('t, 'payload, 'this) }
 
@@ -112,6 +136,9 @@ abstract class Module:
     ModuleOps.when(cond, summon[Module]) {
       block
     }
+
+// protected inline def Cat[T <: HWData](inline t: Seq[T])(using WalkHW[T]): T =
+// ModuleOps.cat
 
 object Module:
   inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
@@ -127,8 +154,10 @@ object Module:
 
 private[hdl] object ModuleOps:
   private def irTypeOf(tpe: HWData): IR.Type = tpe match
-    case u: UInt => IR.UIntType(u.w.value)
+    case u: UInt => IR.UIntType(u.w)
     case _: Bool => IR.BoolType
+    case _: Clock => IR.ClockType
+    case _: Reset => IR.ResetType
     case v: Vec[?] =>
       val elemType = v.elems.headOption.map(irTypeOf).getOrElse(IR.BoolType)
       IR.VecType(v.length, elemType)
@@ -162,13 +191,36 @@ private[hdl] object ModuleOps:
     val regName = mod.getBuilder.allocateName(name, "reg")
     t.setNodeKind(NodeKind.Reg)
     mod.register(t, Some(regName))
-    mod.getBuilder.addStmt(IR.Reg(regName, irTypeOf(t)))
+    val clockExpr = exprFor(mod.getImplicitClock, mod)
+    mod.getBuilder.addStmt(IR.Reg(regName, irTypeOf(t), clockExpr))
+    t
+
+  def regInit[T <: HWData](t: T, init: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
+    val regName = mod.getBuilder.allocateName(name, "reginit")
+    t.setNodeKind(NodeKind.Reg)
+    mod.register(t, Some(regName))
+
+    val clockExpr = exprFor(mod.getImplicitClock, mod)
+    val resetExpr = exprFor(mod.getImplicitReset, mod)
+    val initExpr = exprFor(init, mod)
+    mod.getBuilder.addStmt(IR.RegInit(regName, irTypeOf(t), clockExpr, resetExpr, initExpr))
     t
 
   def lit[T <: HWData](t: T, payload: HostTypeOf[T], mod: Module)(using WalkHW[T]): T =
     t.setNodeKind(NodeKind.Lit)
     t.setLitVal(payload)
     mod.register(t, None)
+    t
+
+  def wireInit[T <: HWData](t: T, init: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
+    val wireName = mod.getBuilder.allocateName(name, "wireinit")
+    t.setNodeKind(NodeKind.Wire)
+    mod.register(t, Some(wireName))
+
+    val clockExpr = exprFor(mod.getImplicitClock, mod)
+    val resetExpr = exprFor(mod.getImplicitReset, mod)
+    val initExpr = exprFor(init, mod)
+    mod.getBuilder.addStmt(IR.WireInit(wireName, irTypeOf(t), clockExpr, resetExpr, initExpr))
     t
 
   def connect[T <: HWData](dst: T, src: T, mod: Module): Unit =
@@ -195,39 +247,29 @@ private[hdl] object ModuleOps:
     mod.getBuilder.addRaw(raw)
     new WhenDSL(mod, raw)
 
-  private def addOperands(v: HWData, mod: Module): Seq[IR.Expr] =
-    v.getIRExpr match
-      case Some(IR.DoPrim(IR.PrimOp.Add, args)) => args
-      case _ => Seq(exprFor(v, mod))
-
-  def add(lhs: UInt, rhs: UInt, mod: Module): UInt =
-    // FIXME: Enable unknown with of things
-    val resWidth = math.max(lhs.w.value, rhs.w.value)
-    val result = UInt(Width(resWidth))
-    result.setNodeKind(NodeKind.PrimOp)
-    val name = mod.getBuilder.allocateName(None, "add")
-    mod.register(result, Some(name))
-    val args = addOperands(lhs, mod) ++ addOperands(rhs, mod)
-    val expr = IR.DoPrim(IR.PrimOp.Add, args)
-    result.setIRExpr(expr)
-    result
-
-  private def cmp[T <: HWData](op: IR.PrimOp, lhs: T, rhs: T, mod: Module): Bool =
-    val result = Bool()
+  private def primOp[R <: HWData, T <: HWData](result: R, op: IR.PrimOp, args: Seq[T], consts: Seq[Int], mod: Module): R =
     result.setNodeKind(NodeKind.PrimOp)
     val name = mod.getBuilder.allocateName(None, op.opName)
     mod.register(result, Some(name))
-    val lhsRef = exprFor(lhs, mod)
-    val rhsRef = exprFor(rhs, mod)
-    val expr = IR.DoPrim(op, Seq(lhsRef, rhsRef))
+    val exprArgs = args.map(exprFor(_, mod))
+    val expr = IR.DoPrim(op, exprArgs, consts)
     result.setIRExpr(expr)
     result
 
-  def eq[T <: HWData](lhs: T, rhs: T, mod: Module): Bool =
-    cmp(IR.PrimOp.Eq, lhs, rhs, mod)
+  def prim2Op[R <: HWData, T <: HWData](result: R, op: IR.PrimOp, lhs: T, rhs: T, mod: Module): R =
+    primOp(result, op, Seq(lhs, rhs), Seq(), mod)
 
-  def neq[T <: HWData](lhs: T, rhs: T, mod: Module): Bool =
-    cmp(IR.PrimOp.Neq, lhs, rhs, mod)
+  def prim1Op1Const[R <: HWData, T <: HWData](result: R, op: IR.PrimOp, lhs: T, const: Int, mod: Module): R =
+    primOp(result, op, Seq(lhs), Seq(const), mod)
+
+  def prim1Op2Const[R <: HWData, T <: HWData](result: R, op: IR.PrimOp, lhs: T, a: Int, b: Int, mod: Module): R =
+    primOp(result, op, Seq(lhs), Seq(a, b), mod)
+
+// def cat[T <: HWData](x: Seq[T], mod: Module): T =
+// primUInt(IR.PrimOp.Cat, x, Seq.empty, mod)
+
+// def pad(lhs: UInt, width: Int, mod: Module): UInt =
+// primUInt(IR.PrimOp.Pad, Seq(lhs), Seq(width), mod)
 
   private def refFor(data: HWData, current: Module): String =
     val base = data.getRef.getOrElse(data.toString)
@@ -248,8 +290,10 @@ private[hdl] object ModuleOps:
     Seq(IR.Port(name, dir, irTypeOf(tpe)))
 
   def formatType(tpe: HWData): String = tpe match
-    case u: UInt => s"UInt<${u.w.value}>"
+    case u: UInt => u.w.map(v => s"UInt<$v>").getOrElse("UInt")
     case _: Bool => "Bool"
+    case _: Clock => "Clock"
+    case _: Reset => "Reset"
     case v: Vec[?] =>
       val elemStr = v.elems.headOption.map(e => formatType(e)).getOrElse("?")
       s"Vec<${v.length}, $elemStr>"
@@ -267,8 +311,10 @@ private[hdl] object ModuleOps:
     case _ => tpe.toString
 
   def formatLiteral(tpe: HWData, value: Any): String = tpe match
-    case u: UInt => s"UInt<${u.w.value}>($value)"
+    case u: UInt => u.w.map(w => s"UInt<$w>($value)").getOrElse(s"UInt($value)")
     case _: Bool => s"Bool($value)"
+    case _: Clock => s"Clock($value)"
+    case _: Reset => s"Reset($value)"
     case _ => value.toString
 
   private def dirPrefixOf(h: HWData): String =
@@ -286,17 +332,85 @@ extension [T <: HWData](dst: T)
 
 extension (lhs: UInt)
   def +(rhs: UInt)(using m: Module): UInt =
-    ModuleOps.add(lhs, rhs, m)
+    ModuleOps.prim2Op(UInt(), IR.PrimOp.Add, lhs, rhs, m)
+
+  def -(rhs: UInt)(using m: Module): UInt =
+    ModuleOps.prim2Op(UInt(), IR.PrimOp.Sub, lhs, rhs, m)
+
+  def *(rhs: UInt)(using m: Module): UInt =
+    ModuleOps.prim2Op(UInt(), IR.PrimOp.Mul, lhs, rhs, m)
+
+  def /(rhs: UInt)(using m: Module): UInt =
+    ModuleOps.prim2Op(UInt(), IR.PrimOp.Div, lhs, rhs, m)
+
+  def %(rhs: UInt)(using m: Module): UInt =
+    ModuleOps.prim2Op(UInt(), IR.PrimOp.Rem, lhs, rhs, m)
+
+  def <(rhs: UInt)(using m: Module): Bool =
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Lt, lhs, rhs, m)
+
+  def <=(rhs: UInt)(using m: Module): Bool =
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Lt, lhs, rhs, m)
+
+  def >(rhs: UInt)(using m: Module): Bool =
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Gt, lhs, rhs, m)
+
+  def >=(rhs: UInt)(using m: Module): Bool =
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Geq, lhs, rhs, m)
+
   def ===(rhs: UInt)(using m: Module): Bool =
-    ModuleOps.eq(lhs, rhs, m)
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, m)
+
   def =/=(rhs: UInt)(using m: Module): Bool =
-    ModuleOps.neq(lhs, rhs, m)
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Neq, lhs, rhs, m)
+
+  def <<(rhs: UInt)(using m: Module): UInt =
+    ModuleOps.prim2Op(UInt(), IR.PrimOp.DShl, lhs, rhs, m)
+
+  def >>(rhs: UInt)(using m: Module): UInt =
+    ModuleOps.prim2Op(UInt(), IR.PrimOp.DShr, lhs, rhs, m)
+
+  def <<(rhs: Int)(using m: Module): UInt =
+    ModuleOps.prim1Op1Const(UInt(), IR.PrimOp.Shl, lhs, rhs, m)
+
+  def >>(rhs: Int)(using m: Module): UInt =
+    ModuleOps.prim1Op1Const(UInt(), IR.PrimOp.Shr, lhs, rhs, m)
+
+  def &(rhs: UInt)(using m: Module): UInt =
+    ModuleOps.prim2Op(UInt(), IR.PrimOp.And, lhs, rhs, m)
+
+  def |(rhs: UInt)(using m: Module): UInt =
+    ModuleOps.prim2Op(UInt(), IR.PrimOp.Or, lhs, rhs, m)
+
+  def ^(rhs: UInt)(using m: Module): UInt =
+    ModuleOps.prim2Op(UInt(), IR.PrimOp.Xor, lhs, rhs, m)
+
+// def pad(n: Int)(using m: Module): UInt =
+// ModuleOps.pad(lhs, n, m)
+  def head(n: Int)(using m: Module): UInt =
+    ModuleOps.prim1Op1Const(UInt(), IR.PrimOp.Head, lhs, n, m)
+
+  def tail(n: Int)(using m: Module): UInt =
+    ModuleOps.prim1Op1Const(UInt(), IR.PrimOp.Tail, lhs, n, m)
+
+  def bits(hi: Int, lo: Int)(using m: Module): UInt =
+    ModuleOps.prim1Op2Const(UInt(), IR.PrimOp.Tail, lhs, lo, hi, m)
 
 extension (lhs: Bool)
   def ===(rhs: Bool)(using m: Module): Bool =
-    ModuleOps.eq(lhs, rhs, m)
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, m)
+
   def =/=(rhs: Bool)(using m: Module): Bool =
-    ModuleOps.neq(lhs, rhs, m)
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Neq, lhs, rhs, m)
+
+  def &&(rhs: Bool)(using m: Module): Bool =
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.And, lhs, rhs, m)
+
+  def ||(rhs: Bool)(using m: Module): Bool =
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Or, lhs, rhs, m)
+
+  def ^(rhs: Bool)(using m: Module): Bool =
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Xor, lhs, rhs, m)
 
 final class WhenDSL(private val mod: Module, private val current: RawWhen):
   def elsewhen(cond: Bool)(block: => Unit): WhenDSL =
@@ -339,6 +453,18 @@ object ModuleMacros:
     val nameOpt = findEnclosingValName
     '{
       ModuleOps.reg($t, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
+    }
+
+  def regInitImpl[T <: HWData: Type](t: Expr[T], init: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
+    val nameOpt = findEnclosingValName
+    '{
+      ModuleOps.regInit($t, $init, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
+    }
+
+  def wireInitImpl[T <: HWData: Type](t: Expr[T], init: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
+    val nameOpt = findEnclosingValName
+    '{
+      ModuleOps.wireInit($t, $init, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
     }
 
   def litImpl[T <: HWData: Type](t: Expr[T], payload: Expr[HostTypeOf[T]], mod: Expr[Module])(using Quotes): Expr[T] =

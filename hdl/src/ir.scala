@@ -2,13 +2,15 @@ package hdl
 
 object IR:
   enum PrimOp:
-    case Add, Eq, Neq
+    case Add, Sub, Mul, Div, Rem, Lt, Leq, Gt, Geq, Eq, Neq, DShl, DShr, And, Or, Xor, Cat, Pad, Shl, Shr, Head, Tail, Bits
 
     def opName: String = this.productPrefix.toLowerCase()
 
   sealed trait Type extends Serializable
-  final case class UIntType(width: Int) extends Type
+  final case class UIntType(width: Option[Width]) extends Type
   final case object BoolType extends Type
+  final case object ClockType extends Type
+  final case object ResetType extends Type
   final case class VecType(length: Int, elemType: Type) extends Type
   final case class BundleField(name: String, flipped: Boolean, tpe: Type) extends Serializable
   final case class BundleType(fields: Seq[BundleField]) extends Type
@@ -16,14 +18,16 @@ object IR:
   sealed trait Expr extends Serializable
   final case class Ref(name: String) extends Expr
   final case class Literal(value: String) extends Expr
-  final case class DoPrim(op: PrimOp, args: Seq[Expr]) extends Expr
+  final case class DoPrim(op: PrimOp, args: Seq[Expr], consts: Seq[Int] = Seq.empty) extends Expr
   final case class SubIndex(expr: Expr, value: Int) extends Expr
   final case class SubAccess(expr: Expr, index: Expr) extends Expr
   final case class SubField(expr: Expr, field: String) extends Expr
 
   sealed trait Stmt extends Serializable
   final case class Wire(name: String, tpe: Type) extends Stmt
-  final case class Reg(name: String, tpe: Type) extends Stmt
+  final case class WireInit(name: String, tpe: Type, clock: Expr, reset: Expr, init: Expr) extends Stmt
+  final case class Reg(name: String, tpe: Type, clock: Expr) extends Stmt
+  final case class RegInit(name: String, tpe: Type, clock: Expr, reset: Expr, init: Expr) extends Stmt
   final case class DefNode(name: String, value: Expr) extends Stmt
   final case class Connect(loc: Expr, expr: Expr) extends Stmt
   final case class When(cond: Expr, conseq: Seq[Stmt], var alt: Seq[Stmt]) extends Stmt

@@ -19,16 +19,6 @@ object Direction:
     case Direction.Default => Direction.Flipped
     case Direction.Flipped => Direction.Default
 
-sealed class Width(val value: Int):
-  override def toString: String = s"${value}"
-
-object Width:
-  def apply(x: Int): Width = new Width(x)
-
-extension (n: Int)
-  def W: Width =
-    Width(n)
-
 sealed trait HWData:
   var dir: Direction = Direction.Default
   def flip: Unit =
@@ -52,7 +42,7 @@ sealed trait HWData:
   def getIRExpr: Option[IR.Expr] = irExpr
 
 sealed class UInt(
-  val w: Width
+  val w: Option[Width]
 ) extends HWData:
 
   def setLitVal(payload: Any): Unit =
@@ -63,10 +53,11 @@ sealed class UInt(
       case Some(v) => v.asInstanceOf[HostTypeOf[UInt]]
       case None    => throw new NoSuchElementException("UInt does not carry a literal value")
 
-  override def toString(): String = s"UInt($w.W, $dir)"
+  override def toString(): String = s"UInt($w, $dir)"
 
 object UInt:
-  def apply(w: Width): UInt = new UInt(w)
+  def apply(w: Width): UInt = new UInt(Some(w))
+  def apply(): UInt = new UInt(None)
 
 sealed class Bool extends HWData:
   def setLitVal(payload: Any): Unit =
@@ -82,6 +73,34 @@ sealed class Bool extends HWData:
 object Bool:
   def apply(): Bool = new Bool
   def apply(u: Unit): Bool = new Bool
+
+sealed class Clock extends HWData:
+  def setLitVal(payload: Any): Unit =
+    this.literal = Some(payload.asInstanceOf[HostTypeOf[Clock]])
+
+  def getLitVal: HostTypeOf[Clock] =
+    literal match
+      case Some(v) => v.asInstanceOf[HostTypeOf[Clock]]
+      case None    => throw new NoSuchElementException("Clock does not carry a literal value")
+
+  override def toString(): String = s"Clock($dir)"
+
+object Clock:
+  def apply(): Clock = new Clock
+
+sealed class Reset extends HWData:
+  def setLitVal(payload: Any): Unit =
+    this.literal = Some(payload.asInstanceOf[HostTypeOf[Reset]])
+
+  def getLitVal: HostTypeOf[Reset] =
+    literal match
+      case Some(v) => v.asInstanceOf[HostTypeOf[Reset]]
+      case None    => throw new NoSuchElementException("Reset does not carry a literal value")
+
+  override def toString(): String = s"Reset($dir)"
+
+object Reset:
+  def apply(): Reset = new Reset
 
 sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnce[T]:
   def iterator: Iterator[T] = elems.iterator
@@ -114,6 +133,8 @@ object Vec:
 type HostTypeOf[T] = T match
   case UInt  => BigInt
   case Bool  => Boolean
+  case Clock => Boolean
+  case Reset => Boolean
   case Vec[t] => Seq[HostTypeOf[t]]
   case _     => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X]]
 
@@ -177,13 +198,23 @@ private object HWDataRebinder:
   def rebind[T <: HWData](template: T, expr: IR.Expr): T =
     val rebound = template match
       case u: UInt =>
-        val n = UInt(u.w)
+        val n = if (u.w.isDefined) UInt(u.w.get) else UInt()
         copyCommon(u, n)
         n.setIRExpr(expr)
         n.asInstanceOf[T]
       case b: Bool =>
         val n = Bool()
         copyCommon(b, n)
+        n.setIRExpr(expr)
+        n.asInstanceOf[T]
+      case c: Clock =>
+        val n = Clock()
+        copyCommon(c, n)
+        n.setIRExpr(expr)
+        n.asInstanceOf[T]
+      case r: Reset =>
+        val n = Reset()
+        copyCommon(r, n)
         n.setIRExpr(expr)
         n.asInstanceOf[T]
       case v: Vec[t] =>

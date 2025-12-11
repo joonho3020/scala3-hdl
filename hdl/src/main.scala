@@ -398,7 +398,7 @@ def vec_check(): Unit =
 
   object ModuleIO:
     def apply(p: VectorParams): ModuleIO =
-      val log2_rows = p.rows
+      val log2_rows = log2Ceil(p.rows)
       ModuleIO(
         in = Input(TableIO(
           entries = Vec(Seq.fill(p.rows)(Vec(Seq.fill(p.cols)(Entry(
