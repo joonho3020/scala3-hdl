@@ -157,11 +157,20 @@ object ElaborationCacheSpec extends TestSuite:
       assert(count(cold._1, "Cache Hit")  == 0)
       assert(count(cold._1, "Cache Miss") == cacheableInsts)
 
+      val cold2 = runTop(cachePath, nonWidth = 9)
+      val cold3 = runTop(cachePath, nonWidth = 9)
+      val cold4 = runTop(cachePath, nonWidth = 9)
+      val cold5 = runTop(cachePath, nonWidth = 9)
+      val cold6 = runTop(cachePath, nonWidth = 9)
+      val cold7 = runTop(cachePath, nonWidth = 9)
+
       val warm = runTop(cachePath, nonWidth = 9)
       assert(count(warm._1, "Cache Hit")  == cacheableInsts)
       assert(count(warm._1, "Cache Miss") == 0)
 
-      printTime(Seq(cold._2, warm._2))
+      printTime(Seq(cold._2, cold2._2, 
+        cold3._2, cold4._2, cold5._2, cold6._2, cold7._2,
+        warm._2))
     }
 
     test("unchanged module hits cache on warm run") {

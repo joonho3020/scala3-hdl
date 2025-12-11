@@ -374,12 +374,15 @@ def parameter_sweep_check(): Unit =
     given Module = this
     val io = IO(PassthroughIO(Input(gen), Output(gen)))
     io.out := io.in
+
   val elaborator = new Elaborator
+
   val mods = Seq(
     new Passthrough(UInt(Width(8))),
     new Passthrough(UInt(Width(12))),
     new Passthrough(Bool())
   )
+
   val designs = mods.flatMap(m => elaborator.elaborate(m))
   println("=" * 50)
   println("Parameter Sweep Check:")
@@ -409,18 +412,70 @@ def vec_check(): Unit =
   class VectorTest(p: VectorParams) extends Module:
     given Module = this
     val io = IO(ModuleIO(p))
-    val row = io.in.entries(io.reduce_idx)
-    val sums = row.elems.map(e => e.a + e.b)
-    io.out := sums.reduce(_ + _)
+
+    body:
+      io.out := io.in.entries(io.reduce_idx).elems.map(e => e.a + e.b).reduce(_ + _)
+
+  val m = new VectorTest(VectorParams(2, 3, 4))
 
   val elaborator = new Elaborator
-  val m = new VectorTest(VectorParams(2, 3, 4))
   val d = elaborator.elaborate(m)
   println("=" * 50)
   println("Vec Check:")
   println(elaborator.emitAll(d))
   println("=" * 50)
 
+// def mixed_vec(): Unit =
+// case class MixedVecBundle(entries: Vec[HWData]) extends Bundle[MixedVecBundle]
+
+// class MixedVecModule extends Module:
+// given Module = this
+
+// val io = IO(MixedVecBundle(
+// entries = Vec(Seq(UInt(3.W), Bool()))
+// ))
+
+// val m = new MixedVecModule
+// val elaborator = new Elaborator
+// val d = elaborator.elaborate(m)
+// println(elaborator.emitAll(d))
+
+def queue(): Unit =
+  case class Decoupled[T <: HWData](valid: Bool, ready: Bool, bits: T) extends Bundle[Decoupled[T]]
+  object Decoupled:
+    def apply[T <: HWData](x: T): Decoupled[T] =
+      Decoupled(
+        valid = Output(Bool()),
+        ready =  Input(Bool()),
+        bits  = Output(x)
+      )
+
+  case class QueueBundle[T <: HWData](
+    enq: Decoupled[T],
+    deq: Decoupled[T]
+  ) extends Bundle[QueueBundle[T]]
+
+  object QueueBundle:
+    def apply[T <: HWData](x: T): QueueBundle[T] =
+      QueueBundle(
+        enq = Flipped(Decoupled(x)),
+        deq =         Decoupled(x))
+
+  class Queue[T <: HWData](x: T, entries: Int) extends Module:
+    val io = IO(QueueBundle(x))
+
+    body:
+      val mem = Vec(Seq.fill(entries)(Reg(x)))
+
+      val enq_ptr = Reg(UInt(entries.W))
+      val deq_ptr = Reg(UInt(entries.W))
+      val full = Reg(Bool())
+
+      when (io.enq.valid) {
+      }
+
+      when (io.deq.valid) {
+      }
 
 @main def demo(): Unit =
   simple_module_test()
@@ -438,3 +493,4 @@ def vec_check(): Unit =
   when_behavior_check()
   comparison_operator_check()
   vec_check()
+// mixed_vec()

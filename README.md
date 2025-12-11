@@ -41,11 +41,12 @@
     - How are vectors supported in Chisel?
     - Should support indexing of vector structures using hardware types...?
     - Emission shouldn't flatten these structures
-- [ ] Mixed vectors
 - [ ] Memories
     - Make the port API explicit (no inferred ports)
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
+- [ ] Unknown width support
 - [ ] More operators
+- [ ] Mixed vectors
 
 ## Misc Notes
 
@@ -775,3 +776,30 @@ To propagate the top level literal payload to its children, `selectDynamic` is r
 
 Another caveat of this `Literal` approach is that the `Bundle`s that define literals must consist of purely `HWData` types. No mixing with `Scala` types are allowed as we are using typeclass derivation to create literal shapes.
 In theory, we can add support for important Scala library types in the future for derivation, but we should leave this as is for now.
+
+---
+
+Things to add
+
+- log2Ceil on integer operations for calculating widths
+- Clock and Reset types
+- Connect Reg to implicit clock signals
+- RegInit, WireInit support (connect to reset)
+- Add support for UInt without width (so that we can defer width determination during width inference pass)
+- Operators
+    - on two hardware data:                 add, subtract, mult, division, remainder, less than, less or equal to, greater than, greater or equal to, equal, not equal, dynamic shift left, dynamic shift right, and, or, xor, concatentate
+    - on one hardware data and one integer: pad, shift left, shift right, head, tail
+    - on one hardware data and two integers: bits
+
+---
+
+users should be able to specify the port interface
+behavioral makes programming easy, but also a nightmare for the designers to reason about things like portcount
+
+```scala
+class SRAM[T <: HWData]
+
+
+
+
+```

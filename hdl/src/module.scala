@@ -201,6 +201,7 @@ private[hdl] object ModuleOps:
       case _ => Seq(exprFor(v, mod))
 
   def add(lhs: UInt, rhs: UInt, mod: Module): UInt =
+    // FIXME: Enable unknown with of things
     val resWidth = math.max(lhs.w.value, rhs.w.value)
     val result = UInt(Width(resWidth))
     result.setNodeKind(NodeKind.PrimOp)
