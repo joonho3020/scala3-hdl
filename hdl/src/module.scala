@@ -78,7 +78,7 @@ abstract class Module:
     val clk = Input(Clock())
     clk.setNodeKind(NodeKind.IO)
     this.register(clk, Some(name))
-    this.getBuilder.addPort(IR.Port(name, Direction.In, IR.ResetType))
+    this.getBuilder.addPort(IR.Port(name, Direction.In, IR.ClockType))
     clk
 
   private var _implicitReset: Reset =
@@ -174,38 +174,41 @@ private[hdl] object ModuleOps:
 
   def io[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
     val baseName = mod.getBuilder.allocateName(name, "io")
-    t.setNodeKind(NodeKind.IO)
-    mod.register(t, Some(baseName))
-    emitPortDecl(baseName, t)
+    val inst = HWDataCloner.cloneData(t)
+    inst.setNodeKind(NodeKind.IO)
+    mod.register(inst, Some(baseName))
+    emitPortDecl(baseName, inst)
       .foreach(mod.getBuilder.addPort)
-    t
+    inst
 
   def wire[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
     val wireName = mod.getBuilder.allocateName(name, "wire")
-    t.setNodeKind(NodeKind.Wire)
-    mod.register(t, Some(wireName))
-    mod.getBuilder.addStmt(IR.Wire(wireName, irTypeOf(t)))
-    t
+    val inst = HWDataCloner.cloneData(t)
+    inst.setNodeKind(NodeKind.Wire)
+    mod.register(inst, Some(wireName))
+    mod.getBuilder.addStmt(IR.Wire(wireName, irTypeOf(inst)))
+    inst
 
   def reg[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
     val regName = mod.getBuilder.allocateName(name, "reg")
-    t.setNodeKind(NodeKind.Reg)
-    mod.register(t, Some(regName))
+    val inst = HWDataCloner.cloneData(t)
+    inst.setNodeKind(NodeKind.Reg)
+    mod.register(inst, Some(regName))
     val clockExpr = exprFor(mod.getImplicitClock, mod)
-    mod.getBuilder.addStmt(IR.Reg(regName, irTypeOf(t), clockExpr))
-    t
+    mod.getBuilder.addStmt(IR.Reg(regName, irTypeOf(inst), clockExpr))
+    inst
 
   def regInit[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
-    val initValue = t
+    val initExpr = exprFor(t, mod)
+    val inst = HWDataCloner.cloneData(t)
     val regName = mod.getBuilder.allocateName(name, "reginit")
-    t.setNodeKind(NodeKind.Reg)
-    mod.register(t, Some(regName))
+    inst.setNodeKind(NodeKind.Reg)
+    mod.register(inst, Some(regName))
 
     val clockExpr = exprFor(mod.getImplicitClock, mod)
     val resetExpr = exprFor(mod.getImplicitReset, mod)
-    val initExpr = exprFor(initValue, mod)
-    mod.getBuilder.addStmt(IR.RegInit(regName, irTypeOf(t), clockExpr, resetExpr, initExpr))
-    t
+    mod.getBuilder.addStmt(IR.RegInit(regName, irTypeOf(inst), clockExpr, resetExpr, initExpr))
+    inst
 
   def lit[T <: HWData](t: T, payload: HostTypeOf[T], mod: Module)(using WalkHW[T]): T =
     t.setNodeKind(NodeKind.Lit)
@@ -215,14 +218,15 @@ private[hdl] object ModuleOps:
 
   def wireInit[T <: HWData](t: T, init: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
     val wireName = mod.getBuilder.allocateName(name, "wireinit")
-    t.setNodeKind(NodeKind.Wire)
-    mod.register(t, Some(wireName))
+    val inst = HWDataCloner.cloneData(t)
+    inst.setNodeKind(NodeKind.Wire)
+    mod.register(inst, Some(wireName))
 
     val clockExpr = exprFor(mod.getImplicitClock, mod)
     val resetExpr = exprFor(mod.getImplicitReset, mod)
     val initExpr = exprFor(init, mod)
-    mod.getBuilder.addStmt(IR.WireInit(wireName, irTypeOf(t), clockExpr, resetExpr, initExpr))
-    t
+    mod.getBuilder.addStmt(IR.WireInit(wireName, irTypeOf(inst), clockExpr, resetExpr, initExpr))
+    inst
 
   def connect[T <: HWData](dst: T, src: T, mod: Module): Unit =
     (dst, src) match

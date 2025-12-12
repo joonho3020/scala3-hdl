@@ -117,6 +117,8 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     stmt match
       case IR.Wire(name, tpe) =>
         sb.append(s"${prefix}wire $name : ${emitType(tpe)}\n")
+      case IR.WireInit(name, tpe, clock, reset, init) =>
+        sb.append(s"${prefix}wire $name : ${emitType(tpe)} with reset : ${emitExpr(reset)} init : ${emitExpr(init)}\n")
       case IR.Reg(name, tpe, clock) =>
         sb.append(s"${prefix}reg $name : ${emitType(tpe)}, ${emitExpr(clock)}\n")
       case IR.RegInit(name, tpe, clock, reset, init) =>

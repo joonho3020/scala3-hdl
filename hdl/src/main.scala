@@ -466,7 +466,7 @@ def queue(): Unit =
 
     body:
       val addrBits = log2Ceil(entries + 1)
-      val mem = Vec(Seq.fill(entries)(Reg(x)))
+      val mem = Reg(Vec.fill(entries)(x))
 
       val enq_ptr = RegInit(0.U(addrBits.W))
       val deq_ptr = RegInit(0.U(addrBits.W))
@@ -503,6 +503,33 @@ def queue(): Unit =
   println("=" * 50)
   println("Queue Check:")
   println(elaborator.emitAll(d))
+
+  case class Request(
+    a: UInt,
+    valid: Bool) extends Bundle[Request]
+
+  object Request:
+    def apply(): Request =
+      Request(a = UInt(3.W), valid = Bool())
+
+  case class MyBundle(
+    a: Vec[Request],
+    b: Seq[Request],
+    c: Option[Request],
+    d: UInt) extends Bundle[MyBundle]
+
+  object MyBundle:
+    def apply(a_len: Int, b_len: Int, c_some: Boolean, d_width: Int): MyBundle =
+      MyBundle(
+        a = Vec.fill(a_len)(Request()),
+        b = Seq.fill(b_len)(Request()),
+        c = if (c_some) Some(Request()) else None,
+        d = UInt(d_width.W))
+
+  val q2 = new Queue(MyBundle(1, 2, true, 3), 4)
+  val d2 = elaborator.elaborate(q2)
+  println(elaborator.emitAll(d2))
+
 
 @main def demo(): Unit =
   simple_module_test()
