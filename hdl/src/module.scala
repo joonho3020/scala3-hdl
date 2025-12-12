@@ -354,7 +354,7 @@ extension (lhs: UInt)
     ModuleOps.prim2Op(Bool(), IR.PrimOp.Lt, lhs, rhs, m)
 
   def <=(rhs: UInt)(using m: Module): Bool =
-    ModuleOps.prim2Op(Bool(), IR.PrimOp.Lt, lhs, rhs, m)
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Leq, lhs, rhs, m)
 
   def >(rhs: UInt)(using m: Module): Bool =
     ModuleOps.prim2Op(Bool(), IR.PrimOp.Gt, lhs, rhs, m)
