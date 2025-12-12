@@ -123,8 +123,8 @@ abstract class Module:
   protected inline def Reg[T <: HWData](inline t: T)(using WalkHW[T]): T =
     ${ ModuleMacros.regImpl('t, 'this) }
 
-  protected inline def RegInit[T <: HWData](inline t: T)(inline init: T)(using WalkHW[T]): T =
-    ${ ModuleMacros.regInitImpl('t, 'init, 'this) }
+  protected inline def RegInit[T <: HWData](inline t: T)(using WalkHW[T]): T =
+    ${ ModuleMacros.regInitImpl('t, 'this) }
 
   protected inline def WireInit[T <: HWData](inline t: T)(inline init: T)(using WalkHW[T]): T =
     ${ ModuleMacros.wireInitImpl('t, 'init, 'this) }
@@ -195,14 +195,15 @@ private[hdl] object ModuleOps:
     mod.getBuilder.addStmt(IR.Reg(regName, irTypeOf(t), clockExpr))
     t
 
-  def regInit[T <: HWData](t: T, init: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
+  def regInit[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
+    val initValue = t
     val regName = mod.getBuilder.allocateName(name, "reginit")
     t.setNodeKind(NodeKind.Reg)
     mod.register(t, Some(regName))
 
     val clockExpr = exprFor(mod.getImplicitClock, mod)
     val resetExpr = exprFor(mod.getImplicitReset, mod)
-    val initExpr = exprFor(init, mod)
+    val initExpr = exprFor(initValue, mod)
     mod.getBuilder.addStmt(IR.RegInit(regName, irTypeOf(t), clockExpr, resetExpr, initExpr))
     t
 
@@ -264,6 +265,9 @@ private[hdl] object ModuleOps:
 
   def prim1Op2Const[R <: HWData, T <: HWData](result: R, op: IR.PrimOp, lhs: T, a: Int, b: Int, mod: Module): R =
     primOp(result, op, Seq(lhs), Seq(a, b), mod)
+
+  def prim1Op[R <: HWData, T <: HWData](result: R, op: IR.PrimOp, lhs: T, mod: Module): R =
+    primOp(result, op, Seq(lhs), Seq(), mod)
 
 // def cat[T <: HWData](x: Seq[T], mod: Module): T =
 // primUInt(IR.PrimOp.Cat, x, Seq.empty, mod)
@@ -412,6 +416,9 @@ extension (lhs: Bool)
   def ^(rhs: Bool)(using m: Module): Bool =
     ModuleOps.prim2Op(Bool(), IR.PrimOp.Xor, lhs, rhs, m)
 
+  def unary_!(using m: Module): Bool =
+    ModuleOps.prim1Op(Bool(), IR.PrimOp.Not, lhs, m)
+
 final class WhenDSL(private val mod: Module, private val current: RawWhen):
   def elsewhen(cond: Bool)(block: => Unit): WhenDSL =
     val body = mod.getBuilder.captureBody {
@@ -455,10 +462,10 @@ object ModuleMacros:
       ModuleOps.reg($t, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
     }
 
-  def regInitImpl[T <: HWData: Type](t: Expr[T], init: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
+  def regInitImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
     '{
-      ModuleOps.regInit($t, $init, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
+      ModuleOps.regInit($t, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
     }
 
   def wireInitImpl[T <: HWData: Type](t: Expr[T], init: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =

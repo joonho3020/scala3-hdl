@@ -2,7 +2,12 @@ package hdl
 
 object IR:
   enum PrimOp:
-    case Add, Sub, Mul, Div, Rem, Lt, Leq, Gt, Geq, Eq, Neq, DShl, DShr, And, Or, Xor, Cat, Pad, Shl, Shr, Head, Tail, Bits
+    case
+      Add, Sub, Mul, Div, Rem,
+      Lt, Leq, Gt, Geq, Eq, Neq,
+      DShl, DShr,
+      And, Or, Xor, Not,
+      Cat, Pad, Shl, Shr, Head, Tail, Bits
 
     def opName: String = this.productPrefix.toLowerCase()
 

@@ -138,6 +138,26 @@ type HostTypeOf[T] = T match
   case Vec[t] => Seq[HostTypeOf[t]]
   case _     => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X]]
 
+extension (x: Int)
+  def U: UInt =
+    val u = UInt()
+    u.setNodeKind(NodeKind.Lit)
+    u.setLitVal(BigInt(x))
+    u
+
+  def U(width: Width): UInt =
+    val u = UInt(width)
+    u.setNodeKind(NodeKind.Lit)
+    u.setLitVal(BigInt(x))
+    u
+
+extension (x: Boolean)
+  def B: Bool =
+    val b = Bool()
+    b.setNodeKind(NodeKind.Lit)
+    b.setLitVal(x)
+    b
+
 type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] = (Labels, Elems) match
   case (L *: _, h *: _)    => h
   case (_ *: lt, _ *: et)  => FieldTypeFromTuple[lt, et, L]

@@ -465,17 +465,44 @@ def queue(): Unit =
     val io = IO(QueueBundle(x))
 
     body:
+      val addrBits = log2Ceil(entries + 1)
       val mem = Vec(Seq.fill(entries)(Reg(x)))
 
-      val enq_ptr = Reg(UInt(entries.W))
-      val deq_ptr = Reg(UInt(entries.W))
-      val full = Reg(Bool())
+      val enq_ptr = RegInit(0.U(addrBits.W))
+      val deq_ptr = RegInit(0.U(addrBits.W))
+      val full    = RegInit(false.B)
+      val empty   = (enq_ptr === deq_ptr) && !full
 
-      when (io.enq.valid) {
+      io.enq.ready := !full
+      io.deq.valid := !empty
+      io.deq.bits  := mem(deq_ptr)
+
+      val enq_fire = io.enq.valid && io.enq.ready
+      val deq_fire = io.deq.valid && io.deq.ready
+      val almost_full = (enq_ptr + 1.U) % entries.U === deq_ptr
+
+      when (enq_fire) {
+        enq_ptr := (enq_ptr + 1.U) % entries.U
+        mem(enq_ptr) := io.enq.bits
       }
 
-      when (io.deq.valid) {
+      when (deq_fire) {
+        deq_ptr := (deq_ptr + 1.U) % entries.U
       }
+
+      when (enq_fire && deq_fire) {
+      } .elsewhen (enq_fire && almost_full) {
+        full := true.B
+      } .elsewhen (deq_fire) {
+        full := false.B
+      }
+
+  val q = new Queue(UInt(3.W), 4)
+  val elaborator = new Elaborator
+  val d = elaborator.elaborate(q)
+  println("=" * 50)
+  println("Queue Check:")
+  println(elaborator.emitAll(d))
 
 @main def demo(): Unit =
   simple_module_test()
@@ -493,4 +520,5 @@ def queue(): Unit =
   when_behavior_check()
   comparison_operator_check()
   vec_check()
+  queue()
 // mixed_vec()
