@@ -26,15 +26,15 @@ sealed trait HWData:
 
   var literal: Option[Any] = None
   var kind: NodeKind = NodeKind.Unset
-  var ref: Option[String] = None
+  var ref: Option[IR.Identifier] = None
   private var owner: Option[Module] = None
   private var irExpr: Option[IR.Expr] = None
 
   def setNodeKind(kind: NodeKind) = this.kind = kind
   def setLitVal(payload: Any): Unit
   def getLitVal: Any
-  def setRef(r: String): Unit = ref = Some(r)
-  def getRef: Option[String] = ref
+  def setRef(r: IR.Identifier): Unit = ref = Some(r)
+  def getRef: Option[IR.Identifier] = ref
   def setOwner(m: Module): Unit = owner = Some(m)
   def getOwner: Option[Module] = owner
   def setIRExpr(expr: IR.Expr): Unit = irExpr = Some(expr)
@@ -192,7 +192,7 @@ trait Bundle[T] extends Selectable with HWData { self: T =>
             childLit.map(lit => childT.asInstanceOf[FT & HWData].setLitVal(lit))
             childT.asInstanceOf[FT & HWData].getOwner.orElse(this.getOwner).foreach(childT.asInstanceOf[FT & HWData].setOwner)
             this.getRef.foreach { prefix =>
-              childT.asInstanceOf[FT & HWData].setRef(s"$prefix.${constValue[L]}")
+              childT.asInstanceOf[FT & HWData].setRef(IR.Identifier(s"${prefix.value}.${constValue[L]}"))
             }
             childT
           case _ =>
@@ -243,10 +243,16 @@ object HWLiteral:
           set(bp.productElement(i), p.productElement(i))
           i += 1
         b.literal = Some(value)
+
+      // Option
       case (Some(hd), Some(vv)) => set(hd, vv)
       case (None, None) => ()
+
+      // Iterable
       case (it: Iterable[?], iv: Iterable[?]) =>
         assert(it.iterator.length == iv.iterator.length)
         it.iterator.zip(iv.iterator).foreach { case (d, v) => set(d, v) }
+
+      // Unknown
       case _ =>
         throw new IllegalStateException("Option shape mismatch")

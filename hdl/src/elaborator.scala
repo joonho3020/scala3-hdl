@@ -76,7 +76,7 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
   def emit(design: ElaboratedDesign): String =
     val m = design.ir
     val sb = new StringBuilder
-    sb.append(s"module ${m.name}:\n")
+    sb.append(s"module ${m.name.value}:\n")
     m.ports.foreach(p => sb.append(s"  ${emitPort(p)}\n"))
     if m.body.nonEmpty then sb.append("\n")
     m.body.foreach(stmt => emitStmt(stmt, indent = 1, sb))
@@ -87,7 +87,7 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
 
   private def emitPort(p: IR.Port): String =
     val dirStr = if p.direction == Direction.In then "input" else "output"
-    s"$dirStr ${p.name} : ${emitType(p.tpe)}"
+    s"$dirStr ${p.name.value} : ${emitType(p.tpe)}"
 
   private def emitType(t: IR.Type): String = t match
     case IR.UIntType(w) => w.map(v => s"UInt<$v>").getOrElse("UInt")
@@ -103,11 +103,11 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
       s"{ $inner }"
 
   private def emitExpr(e: IR.Expr): String = e match
-    case IR.Ref(name)       => name
-    case IR.Literal(value)  => value
+    case IR.Ref(name)       => name.value
+    case IR.Literal(value)  => value.value
     case IR.SubIndex(expr, value) => s"${emitExpr(expr)}[$value]"
     case IR.SubAccess(expr, index) => s"${emitExpr(expr)}[${emitExpr(index)}]"
-    case IR.SubField(expr, field) => s"${emitExpr(expr)}.$field"
+    case IR.SubField(expr, field) => s"${emitExpr(expr)}.${field.value}"
     case IR.DoPrim(op, args, consts) =>
       val parts = args.map(emitExpr) ++ consts.map(_.toString)
       s"${op.opName}(${parts.mkString(", ")})"
@@ -116,15 +116,15 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     val prefix = "  " * indent
     stmt match
       case IR.Wire(name, tpe) =>
-        sb.append(s"${prefix}wire $name : ${emitType(tpe)}\n")
+        sb.append(s"${prefix}wire ${name.value} : ${emitType(tpe)}\n")
       case IR.WireInit(name, tpe, clock, reset, init) =>
-        sb.append(s"${prefix}wire $name : ${emitType(tpe)} with reset : ${emitExpr(reset)} init : ${emitExpr(init)}\n")
+        sb.append(s"${prefix}wire ${name.value} : ${emitType(tpe)} with reset : ${emitExpr(reset)} init : ${emitExpr(init)}\n")
       case IR.Reg(name, tpe, clock) =>
-        sb.append(s"${prefix}reg $name : ${emitType(tpe)}, ${emitExpr(clock)}\n")
+        sb.append(s"${prefix}reg ${name.value} : ${emitType(tpe)}, ${emitExpr(clock)}\n")
       case IR.RegInit(name, tpe, clock, reset, init) =>
-        sb.append(s"${prefix}reg $name : ${emitType(tpe)}, ${emitExpr(clock)} with reset : ${emitExpr(reset)} init : ${emitExpr(init)}\n")
+        sb.append(s"${prefix}reg ${name.value} : ${emitType(tpe)}, ${emitExpr(clock)} with reset : ${emitExpr(reset)} init : ${emitExpr(init)}\n")
       case IR.DefNode(name, value) =>
-        sb.append(s"${prefix}node $name = ${emitExpr(value)}\n")
+        sb.append(s"${prefix}node ${name.value} = ${emitExpr(value)}\n")
       case IR.Connect(loc, expr) =>
         sb.append(s"${prefix}connect ${emitExpr(loc)}, ${emitExpr(expr)}\n")
       case IR.When(cond, conseq, alt) =>
@@ -134,4 +134,4 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
           sb.append(s"${prefix}otherwise:\n")
           alt.foreach(s => emitStmt(s, indent + 1, sb))
       case IR.Inst(name, module) =>
-        sb.append(s"${prefix}inst $name of $module\n")
+        sb.append(s"${prefix}inst ${name.value} of ${module.value}\n")

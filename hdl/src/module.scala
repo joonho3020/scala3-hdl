@@ -2,7 +2,7 @@ package hdl
 
 import scala.collection.mutable
 
-final case class ElaboratedDesign(name: String, ir: IR.Module) extends Serializable
+final case class ElaboratedDesign(name: IR.Identifier, ir: IR.Module) extends Serializable
 
 private sealed trait RawStmt
 private final case class RawInst(instName: String, mod: Module, baseModule: String) extends RawStmt
@@ -52,14 +52,15 @@ final class ModuleBuilder(val moduleBaseName: String):
 
   def snapshot(label: String, instLabels: Map[Module, String]): ElaboratedDesign =
     val body = currentBody.toSeq.map(rawToIR(_, instLabels))
-    val mod = IR.Module(label, ports.toSeq, body)
-    ElaboratedDesign(label, mod)
+    val id = IR.Identifier(label)
+    val mod = IR.Module(id, ports.toSeq, body)
+    ElaboratedDesign(id, mod)
 
   private def rawToIR(rs: RawStmt, instLabels: Map[Module, String]): IR.Stmt = rs match
     case RawLeaf(s) => s
     case RawInst(name, m, base) =>
       val target = instLabels.getOrElse(m, base)
-      IR.Inst(name, target)
+      IR.Inst(IR.Identifier(name), IR.Identifier(target))
     case w: RawWhen =>
       val conseq = w.conseq.map(rawToIR(_, instLabels))
       val alt = w.alt.map(rawToIR(_, instLabels))
@@ -77,7 +78,7 @@ abstract class Module:
     val clk = Input(Clock())
     clk.setNodeKind(NodeKind.IO)
     this.register(clk, Some(name))
-    this.getBuilder.addPort(IR.Port(name, Direction.In, IR.ClockType))
+    this.getBuilder.addPort(IR.Port(IR.Identifier(name), Direction.In, IR.ClockType))
     clk
 
   private var _implicitReset: Reset =
@@ -85,7 +86,7 @@ abstract class Module:
     val reset = Input(Reset())
     reset.setNodeKind(NodeKind.IO)
     this.register(reset, Some(name))
-    this.getBuilder.addPort(IR.Port(name, Direction.In, IR.ResetType))
+    this.getBuilder.addPort(IR.Port(IR.Identifier(name), Direction.In, IR.ResetType))
     reset
 
   def moduleName: String = getClass.getSimpleName.stripSuffix("$")
@@ -165,7 +166,7 @@ private[hdl] object ModuleOps:
       val fields = (0 until p.productArity).flatMap { i =>
         val name = p.productElementName(i)
         fieldInfo(p.productElement(i)).map { case (dir, tpe) =>
-          IR.BundleField(name, dir == Direction.In, tpe)
+          IR.BundleField(IR.Identifier(name), dir == Direction.In, tpe)
         }
       }
       IR.BundleType(fields.toSeq)
@@ -194,7 +195,7 @@ private[hdl] object ModuleOps:
     val inst = HWAggregate.cloneData(t)
     inst.setNodeKind(NodeKind.Wire)
     mod.register(inst, Some(wireName))
-    mod.getBuilder.addStmt(IR.Wire(wireName, irTypeOf(inst)))
+    mod.getBuilder.addStmt(IR.Wire(IR.Identifier(wireName), irTypeOf(inst)))
     inst
 
   def reg[T <: HWData](t: T, name: Option[String], mod: Module): T =
@@ -203,7 +204,7 @@ private[hdl] object ModuleOps:
     inst.setNodeKind(NodeKind.Reg)
     mod.register(inst, Some(regName))
     val clockExpr = exprFor(mod.getImplicitClock, mod)
-    mod.getBuilder.addStmt(IR.Reg(regName, irTypeOf(inst), clockExpr))
+    mod.getBuilder.addStmt(IR.Reg(IR.Identifier(regName), irTypeOf(inst), clockExpr))
     inst
 
   def regInit[T <: HWData](t: T, name: Option[String], mod: Module): T =
@@ -215,7 +216,7 @@ private[hdl] object ModuleOps:
 
     val clockExpr = exprFor(mod.getImplicitClock, mod)
     val resetExpr = exprFor(mod.getImplicitReset, mod)
-    mod.getBuilder.addStmt(IR.RegInit(regName, irTypeOf(inst), clockExpr, resetExpr, initExpr))
+    mod.getBuilder.addStmt(IR.RegInit(IR.Identifier(regName), irTypeOf(inst), clockExpr, resetExpr, initExpr))
     inst
 
   def lit[T <: HWData](t: T, payload: HostTypeOf[T], mod: Module): T =
@@ -233,7 +234,7 @@ private[hdl] object ModuleOps:
     val clockExpr = exprFor(mod.getImplicitClock, mod)
     val resetExpr = exprFor(mod.getImplicitReset, mod)
     val initExpr = exprFor(init, mod)
-    mod.getBuilder.addStmt(IR.WireInit(wireName, irTypeOf(inst), clockExpr, resetExpr, initExpr))
+    mod.getBuilder.addStmt(IR.WireInit(IR.Identifier(wireName), irTypeOf(inst), clockExpr, resetExpr, initExpr))
     inst
 
   def connect[T <: HWData](dst: T, src: T, mod: Module): Unit =
@@ -287,12 +288,13 @@ private[hdl] object ModuleOps:
 // def pad(lhs: UInt, width: Int, mod: Module): UInt =
 // primUInt(IR.PrimOp.Pad, Seq(lhs), Seq(width), mod)
 
-  private def refFor(data: HWData, current: Module): String =
-    val base = data.getRef.getOrElse(data.toString)
-    data.getOwner match
+  private def refFor(data: HWData, current: Module): IR.Identifier =
+    val base = data.getRef.map(_.value).getOrElse(data.toString)
+    val name = data.getOwner match
       case Some(owner) if owner.ne(current) =>
         owner.instanceName.map(prefix => s"$prefix.$base").getOrElse(base)
       case _ => base
+    IR.Identifier(name)
 
   private def locFor(data: HWData, current: Module): IR.Expr =
     data.getIRExpr.getOrElse(IR.Ref(refFor(data, current)))
@@ -303,7 +305,7 @@ private[hdl] object ModuleOps:
 
   def emitPortDecl[T <: HWData](name: String, tpe: T): Seq[IR.Port] =
     val dir = if tpe.dir == Direction.In then Direction.In else Direction.Out
-    Seq(IR.Port(name, dir, irTypeOf(tpe)))
+    Seq(IR.Port(IR.Identifier(name), dir, irTypeOf(tpe)))
 
   def formatType(tpe: HWData): String = tpe match
     case u: UInt => u.w.map(v => s"UInt<$v>").getOrElse("UInt")
@@ -326,12 +328,12 @@ private[hdl] object ModuleOps:
       s"{ ${fields.mkString(", ")} }"
     case _ => tpe.toString
 
-  def formatLiteral(tpe: HWData, value: Any): String = tpe match
-    case u: UInt => u.w.map(w => s"UInt<$w>($value)").getOrElse(s"UInt($value)")
-    case _: Bool => s"Bool($value)"
-    case _: Clock => s"Clock($value)"
-    case _: Reset => s"Reset($value)"
-    case _ => value.toString
+  def formatLiteral(tpe: HWData, value: Any): IR.Identifier = tpe match
+    case u: UInt => IR.Identifier(u.w.map(w => s"UInt<$w>($value)").getOrElse(s"UInt($value)"))
+    case _: Bool => IR.Identifier(s"Bool($value)")
+    case _: Clock => IR.Identifier(s"Clock($value)")
+    case _: Reset => IR.Identifier(s"Reset($value)")
+    case _ => IR.Identifier(value.toString)
 
   private def dirPrefixOf(h: HWData): String =
     if h.dir == Direction.In then "flip " else ""
@@ -340,7 +342,7 @@ private[hdl] object ModuleOps:
     HWAggregate.foreach(value, "")((h, _) => h.setOwner(mod))
 
   def assignRefs[T](value: T, base: String): Unit =
-    HWAggregate.foreach(value, base)((h, path) => h.setRef(path))
+    HWAggregate.foreach(value, base)((h, path) => h.setRef(IR.Identifier(path)))
 
 extension [T <: HWData](dst: T)
   def :=(src: T)(using m: Module): Unit =

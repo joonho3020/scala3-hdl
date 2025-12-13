@@ -46,15 +46,16 @@
 - [x] Connect Reg to implicit clock signals
 - [x] RegInit, WireInit support (connect to reset)
 - [x] Add support for UInt without width (so that we can defer width determination during width inference pass)
+- [x] Unknown width support
 - [x] Operators
     - [x] on two hardware data : add, subtract, mult, division, remainder, less than, less or equal to, greater than, greater or equal to, equal, not equal, dynamic shift left, dynamic shift right, and, or, xor, concatentate
     - [x] on one hardware data and one integer: pad, shift left, shift right, head, tail
     - [x] on one hardware data and two integers: bits
-    - [ ] Concatenation, bitwire or/and reduction
+    - [ ] Concatenation, bitwise or/and reduction, mux implementation
+- [x] Test against reference IR
 - [ ] Memories
     - Make the port API explicit (no inferred ports)
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
-- [ ] Unknown width support
 - [ ] Mixed vectors
 - [ ] Per-class caching??
     - Currently, the caching is on a file basis as we are relying on hasing classfiles. Although this is robust, we can achieve finer-grained incrementalism by other methods

@@ -85,7 +85,7 @@ object HWAggregate:
         while i < arity do
           val name = productElementNameSafe(prod, i)
           val childPath = if path.isEmpty then name else s"$path.$name"
-          val childCtx = ctx.map(expr => IR.SubField(expr, name))
+          val childCtx = ctx.map(expr => IR.SubField(expr, IR.Identifier(name)))
           values(i) = transformAny(prod.productElement(i), childPath, childCtx, f)
           i += 1
         rebuildProduct(prod, values).asInstanceOf[HWData]
