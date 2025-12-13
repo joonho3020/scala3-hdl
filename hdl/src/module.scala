@@ -1,7 +1,6 @@
 package hdl
 
 import scala.collection.mutable
-import scala.compiletime.summonInline
 
 final case class ElaboratedDesign(name: String, ir: IR.Module) extends Serializable
 
@@ -95,7 +94,7 @@ abstract class Module:
   private[hdl] def addChild(m: Module): Unit = _children += m
   private[hdl] def children: Seq[Module] = _children.toSeq
   private[hdl] def getBuilder: ModuleBuilder = _builder
-  private[hdl] def register[T](data: T, ref: Option[String])(using WalkHW[T]): Unit =
+  private[hdl] def register[T](data: T, ref: Option[String]): Unit =
     ModuleOps.assignOwner(data, this)
     ref.foreach(r => ModuleOps.assignRefs(data, r))
   private[hdl] def getImplicitClock: Clock = _implicitClock
@@ -114,22 +113,22 @@ abstract class Module:
       _bodyFn.foreach(fn => fn(using summon[Module]))
       _bodyRan = true
 
-  protected inline def IO[T <: HWData](inline t: T)(using WalkHW[T]): T =
+  protected inline def IO[T <: HWData](inline t: T): T =
     ${ ModuleMacros.ioImpl('t, 'this) }
 
-  protected inline def Wire[T <: HWData](inline t: T)(using WalkHW[T]): T =
+  protected inline def Wire[T <: HWData](inline t: T): T =
     ${ ModuleMacros.wireImpl('t, 'this) }
 
-  protected inline def Reg[T <: HWData](inline t: T)(using WalkHW[T]): T =
+  protected inline def Reg[T <: HWData](inline t: T): T =
     ${ ModuleMacros.regImpl('t, 'this) }
 
-  protected inline def RegInit[T <: HWData](inline t: T)(using WalkHW[T]): T =
+  protected inline def RegInit[T <: HWData](inline t: T): T =
     ${ ModuleMacros.regInitImpl('t, 'this) }
 
-  protected inline def WireInit[T <: HWData](inline t: T)(inline init: T)(using WalkHW[T]): T =
+  protected inline def WireInit[T <: HWData](inline t: T)(inline init: T): T =
     ${ ModuleMacros.wireInitImpl('t, 'init, 'this) }
 
-  protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T])(using WalkHW[T]): T =
+  protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T]): T =
     ${ ModuleMacros.litImpl('t, 'payload, 'this) }
 
   protected inline def when(cond: Bool)(block: => Unit)(using m: Module): WhenDSL =
@@ -164,43 +163,52 @@ private[hdl] object ModuleOps:
     case bundle: Bundle[?] =>
       val p = bundle.asInstanceOf[Product]
       val fields = (0 until p.productArity).flatMap { i =>
-        p.productElement(i) match
-          case hd: HWData =>
-            val dirFlip = hd.dir == Direction.In
-            Some(IR.BundleField(p.productElementName(i), dirFlip, irTypeOf(hd)))
-          case _ => Nil
+        val name = p.productElementName(i)
+        fieldInfo(p.productElement(i)).map { case (dir, tpe) =>
+          IR.BundleField(name, dir == Direction.In, tpe)
+        }
       }
       IR.BundleType(fields.toSeq)
 
-  def io[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
+  private def fieldInfo(value: Any): Option[(Direction, IR.Type)] = value match
+    case h: HWData => Some((h.dir, irTypeOf(h)))
+    case opt: Option[?] => opt.flatMap(fieldInfo)
+    case it: Iterable[?] =>
+      val elems = it.iterator.toSeq
+      elems.headOption.flatMap(fieldInfo).map { case (dir, elemType) =>
+        (dir, IR.VecType(elems.length, elemType))
+      }
+    case _ => None
+
+  def io[T <: HWData](t: T, name: Option[String], mod: Module): T =
     val baseName = mod.getBuilder.allocateName(name, "io")
-    val inst = HWDataCloner.cloneData(t)
+    val inst = HWAggregate.cloneData(t)
     inst.setNodeKind(NodeKind.IO)
     mod.register(inst, Some(baseName))
     emitPortDecl(baseName, inst)
       .foreach(mod.getBuilder.addPort)
     inst
 
-  def wire[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
+  def wire[T <: HWData](t: T, name: Option[String], mod: Module): T =
     val wireName = mod.getBuilder.allocateName(name, "wire")
-    val inst = HWDataCloner.cloneData(t)
+    val inst = HWAggregate.cloneData(t)
     inst.setNodeKind(NodeKind.Wire)
     mod.register(inst, Some(wireName))
     mod.getBuilder.addStmt(IR.Wire(wireName, irTypeOf(inst)))
     inst
 
-  def reg[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
+  def reg[T <: HWData](t: T, name: Option[String], mod: Module): T =
     val regName = mod.getBuilder.allocateName(name, "reg")
-    val inst = HWDataCloner.cloneData(t)
+    val inst = HWAggregate.cloneData(t)
     inst.setNodeKind(NodeKind.Reg)
     mod.register(inst, Some(regName))
     val clockExpr = exprFor(mod.getImplicitClock, mod)
     mod.getBuilder.addStmt(IR.Reg(regName, irTypeOf(inst), clockExpr))
     inst
 
-  def regInit[T <: HWData](t: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
+  def regInit[T <: HWData](t: T, name: Option[String], mod: Module): T =
     val initExpr = exprFor(t, mod)
-    val inst = HWDataCloner.cloneData(t)
+    val inst = HWAggregate.cloneData(t)
     val regName = mod.getBuilder.allocateName(name, "reginit")
     inst.setNodeKind(NodeKind.Reg)
     mod.register(inst, Some(regName))
@@ -210,15 +218,15 @@ private[hdl] object ModuleOps:
     mod.getBuilder.addStmt(IR.RegInit(regName, irTypeOf(inst), clockExpr, resetExpr, initExpr))
     inst
 
-  def lit[T <: HWData](t: T, payload: HostTypeOf[T], mod: Module)(using WalkHW[T]): T =
+  def lit[T <: HWData](t: T, payload: HostTypeOf[T], mod: Module): T =
     t.setNodeKind(NodeKind.Lit)
     t.setLitVal(payload)
     mod.register(t, None)
     t
 
-  def wireInit[T <: HWData](t: T, init: T, name: Option[String], mod: Module)(using WalkHW[T]): T =
+  def wireInit[T <: HWData](t: T, init: T, name: Option[String], mod: Module): T =
     val wireName = mod.getBuilder.allocateName(name, "wireinit")
-    val inst = HWDataCloner.cloneData(t)
+    val inst = HWAggregate.cloneData(t)
     inst.setNodeKind(NodeKind.Wire)
     mod.register(inst, Some(wireName))
 
@@ -293,7 +301,7 @@ private[hdl] object ModuleOps:
     if data.kind == NodeKind.Lit then IR.Literal(formatLiteral(data, data.literal.getOrElse("")))
     else data.getIRExpr.getOrElse(IR.Ref(refFor(data, current)))
 
-  def emitPortDecl[T <: HWData](name: String, tpe: T)(using w: WalkHW[T]): Seq[IR.Port] =
+  def emitPortDecl[T <: HWData](name: String, tpe: T): Seq[IR.Port] =
     val dir = if tpe.dir == Direction.In then Direction.In else Direction.Out
     Seq(IR.Port(name, dir, irTypeOf(tpe)))
 
@@ -328,11 +336,11 @@ private[hdl] object ModuleOps:
   private def dirPrefixOf(h: HWData): String =
     if h.dir == Direction.In then "flip " else ""
 
-  def assignOwner[T](value: T, mod: Module)(using w: WalkHW[T]): Unit =
-    w(value, "")((h, _) => h.setOwner(mod))
+  def assignOwner[T](value: T, mod: Module): Unit =
+    HWAggregate.foreach(value, "")((h, _) => h.setOwner(mod))
 
-  def assignRefs[T](value: T, base: String)(using w: WalkHW[T]): Unit =
-    w(value, base)((h, path) => h.setRef(path))
+  def assignRefs[T](value: T, base: String): Unit =
+    HWAggregate.foreach(value, base)((h, path) => h.setRef(path))
 
 extension [T <: HWData](dst: T)
   def :=(src: T)(using m: Module): Unit =
@@ -451,36 +459,36 @@ object ModuleMacros:
   def ioImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
     '{
-      ModuleOps.io($t, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
+      ModuleOps.io($t, ${Expr(nameOpt)}, $mod)
     }
 
   def wireImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
     '{
-      ModuleOps.wire($t, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
+      ModuleOps.wire($t, ${Expr(nameOpt)}, $mod)
     }
 
   def regImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
     '{
-      ModuleOps.reg($t, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
+      ModuleOps.reg($t, ${Expr(nameOpt)}, $mod)
     }
 
   def regInitImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
     '{
-      ModuleOps.regInit($t, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
+      ModuleOps.regInit($t, ${Expr(nameOpt)}, $mod)
     }
 
   def wireInitImpl[T <: HWData: Type](t: Expr[T], init: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
     '{
-      ModuleOps.wireInit($t, $init, ${Expr(nameOpt)}, $mod)(using summonInline[WalkHW[T]])
+      ModuleOps.wireInit($t, $init, ${Expr(nameOpt)}, $mod)
     }
 
   def litImpl[T <: HWData: Type](t: Expr[T], payload: Expr[HostTypeOf[T]], mod: Expr[Module])(using Quotes): Expr[T] =
     '{
-      ModuleOps.lit($t, $payload, $mod)(using summonInline[WalkHW[T]])
+      ModuleOps.lit($t, $payload, $mod)
     }
 
   def moduleInstImpl[M <: Module: Type](gen: Expr[M], parent: Expr[Module])(using Quotes): Expr[M] =

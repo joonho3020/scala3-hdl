@@ -111,7 +111,7 @@ sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnc
     val baseExpr = ModuleOps.exprFor(this, m)
     val idxExpr = ModuleOps.exprFor(i, m)
     val accessExpr = IR.SubAccess(baseExpr, idxExpr)
-    HWDataRebinder.rebind(proto, accessExpr)
+    HWAggregate.rebind(proto, accessExpr)
   override def flip: Unit =
     dir = Direction.flip(dir)
     elems.foreach(_.flip)
@@ -136,6 +136,8 @@ type HostTypeOf[T] = T match
   case Clock => Boolean
   case Reset => Boolean
   case Vec[t] => Seq[HostTypeOf[t]]
+  case Option[t] => Option[HostTypeOf[t]]
+  case IterableOnce[t] => Seq[HostTypeOf[t]]
   case _     => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X]]
 
 extension (x: Int)
@@ -207,146 +209,6 @@ trait Bundle[T] extends Selectable with HWData { self: T =>
       case Some(v) => v.asInstanceOf[HostTypeOf[T]]
       case None    => throw new NoSuchElementException("Node does not carry a literal value")
 }
-
-private object HWDataRebinder:
-  private def copyCommon(from: HWData, to: HWData): Unit =
-    to.dir = from.dir
-    to.kind = from.kind
-    to.literal = from.literal
-    from.getOwner.foreach(to.setOwner)
-
-  def rebind[T <: HWData](template: T, expr: IR.Expr): T =
-    val rebound = template match
-      case u: UInt =>
-        val n = if (u.w.isDefined) UInt(u.w.get) else UInt()
-        copyCommon(u, n)
-        n.setIRExpr(expr)
-        n.asInstanceOf[T]
-      case b: Bool =>
-        val n = Bool()
-        copyCommon(b, n)
-        n.setIRExpr(expr)
-        n.asInstanceOf[T]
-      case c: Clock =>
-        val n = Clock()
-        copyCommon(c, n)
-        n.setIRExpr(expr)
-        n.asInstanceOf[T]
-      case r: Reset =>
-        val n = Reset()
-        copyCommon(r, n)
-        n.setIRExpr(expr)
-        n.asInstanceOf[T]
-      case v: Vec[t] =>
-        val elems = v.elems.zipWithIndex.map { case (e, idx) =>
-          rebind(e, IR.SubIndex(expr, idx)).asInstanceOf[t]
-        }
-        val nv = Vec(elems)
-        copyCommon(v, nv)
-        nv.setIRExpr(expr)
-        nv.asInstanceOf[T]
-      case b: Bundle[bt] =>
-        val prod = b.asInstanceOf[Product]
-        val arity = prod.productArity
-        val values = Array.ofDim[Any](arity)
-        var i = 0
-        while i < arity do
-          val fieldName = prod.productElementName(i)
-          val value = prod.productElement(i) match
-            case h: HWData =>
-              rebind(h, IR.SubField(expr, fieldName))
-            case other => other
-          values(i) = value
-          i += 1
-        val cls = b.getClass
-        val ctor = cls.getConstructors.find(_.getParameterCount == values.length)
-        val args = values.map(_.asInstanceOf[AnyRef])
-        val rebuilt = ctor
-          .map(_.newInstance(args*))
-          .getOrElse {
-            val companionCls = Class.forName(s"${cls.getName}$$")
-            val module = companionCls.getField("MODULE$").get(null)
-            val apply = module.getClass.getMethods.find(m => m.getName == "apply" && m.getParameterCount == values.length)
-              .getOrElse(throw new IllegalArgumentException(s"No apply method for ${cls.getName}"))
-            apply.invoke(module, args*)
-          }
-        val nb = rebuilt.asInstanceOf[Bundle[bt]]
-        copyCommon(b, nb)
-        nb.setIRExpr(expr)
-        nb.asInstanceOf[T]
-    rebound
-
-object HWDataCloner:
-  private def copyCommon(from: HWData, to: HWData): Unit =
-    to.dir = from.dir
-    to.kind = NodeKind.Unset
-    to.literal = from.literal
-
-  def cloneData[T <: HWData](template: T): T =
-    val cloned = template match
-      case u: UInt =>
-        val n = if (u.w.isDefined) UInt(u.w.get) else UInt()
-        copyCommon(u, n)
-        n.asInstanceOf[T]
-      case b: Bool =>
-        val n = Bool()
-        copyCommon(b, n)
-        n.asInstanceOf[T]
-      case c: Clock =>
-        val n = Clock()
-        copyCommon(c, n)
-        n.asInstanceOf[T]
-      case r: Reset =>
-        val n = Reset()
-        copyCommon(r, n)
-        n.asInstanceOf[T]
-      case v: Vec[t] =>
-        val elems = v.elems.map(e => cloneData(e))
-        val nv = Vec(elems)
-        copyCommon(v, nv)
-        nv.asInstanceOf[T]
-      case b: Bundle[bt] =>
-        val prod = b.asInstanceOf[Product]
-        val arity = prod.productArity
-        val values = Array.ofDim[Any](arity)
-        var i = 0
-        while i < arity do
-          values(i) = prod.productElement(i) match
-            case h: HWData => cloneData(h)
-            case other     => other
-          i += 1
-        val cls = b.getClass
-        val ctors = cls.getConstructors
-        val args = values.map(_.asInstanceOf[AnyRef])
-        val directCtor = ctors.collectFirst {
-          case c if c.getParameterCount == args.length =>
-            () => c.newInstance(args*)
-        }
-        val outerCtor = ctors.collectFirst {
-          case c if c.getParameterCount == args.length + 1 =>
-            cls.getDeclaredFields.find(_.getName == "$outer").map { outerField =>
-              outerField.setAccessible(true)
-              val outer = outerField.get(b)
-              val outerArgs: Array[AnyRef] = Array(outer.asInstanceOf[AnyRef]) ++ args
-              () => c.newInstance(outerArgs*)
-            }
-        }.flatten
-        val rebuilt =
-          directCtor.orElse(outerCtor)
-            .map(_())
-            .getOrElse {
-              val companionOpt = try Some(Class.forName(s"${cls.getName}$$")) catch
-                case _: Throwable => None
-              val module = companionOpt.map(_.getField("MODULE$").get(null))
-                .getOrElse(throw new IllegalArgumentException(s"No apply method for ${cls.getName}"))
-              val apply = module.getClass.getMethods.find(m => m.getName == "apply" && m.getParameterCount == values.length)
-                .getOrElse(throw new IllegalArgumentException(s"No apply method for ${cls.getName}"))
-              apply.invoke(module, args*)
-            }
-        val nb = rebuilt.asInstanceOf[Bundle[bt]]
-        copyCommon(b, nb)
-        nb.asInstanceOf[T]
-    cloned
 
 object Input:
   def apply[T <: HWData](t: T): T =

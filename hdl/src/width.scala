@@ -1,6 +1,6 @@
 package hdl
 
-sealed class Width(val value: Int):
+sealed class Width(val value: Int) extends Serializable:
   override def toString: String = s"${value}"
 
 object Width:
