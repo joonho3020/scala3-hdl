@@ -296,23 +296,123 @@ def parameterized_bundle_check(): Unit =
   // Note: Literals with Scala types doesn't work. In theary, we can add support
   // later by extending `HostTypeOf` and `FieldToNode` for `Bundle`.
   //
-  val fletcher_lit = Lit(Fletcher(fp))((
-    security = (
-      pixelstealing = BigInt(1),
-      bpred = BigInt(2),
-      prefetcher = BigInt(3)
-    ),
-    students = Seq.fill(fp.num_students)((
-      age = BigInt(4),
-      female = true
-    )),
-    childs = if (fp.has_child) Some(
-      Seq.fill(fp.num_childs)((
-        age = BigInt(5)
-      )))
-      else None
-  ))
+  // val fletcher_lit = Lit(Fletcher(fp))((
+  //   security = (
+  //     pixelstealing = BigInt(1),
+  //     bpred = BigInt(2),
+  //     prefetcher = BigInt(3)
+  //   ),
+  //   students = Seq.fill(fp.num_students)(
+  //     (
+  //       age = BigInt(4),
+  //       female = true
+  //     )
+  //   ),
+  //   childs = if (fp.has_child) Some(
+  //     Seq.fill(fp.num_childs)(
+  //       (
+  //         age = BigInt(5)
+  //       )
+  //     ))
+  //     else None
+  // ))
 
+  // val fletcher_lit = Lit(Fletcher(fp))((
+  //   security = Lit(Security(fp.security))((
+  //     pixelstealing = BigInt(1),
+  //     bpred = BigInt(2),
+  //     prefetcher = BigInt(3)
+  //   )),
+  //   students = Seq.fill(fp.num_students)(
+  //     Lit(Student())((
+  //       age = BigInt(4),
+  //       female = true
+  //     ))
+  //   ),
+  //   childs = if (fp.has_child) Some(
+  //     Seq.fill(fp.num_childs)(
+  //       Lit(Child())((
+  //         age = BigInt(5)
+  //       ))
+  //     ))
+  //     else None
+  // ))
+
+  // assert(fletcher_lit.security.pixelstealing.getLitVal == BigInt(1))
+
+  case class Shao(
+    private val security: Security,
+    private val students: Vec[Vec[Student]],
+  ) extends Bundle[Shao]
+
+  case class ShaoParams(
+    num_students: Int,
+    security: SecurityParams
+  )
+
+  object Shao:
+    def apply(p: ShaoParams): Shao =
+      Shao(
+        security = Input(Security(p.security)),
+        students = Vec(Seq.fill(p.num_students)(
+          Vec(Seq.fill(p.num_students)(
+            Flipped(Student())
+          ))
+        ))
+      )
+
+  val shao_lit = Lit(
+    Shao(ShaoParams(
+      num_students = 2,
+      security = SecurityParams(3)
+    ))
+  )(
+    (
+      security = (
+        pixelstealing = BigInt(1),
+        bpred = BigInt(2),
+        prefetcher = BigInt(3)
+      ),
+      students = Seq(
+        Seq(
+          (
+            age = BigInt(4),
+            female = true
+          ),
+          (
+            age = BigInt(5),
+            female = false
+          ),
+        ),
+        Seq(
+          (
+            age = BigInt(6),
+            female = true
+          ),
+          (
+            age = BigInt(7),
+            female = false
+          ),
+        ),
+      ),
+    )
+  )
+
+  assert(shao_lit.students(0)(0).age.getLitVal == BigInt(4))
+  assert(shao_lit.students(0)(0).female.getLitVal == true)
+
+  assert(shao_lit.students(0)(1).age.getLitVal == BigInt(5))
+  assert(shao_lit.students(0)(1).female.getLitVal == false)
+
+  assert(shao_lit.students(1)(0).age.getLitVal == BigInt(6))
+  assert(shao_lit.students(1)(0).female.getLitVal == true)
+
+  assert(shao_lit.students(1)(1).age.getLitVal == BigInt(7))
+  assert(shao_lit.students(1)(1).female.getLitVal == false)
+
+  assert(shao_lit.security.pixelstealing.getLitVal == BigInt(1))
+  assert(shao_lit.security.bpred.getLitVal == BigInt(2))
+  assert(shao_lit.security.prefetcher.getLitVal == BigInt(3))
 
 object BundleChecksSpec extends TestSuite:
   val tests = Tests {

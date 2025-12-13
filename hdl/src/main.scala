@@ -533,10 +533,6 @@ def queue(): Unit =
   val d2 = elaborator.elaborate(q2)
   println(elaborator.emitAll(d2))
 
-// val mybundle_lit = Lit(MyBundle(1, 2, true, 3))((
-// a = Seq.fill(
-
-
 @main def demo(): Unit =
   simple_module_test()
   list_operation_check()

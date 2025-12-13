@@ -129,15 +129,16 @@ object Vec:
   def tabulate[T <: HWData](n: Int)(gen: Int => T): Vec[T] = Vec(Seq.tabulate(n)(gen))
   def fill[T <: HWData](n: Int)(gen: => T): Vec[T] = Vec(Seq.fill(n)(gen))
 
+
+
 type HostTypeOf[T] = T match
   case UInt  => BigInt
   case Bool  => Boolean
   case Clock => Boolean
   case Reset => Boolean
   case Vec[t] => Seq[HostTypeOf[t]]
-  case Option[t] => Option[HostTypeOf[t]]
-  case IterableOnce[t] => Seq[HostTypeOf[t]]
-  case _     => NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X]]
+  case _ =>
+    NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X]]
 
 extension (x: Int)
   def U: UInt =
@@ -243,9 +244,9 @@ object HWLiteral:
           i += 1
         b.literal = Some(value)
       case (Some(hd), Some(vv)) => set(hd, vv)
+      case (None, None) => ()
       case (it: Iterable[?], iv: Iterable[?]) =>
         assert(it.iterator.length == iv.iterator.length)
         it.iterator.zip(iv.iterator).foreach { case (d, v) => set(d, v) }
       case _ =>
-        throw new IllegalStateException(
-          s"Unable to set literal for ${data} with payload=${value})")
+        throw new IllegalStateException("Option shape mismatch")
