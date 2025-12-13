@@ -296,22 +296,22 @@ def parameterized_bundle_check(): Unit =
   // Note: Literals with Scala types doesn't work. In theary, we can add support
   // later by extending `HostTypeOf` and `FieldToNode` for `Bundle`.
   //
-  // val fletcher_lit = Lit(Fletcher(fp))((
-  //   security = (
-  //     pixelstealing = BigInt(1),
-  //     bpred = BigInt(2),
-  //     prefetcher = BigInt(3)
-  //   ),
-  //   students = Seq.fill(fp.num_students)((
-  //     age = BigInt(4),
-  //     female = true
-  //   )),
-  //   childs = if (fp.has_child) Some(
-  //     Seq.fill(fp.num_childs)((
-  //       age = BigInt(5)
-  //     )))
-  //     else None
-  // ))
+  val fletcher_lit = Lit(Fletcher(fp))((
+    security = (
+      pixelstealing = BigInt(1),
+      bpred = BigInt(2),
+      prefetcher = BigInt(3)
+    ),
+    students = Seq.fill(fp.num_students)((
+      age = BigInt(4),
+      female = true
+    )),
+    childs = if (fp.has_child) Some(
+      Seq.fill(fp.num_childs)((
+        age = BigInt(5)
+      )))
+      else None
+  ))
 
 
 object BundleChecksSpec extends TestSuite:

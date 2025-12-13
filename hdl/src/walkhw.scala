@@ -45,7 +45,7 @@ object HWAggregate:
       visitAny(p.productElement(i), childPath, f)
       i += 1
 
-  def transform[T](value: T, path: String = "", ctx: Option[IR.Expr] = None)(
+  private def transform[T](value: T, path: String = "", ctx: Option[IR.Expr] = None)(
     f: (HWData, String, HWData, Option[IR.Expr]) => HWData
   ): T =
     transformAny(value, path, ctx, f).asInstanceOf[T]

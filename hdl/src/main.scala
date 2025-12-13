@@ -114,11 +114,14 @@ def inheritance_check(): Unit =
     val io = IO(
       SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4))))
     )
+    // Common logic that should be shared for child classes of the base class
+    // cann't be in the 'body' block. Hence, it is always eagerly elaborated
     io.out := io.in
 
   class Concrete extends Abstract:
     val add_result = io.in + io.in + io.in
-    io.out := add_result
+    body:
+      io.out := add_result
 
   val elaborator = new Elaborator
   val concrete = new Concrete
@@ -530,6 +533,9 @@ def queue(): Unit =
   val d2 = elaborator.elaborate(q2)
   println(elaborator.emitAll(d2))
 
+// val mybundle_lit = Lit(MyBundle(1, 2, true, 3))((
+// a = Seq.fill(
+
 
 @main def demo(): Unit =
   simple_module_test()
@@ -539,12 +545,12 @@ def queue(): Unit =
   inheritance_check()
   type_parameterization_check()
   conditional_generation_check()
+  when_behavior_check()
   optional_io_check()
   nested_seq_generation_check()
   optional_and_map_check()
   module_array_generation_check()
   parameter_sweep_check()
-  when_behavior_check()
   comparison_operator_check()
   vec_check()
   queue()

@@ -107,7 +107,8 @@ sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnc
   def length: Int = elems.length
   def apply(i: Int): T = elems(i)
   def apply(i: UInt)(using m: Module): T =
-    val proto = elems.headOption.getOrElse(throw new IllegalArgumentException("Cannot index empty Vec"))
+    val proto = elems.headOption.getOrElse(
+      throw new IllegalArgumentException("Cannot index empty Vec"))
     val baseExpr = ModuleOps.exprFor(this, m)
     val idxExpr = ModuleOps.exprFor(i, m)
     val accessExpr = IR.SubAccess(baseExpr, idxExpr)
@@ -116,9 +117,7 @@ sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnc
     dir = Direction.flip(dir)
     elems.foreach(_.flip)
   def setLitVal(payload: Any): Unit =
-    val seq = payload.asInstanceOf[Seq[HostTypeOf[T]]]
-    elems.zip(seq).foreach((e, v) => e.setLitVal(v))
-    literal = Some(seq)
+    HWLiteral.set(this, payload)
   def getLitVal: HostTypeOf[Vec[T]] =
     literal match
       case Some(v) => v.asInstanceOf[HostTypeOf[Vec[T]]]
@@ -202,6 +201,7 @@ trait Bundle[T] extends Selectable with HWData { self: T =>
     }
 
   def setLitVal(payload: Any): Unit =
+    HWLiteral.set(this, payload)
     this.literal = Some(payload.asInstanceOf[HostTypeOf[T]])
 
   def getLitVal: HostTypeOf[T] =
@@ -222,3 +222,30 @@ object Output:
 object Flipped:
   def apply[T <: HWData](t: T): T =
     Input(t)
+
+object HWLiteral:
+  def set(data: Any, value: Any): Unit =
+    (data, value) match
+      case (u: UInt, v: BigInt) => u.setLitVal(v)
+      case (b: Bool, v: Boolean) => b.setLitVal(v)
+      case (c: Clock, v: Boolean) => c.setLitVal(v)
+      case (r: Reset, v: Boolean) => r.setLitVal(v)
+      case (v: Vec[?], seq: Seq[?]) =>
+        v.elems.zip(seq).foreach { case (e, v2) => set(e, v2) }
+        v.literal = Some(seq)
+      case (b: Bundle[?], p: Product) =>
+        val bp = b.asInstanceOf[Product]
+        val arity = bp.productArity
+        assert(arity == p.productArity)
+        var i = 0
+        while i < arity do
+          set(bp.productElement(i), p.productElement(i))
+          i += 1
+        b.literal = Some(value)
+      case (Some(hd), Some(vv)) => set(hd, vv)
+      case (it: Iterable[?], iv: Iterable[?]) =>
+        assert(it.iterator.length == iv.iterator.length)
+        it.iterator.zip(iv.iterator).foreach { case (d, v) => set(d, v) }
+      case _ =>
+        throw new IllegalStateException(
+          s"Unable to set literal for ${data} with payload=${value})")
