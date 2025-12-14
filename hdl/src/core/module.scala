@@ -123,6 +123,9 @@ abstract class Module:
   protected inline def Reg[T <: HWData](inline t: T): T =
     ${ ModuleMacros.regImpl('t, 'this) }
 
+  protected inline def RegNext[T <: HWData](inline t: T): T =
+    ${ ModuleMacros.regNextImpl('t, 'this) }
+
   protected inline def RegInit[T <: HWData](inline t: T): T =
     ${ ModuleMacros.regInitImpl('t, 'this) }
 
@@ -206,6 +209,11 @@ private[hdl] object ModuleOps:
     val clockExpr = exprFor(mod.getImplicitClock, mod)
     mod.getBuilder.addStmt(IR.Reg(IR.Identifier(regName), irTypeOf(inst), clockExpr))
     inst
+
+  def regNext[T <: HWData](next: T, name: Option[String], mod: Module): T =
+    val regNode = reg(next, name, mod)
+    connect(regNode, next, mod)
+    regNode
 
   def regInit[T <: HWData](t: T, name: Option[String], mod: Module): T =
     val initExpr = exprFor(t, mod)
@@ -527,6 +535,12 @@ object ModuleMacros:
     val nameOpt = findEnclosingValName
     '{
       ModuleOps.regInit($t, ${Expr(nameOpt)}, $mod)
+    }
+
+  def regNextImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
+    val nameOpt = findEnclosingValName
+    '{
+      ModuleOps.regNext($t, ${Expr(nameOpt)}, $mod)
     }
 
   def wireInitImpl[T <: HWData: Type](t: Expr[T], init: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =

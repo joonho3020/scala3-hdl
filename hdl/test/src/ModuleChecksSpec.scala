@@ -78,6 +78,41 @@ def simple_module_test(): Unit =
   println(elaborator.emitAll(designs))
   assertDesigns("Simple Module Test", designs, expected)
 
+def regnext_check(): Unit =
+  class RegNextModule extends Module:
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+    val pc_1 = RegNext(io.in)
+    io.out := pc_1
+
+  val elaborator = new Elaborator
+  val m = new RegNextModule
+  val designs = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(designs)
+  val expected = Seq(
+    module(
+      "RegNextModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("in", true, u(4)),
+          ("out", false, u(4))
+        ))
+      ),
+      Seq(
+        reg("pc_1", u(4), ref("clock")),
+        IR.Connect(ref("pc_1"), sf(ref("io"), "in")),
+        IR.Connect(sf(ref("io"), "out"), ref("pc_1"))
+      )
+    )
+  )
+  println("=" * 50)
+  println("RegNext Check:")
+  println(rendered)
+  assertDesigns("RegNext Check", designs, expected)
+  println("=" * 50)
+
 def list_operation_check(): Unit =
   final case class MultBySumIO(a: UInt, b: UInt, sum: Seq[UInt]) extends Bundle[MultBySumIO]
   object MultBySumIO:
@@ -1343,6 +1378,7 @@ def mux_and_concat_check(): Unit =
 object ModuleChecksSpec extends TestSuite:
   val tests = Tests {
     test("simple_module_test") { simple_module_test() }
+    test("regnext_check") { regnext_check() }
     test("list_operation_check") { list_operation_check() }
     test("nested_module_check") { nested_module_check() }
     test("nested_bundle_check") { nested_bundle_check() }

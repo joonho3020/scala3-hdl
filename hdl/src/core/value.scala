@@ -104,8 +104,11 @@ object Reset:
 
 sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnce[T]:
   def iterator: Iterator[T] = elems.iterator
+
   def length: Int = elems.length
+
   def apply(i: Int): T = elems(i)
+
   def apply(i: UInt)(using m: Module): T =
     val proto = elems.headOption.getOrElse(
       throw new IllegalArgumentException("Cannot index empty Vec"))
@@ -113,23 +116,42 @@ sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnc
     val idxExpr = ModuleOps.exprFor(i, m)
     val accessExpr = IR.SubAccess(baseExpr, idxExpr)
     HWAggregate.rebind(proto, accessExpr)
+
   override def flip: Unit =
     dir = Direction.flip(dir)
     elems.foreach(_.flip)
+
   def setLitVal(payload: Any): Unit =
     HWLiteral.set(this, payload)
+
   def getLitVal: HostTypeOf[Vec[T]] =
     literal match
       case Some(v) => v.asInstanceOf[HostTypeOf[Vec[T]]]
       case None    => throw new NoSuchElementException("Vec does not carry a literal value")
+
   override def toString(): String = s"Vec(${elems.mkString(",")}, $dir)"
+
+  def map[U <: HWData](f: T => U): Vec[U] =
+    Vec(elems.map(f))
+
+  def flatMap[U <: HWData](f: T => IterableOnce[U]): Vec[U] =
+    Vec(elems.iterator.flatMap(f).toSeq)
+
+  def filter(p: T => Boolean): Vec[T] =
+    Vec(elems.filter(p))
+
+  def reduce(op: (T, T) => T): T =
+    elems.reduce(op)
+
+  def reduceOption(op: (T, T) => T): Option[T] =
+    elems.reduceOption(op)
+
+  export elems.{ foreach, foldLeft, foldRight, exists, forall, count, mkString, zip, zipWithIndex }
 
 object Vec:
   def apply[T <: HWData](elems: Seq[T]): Vec[T] = new Vec[T](elems)
   def tabulate[T <: HWData](n: Int)(gen: Int => T): Vec[T] = Vec(Seq.tabulate(n)(gen))
   def fill[T <: HWData](n: Int)(gen: => T): Vec[T] = Vec(Seq.fill(n)(gen))
-
-
 
 type HostTypeOf[T] = T match
   case UInt  => BigInt
