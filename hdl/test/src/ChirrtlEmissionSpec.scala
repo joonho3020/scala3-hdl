@@ -3,13 +3,8 @@ package hdl
 import utest.*
 import java.io.{File, PrintWriter}
 import scala.sys.process.*
-import hdl.ModuleOps.*
-
-def boolLit(value: Boolean): Bool =
-  val b = Bool()
-  b.setNodeKind(NodeKind.Lit)
-  b.setLitVal(value)
-  b
+import hdl.*
+import hdl.`Value$package`.*
 
 case class AdderIO(a: UInt, b: UInt, c: UInt) extends Bundle[AdderIO]
 
@@ -160,47 +155,47 @@ class Cache(addrWidth: Int = 8, dataWidth: Int = 8, cacheSize: Int = 8) extends 
   val hit = (storedTag === reqTag) && (storedTag =/= 0.U)
 
   dataMem.io.readAddr := reqIndex
-  dataMem.io.writeEnable := boolLit(false)
+  dataMem.io.writeEnable := false.B
   dataMem.io.writeAddr := 0.U
   dataMem.io.writeData := 0.U
-  io.respValid := boolLit(false)
-  io.respData := 0.U(Width(dataWidth))
+  io.respValid := false.B
+  io.respData := 0.U(dataWidth.W)
 
-  io.memAddr := 0.U(Width(addrWidth))
-  io.memRead := boolLit(false)
-  io.memWrite := boolLit(false)
-  io.memDataOut := 0.U(Width(dataWidth))
+  io.memAddr := 0.U(addrWidth.W)
+  io.memRead := false.B
+  io.memWrite := false.B
+  io.memDataOut := 0.U(dataWidth.W)
 
-  when(state === sIdle) {
+  when (state === sIdle) {
     reqTagReg := reqTag
     reqIndexReg := reqIndex
     reqDataReg := io.reqData
 
-    when(hit) {
-      when(io.reqRead) {
+    when (hit) {
+      when (io.reqRead) {
         io.respData := dataMem.io.readData
-        io.respValid := boolLit(true)
+        io.respValid := true.B
       } .elsewhen (io.reqWrite) {
-        dataMem.io.writeEnable := boolLit(true)
+        dataMem.io.writeEnable := true.B
         dataMem.io.writeAddr := reqIndex
         dataMem.io.writeData := io.reqData
       }
-    }.otherwise {
+    } .otherwise {
       state := sMemRead
       io.memAddr := io.reqAddr
-      io.memRead := boolLit(true)
+      io.memRead := true.B
     }
-  }.elsewhen(state === sMemRead) {
+  } .elsewhen (state === sMemRead) {
     state := sWait
-    io.memRead := boolLit(false)
-  }.elsewhen(state === sWait) {
+    io.memRead := false.B
+  } .elsewhen (state === sWait) {
     tagWrite.write(reqIndex, reqTag)
-    dataMem.io.writeEnable := boolLit(true)
+    dataMem.io.writeEnable := true.B
     dataMem.io.writeAddr := reqIndex
     dataMem.io.writeData := io.memDataIn
 
     io.respData := io.memDataIn
-    io.respValid := boolLit(true)
+    io.respValid := true.B
     state := sIdle
   }
 
@@ -638,7 +633,7 @@ class SRAMModule(depth: Int, width: Int) extends Module:
   when(io.wr_en) {
     mem.writePorts(0).write(io.wr_addr, io.wr_data)
   }
-  io.rd_data := mem.readPorts(0).read(io.rd_addr, boolLit(true))
+  io.rd_data := mem.readPorts(0).read(io.rd_addr, true.B)
 
 case class ChaserIO(
   start: Bool,
@@ -695,25 +690,25 @@ class PointerChasing extends Module:
     Output(UInt(Width(addrWidth)))
   ))
   val sram = SRAM(UInt(Width(addrWidth)), sramDepth)(1, 1, 0)
-  val initDone = RegInit(boolLit(false))
+  val initDone = RegInit(false.B)
   val initCntr = RegInit(0.U(Width(log2Ceil(sramDepth + 1))))
-  sram.writePorts(0).enable := boolLit(false)
+  sram.writePorts(0).enable := false.B
   sram.writePorts(0).address := 0.U(Width(log2Ceil(sramDepth)))
   sram.writePorts(0).data := 0.U(Width(addrWidth))
   when(!initDone) {
-    sram.writePorts(0).enable := boolLit(true)
+    sram.writePorts(0).enable := true.B
     sram.writePorts(0).address := initCntr
     sram.writePorts(0).data := initCntr + 1.U(Width(addrWidth))
     initCntr := initCntr + 1.U(Width(log2Ceil(sramDepth + 1)))
     when(initCntr === (sramDepth - 1).U(Width(log2Ceil(sramDepth)))) {
-      initDone := boolLit(true)
+      initDone := true.B
     }
   }
   val chaser = Module(new Chaser(addrWidth, chasingSteps))
   chaser.io.start := io.start && initDone
   io.done := chaser.io.done
   io.final_addr := chaser.io.final_addr
-  sram.readPorts(0).enable := boolLit(true)
+  sram.readPorts(0).enable := true.B
   sram.readPorts(0).address := chaser.io.sram_rd_addr
   chaser.io.sram_rd_data := sram.readPorts(0).data
 
@@ -747,7 +742,7 @@ class MyCustomQueue[T <: HWData](data: T, entries: Int) extends Module:
   val mem = Reg(Vec.fill(entries)(data))
   val enq_ptr = RegInit(0.U(Width(addrBits)))
   val deq_ptr = RegInit(0.U(Width(addrBits)))
-  val full = RegInit(boolLit(false))
+  val full = RegInit(false.B)
   val empty = (enq_ptr === deq_ptr) && !full
   io.enq.ready := !full
   io.deq.valid := !empty
@@ -764,9 +759,9 @@ class MyCustomQueue[T <: HWData](data: T, entries: Int) extends Module:
   }
   when(enq_fire && deq_fire) {
   }.elsewhen(enq_fire && almost_full) {
-    full := boolLit(true)
+    full := true.B
   }.elsewhen(deq_fire) {
-    full := boolLit(false)
+    full := false.B
   }
 
 case class RegFileIO(addr: UInt, data: UInt) extends Bundle[RegFileIO]

@@ -57,6 +57,7 @@
 - [x] Memories
     - Make the port API explicit (no inferred ports)
 - [ ] CHIRRTL emission
+- [ ] Switch statements
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
 - [ ] Mixed vectors
 - [ ] Per-class caching??
