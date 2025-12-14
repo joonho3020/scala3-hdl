@@ -35,8 +35,18 @@ def runFirtool(firFile: String): (Int, String) =
   )
 
   val frontend = new Frontend(p)
+
+
+
+
   val elaborator = new Elaborator
   val designs = elaborator.elaborate(frontend)
-  val chirrtl = elaborator.emitChirrtl(designs, "Frontend")
-  writeChirrtl("Frontend.fir", chirrtl)
-  val (exitCode, output) = runFirtool("Frontend.fir")
+
+  val top_name = frontend.moduleName
+  val top_name_hashed = designs.map(_.name.value).filter(_.contains(top_name)).head
+
+  val chirrtl = elaborator.emitChirrtl(designs, top_name_hashed)
+  val fir_filename = s"${top_name}.fir"
+
+  writeChirrtl(fir_filename, chirrtl)
+  val (exitCode, output) = runFirtool(fir_filename)

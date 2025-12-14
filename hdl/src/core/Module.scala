@@ -65,8 +65,8 @@ abstract class Module:
   protected inline def RegInit[T <: HWData](inline t: T): T =
     ${ ModuleMacros.regInitImpl('t, 'this) }
 
-  protected inline def WireInit[T <: HWData](inline t: T)(inline init: T): T =
-    ${ ModuleMacros.wireInitImpl('t, 'init, 'this) }
+  protected inline def WireInit[T <: HWData](inline t: T): T =
+    ${ ModuleMacros.wireInitImpl('t, 'this) }
 
   protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T]): T =
     ${ ModuleMacros.litImpl('t, 'payload, 'this) }
@@ -132,10 +132,10 @@ object ModuleMacros:
       ModuleOps.regNext($t, ${Expr(nameOpt)}, $mod)
     }
 
-  def wireInitImpl[T <: HWData: Type](t: Expr[T], init: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
+  def wireInitImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
     val nameOpt = findEnclosingValName
     '{
-      ModuleOps.wireInit($t, $init, ${Expr(nameOpt)}, $mod)
+      ModuleOps.wireInit($t, ${Expr(nameOpt)}, $mod)
     }
 
   def litImpl[T <: HWData: Type](t: Expr[T], payload: Expr[HostTypeOf[T]], mod: Expr[Module])(using Quotes): Expr[T] =
