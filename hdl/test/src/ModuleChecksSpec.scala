@@ -32,6 +32,7 @@ private def and(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.And, Seq(
 private def eqv(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Eq, Seq(a, b))
 private def neqv(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Neq, Seq(a, b))
 private def not(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
+private def reverseBits(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
 private def rem(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Rem, Seq(a, b))
 
 private def assertDesigns(label: String, actual: Seq[ElaboratedDesign], expected: Seq[IR.Module]): Unit =
@@ -1351,6 +1352,45 @@ def queue_check(): Unit =
   assertDesigns("Queue Check nested bundle", d2, expected2)
   println("=" * 50)
 
+def bitwise_reverse_check(): Unit =
+  final case class ReverseIO(in: UInt, out: UInt) extends Bundle[ReverseIO]
+  class ReverseModule extends Module:
+    given Module = this
+    val io = IO(ReverseIO(
+      in = Input(UInt(Width(4))),
+      out = Output(UInt(Width(4)))
+    ))
+    io.out := ~io.in
+
+  val elaborator = new Elaborator
+  val m = new ReverseModule
+  val d = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(d)
+  val expected = Seq(
+    module(
+      "ReverseModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("in", true, u(4)),
+          ("out", false, u(4))
+        ))
+      ),
+      Seq(
+        IR.Connect(
+          sf(ref("io"), "out"),
+          reverseBits(sf(ref("io"), "in"))
+        )
+      )
+    )
+  )
+  println("=" * 50)
+  println("Bitwise Reverse Check:")
+  println(rendered)
+  assertDesigns("Bitwise Reverse Check", d, expected)
+  println("=" * 50)
+
 def mux_and_concat_check(): Unit =
   final case class MuxConcatIO(a: UInt, b: UInt, sel: Bool, out: UInt, cat: UInt) extends Bundle[MuxConcatIO]
   class MuxConcat extends Module:
@@ -1427,5 +1467,6 @@ object ModuleChecksSpec extends TestSuite:
     test("comparison_operator_check") { comparison_operator_check() }
     test("vec_check") { vec_check() }
     test("queue_check") { queue_check() }
+    test("bitwise_reverse_check") { bitwise_reverse_check() }
     test("mux_and_concat_check") { mux_and_concat_check() }
   }

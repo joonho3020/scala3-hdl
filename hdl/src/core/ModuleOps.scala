@@ -305,6 +305,9 @@ extension (lhs: UInt)
   def asBool(using m: Module): Bool =
     ModuleOps.prim1Op(Bool(), IR.PrimOp.AsBool, lhs, m)
 
+  def unary_~(using m: Module): UInt =
+    ModuleOps.prim1Op(UInt(), IR.PrimOp.Not, lhs, m)
+
 extension (lhs: Bool)
   def ===(rhs: Bool)(using m: Module): Bool =
     ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, m)
@@ -355,4 +358,3 @@ final class WhenDSL(private val mod: Module, private val current: RawWhen):
     current.alt = mod.getBuilder.captureBody {
       block
     }
-
