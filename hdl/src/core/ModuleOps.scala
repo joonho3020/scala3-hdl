@@ -299,7 +299,7 @@ extension (lhs: UInt)
   def tail(n: Int)(using m: Module): UInt =
     ModuleOps.prim1Op1Const(UInt(), IR.PrimOp.Tail, lhs, n, m)
 
-  def bits(hi: Int, lo: Int)(using m: Module): UInt =
+  def apply(hi: Int, lo: Int)(using m: Module): UInt =
     ModuleOps.prim1Op2Const(UInt(), IR.PrimOp.Bits, lhs, hi, lo, m)
 
   def apply(idx: Int)(using m: Module): UInt =

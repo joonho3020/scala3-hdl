@@ -68,8 +68,8 @@ class BitSel1 extends Module:
     Output(UInt(Width(4))),
     Output(UInt(Width(4)))
   ))
-  io.out_hi := ModuleOps.prim1Op2Const(UInt(Width(4)), IR.PrimOp.Bits, io.in, 7, 4, summon[Module])
-  io.out_lo := ModuleOps.prim1Op2Const(UInt(Width(4)), IR.PrimOp.Bits, io.in, 3, 0, summon[Module])
+  io.out_hi := io.in(7, 4)
+  io.out_lo := io.in(3, 0)
 
 case class BitSel2IO(in: UInt, bit3: Bool) extends Bundle[BitSel2IO]
 
@@ -79,7 +79,7 @@ class BitSel2 extends Module:
     Input(UInt(Width(8))),
     Output(Bool())
   ))
-  io.bit3 := io.in(3).asBool
+  io.bit3 := io.in(3)
 
 case class DataMemIO(
   writeEnable: Bool,
@@ -286,30 +286,35 @@ class Fir(length: Int) extends Module:
 case class MyBundle(in: UInt, out: UInt) extends Bundle[MyBundle]
 
 class A extends Module:
-  given Module = this
   val io = IO(MyBundle(Input(UInt(Width(2))), Output(UInt(Width(2)))))
-  io.out := RegNext(io.in)
+
+  body:
+    io.out := RegNext(io.in)
 
 class C extends Module:
-  given Module = this
   val io = IO(MyBundle(Input(UInt(Width(2))), Output(UInt(Width(2)))))
-  io.out := RegNext(io.in)
+
+  body:
+    io.out := RegNext(io.in)
 
 class B extends Module:
   given Module = this
   val io = IO(MyBundle(Input(UInt(Width(2))), Output(UInt(Width(2)))))
-  val c = Module(new C)
-  c.io.in := io.in
-  io.out := RegNext(c.io.out)
+
+  body:
+    val c = Module(new C)
+    c.io.in := io.in
+    io.out := RegNext(c.io.out)
 
 class Top extends Module:
-  given Module = this
   val io = IO(MyBundle(Input(UInt(Width(2))), Output(UInt(Width(2)))))
-  val a = Module(new A)
-  a.io.in := io.in
-  val b = Module(new B)
-  b.io.in := a.io.out
-  io.out := b.io.out
+
+  body:
+    val a = Module(new A)
+    a.io.in := io.in
+    val b = Module(new B)
+    b.io.in := a.io.out
+    io.out := b.io.out
 
 case class NestedWhenIO(a: UInt, b: UInt, c: UInt, sel: UInt, output: UInt) extends Bundle[NestedWhenIO]
 
@@ -1098,7 +1103,7 @@ object ChirrtlEmissionSpec extends TestSuite:
       val elaborator = new Elaborator(log = _ => ())
       val mod = new Top
       val designs = elaborator.elaborate(mod)
-      val chirrtl = elaborator.emitChirrtl(designs, "Hierarchy")
+      val chirrtl = elaborator.emitChirrtl(designs, "Top")
       writeChirrtl("Hierarchy.fir", chirrtl)
       val (exitCode, output) = runFirtool("Hierarchy.fir")
       if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
