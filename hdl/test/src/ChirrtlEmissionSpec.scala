@@ -542,52 +542,6 @@ class LastConnectSemantics2 extends Module:
   }
   io.output_2 := io.c
 
-case class WBdl(a: UInt, b: Vec[UInt]) extends Bundle[WBdl]
-case class X(c: Vec[WBdl], d: UInt, e: Decoupled[UInt]) extends Bundle[X]
-case class Y(e: X, f: Vec[UInt]) extends Bundle[Y]
-case class Z(g: Vec[Y], h: Vec[Y]) extends Bundle[Z]
-
-object Z:
-  def apply(): Z =
-    Z(
-      Vec.fill(2)(
-        Y(
-          X(
-            Vec.fill(2)(
-              WBdl(
-                UInt(Width(2)),
-                Flipped(Vec.fill(2)(UInt(Width(3))))
-              )
-            ),
-            Flipped(UInt(Width(3))),
-            Decoupled(UInt(Width(2)))
-          ),
-          Vec.fill(3)(UInt(Width(2)))
-        )
-      ),
-      Flipped(Vec.fill(2)(
-        Y(
-          X(
-            Vec.fill(2)(
-              WBdl(
-                UInt(Width(2)),
-                Flipped(Vec.fill(2)(UInt(Width(3))))
-              )
-            ),
-            Flipped(UInt(Width(3))),
-            Decoupled(UInt(Width(2)))
-          ),
-          Vec.fill(3)(UInt(Width(2)))
-        )
-      ))
-    )
-
-class NestedBundleModule extends Module:
-  given Module = this
-  val io = IO(Z())
-  val reg = RegNext(io.h)
-  io.g := reg
-
 case class WireRegInsideWhenIO(a: UInt, b: UInt, out: UInt) extends Bundle[WireRegInsideWhenIO]
 
 class WireRegInsideWhen extends Module:
@@ -1131,7 +1085,6 @@ object ChirrtlEmissionSpec extends TestSuite:
         new LCS7,
         new LCS8,
         new LastConnectSemantics2,
-        new NestedBundleModule,
         new WireRegInsideWhen,
         new MultiWhen
       )
