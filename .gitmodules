@@ -1,3 +1,6 @@
 [submodule "chisel"]
 	path = chisel
 	url = https://github.com/chipsalliance/chisel.git
+[submodule "chisel-examples"]
+	path = chisel-examples
+	url = git@github.com:joonho3020/chisel-examples.git
