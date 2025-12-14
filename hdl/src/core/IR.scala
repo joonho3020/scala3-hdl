@@ -40,6 +40,7 @@ private[hdl] object IR:
   final case class SubField(expr: Expr, field: Identifier) extends Expr
 
   sealed trait Stmt extends Serializable
+  case object Skip extends Stmt
   final case class Wire(name: Identifier, tpe: Type) extends Stmt
   final case class WireInit(name: Identifier, tpe: Type, clock: Expr, reset: Expr, init: Expr) extends Stmt
   final case class Reg(name: Identifier, tpe: Type, clock: Expr) extends Stmt

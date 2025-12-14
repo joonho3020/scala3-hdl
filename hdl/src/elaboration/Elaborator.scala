@@ -133,6 +133,8 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
   private def emitStmt(stmt: IR.Stmt, indent: Int, sb: StringBuilder): Unit =
     val prefix = "  " * indent
     stmt match
+      case IR.Skip =>
+        sb.append(s"${prefix}skip\n")
       case IR.Wire(name, tpe) =>
         sb.append(s"${prefix}wire ${name.value} : ${emitType(tpe)}\n")
       case IR.WireInit(name, tpe, clock, reset, init) =>
@@ -201,6 +203,8 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
   private def emitChirrtlStmt(stmt: IR.Stmt, indent: Int, sb: StringBuilder): Unit =
     val prefix = "    " * indent
     stmt match
+      case IR.Skip =>
+        sb.append(s"${prefix}skip\n")
       case IR.Wire(name, tpe) =>
         sb.append(s"${prefix}wire ${name.value} : ${emitChirrtlType(tpe, false)}\n")
       case IR.WireInit(name, tpe, clock, reset, init) =>

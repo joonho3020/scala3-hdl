@@ -46,7 +46,8 @@ private[hdl] final class ModuleBuilder(val moduleBaseName: String):
     bodyStack.push(buf)
     try
       thunk
-      buf.toSeq
+      val body = buf.toSeq
+      if body.isEmpty then Seq(RawLeaf(IR.Skip)) else body
     finally
       bodyStack.pop()
 
@@ -65,4 +66,3 @@ private[hdl] final class ModuleBuilder(val moduleBaseName: String):
       val conseq = w.conseq.map(rawToIR(_, instLabels))
       val alt = w.alt.map(rawToIR(_, instLabels))
       IR.When(w.cond, conseq, alt)
-
