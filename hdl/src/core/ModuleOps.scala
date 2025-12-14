@@ -3,7 +3,7 @@ package hdl
 import scala.collection.mutable
 
 private[hdl] object ModuleOps:
-  private def irTypeOf(tpe: HWData): IR.Type = tpe match
+  private[hdl] def irTypeOf(tpe: HWData): IR.Type = tpe match
     case u: UInt => IR.UIntType(u.w)
     case _: Bool => IR.BoolType
     case _: Clock => IR.ClockType

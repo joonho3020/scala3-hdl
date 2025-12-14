@@ -18,6 +18,9 @@ private[hdl] object IR:
 
     def opName: String = this.productPrefix.toLowerCase()
 
+  enum ReadUnderWrite:
+    case Undefined, Old, New
+
   sealed trait Type extends Serializable
   final case class UIntType(width: Option[Width]) extends Type
   final case object BoolType extends Type
@@ -46,6 +49,17 @@ private[hdl] object IR:
   final case class When(cond: Expr, conseq: Seq[Stmt], var alt: Seq[Stmt]) extends Stmt
   final case class Inst(name: Identifier, module: Identifier) extends Stmt
   final case class Invalid(expr: Expr) extends Stmt
+  final case class Mem(
+    name: Identifier,
+    tpe: Type,
+    depth: Int,
+    readLatency: Int,
+    writeLatency: Int,
+    readers: Seq[Identifier],
+    writers: Seq[Identifier],
+    readwriters: Seq[Identifier],
+    readUnderWrite: ReadUnderWrite
+  ) extends Stmt
 
   final case class Port(name: Identifier, direction: Direction, tpe: Type) extends Serializable
   final case class Module(name: Identifier, ports: Seq[Port], body: Seq[Stmt]) extends Serializable

@@ -138,3 +138,17 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
           alt.foreach(s => emitStmt(s, indent + 1, sb))
       case IR.Inst(name, module) =>
         sb.append(s"${prefix}inst ${name.value} of ${module.value}\n")
+      case IR.Mem(name, tpe, depth, rlat, wlat, readers, writers, readwriters, ruw) =>
+        sb.append(s"${prefix}mem ${name.value}:\n")
+        sb.append(s"${prefix}  data-type => ${emitType(tpe)}\n")
+        sb.append(s"${prefix}  depth => $depth\n")
+        sb.append(s"${prefix}  read-latency => $rlat\n")
+        sb.append(s"${prefix}  write-latency => $wlat\n")
+        readers.foreach(r => sb.append(s"${prefix}  reader => ${r.value}\n"))
+        writers.foreach(w => sb.append(s"${prefix}  writer => ${w.value}\n"))
+        readwriters.foreach(rw => sb.append(s"${prefix}  readwriter => ${rw.value}\n"))
+        val ruwStr = ruw match
+          case IR.ReadUnderWrite.Undefined => "undefined"
+          case IR.ReadUnderWrite.Old => "old"
+          case IR.ReadUnderWrite.New => "new"
+        sb.append(s"${prefix}  read-under-write => $ruwStr\n")

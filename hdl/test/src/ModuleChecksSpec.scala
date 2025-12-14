@@ -36,6 +36,18 @@ private def bits(a: IR.Expr, hi: Int, lo: Int): IR.Expr = IR.DoPrim(IR.PrimOp.Bi
 private def dshr(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.DShr, Seq(a, b))
 private def reverseBits(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
 private def rem(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Rem, Seq(a, b))
+private def mem(name: String, tpe: IR.Type, depth: Int, readers: Seq[String], writers: Seq[String], readwriters: Seq[String]): IR.Stmt =
+  IR.Mem(
+    id(name),
+    tpe,
+    depth,
+    1,
+    1,
+    readers.map(id),
+    writers.map(id),
+    readwriters.map(id),
+    IR.ReadUnderWrite.Undefined
+  )
 
 private def assertDesigns(label: String, actual: Seq[ElaboratedDesign], expected: Seq[IR.Module]): Unit =
   val renderer = new Elaborator
@@ -1497,6 +1509,83 @@ def mux_and_concat_check(): Unit =
   assertDesigns("Mux and Concat Check", d, expected)
   println("=" * 50)
 
+def sram_check(): Unit =
+  final case class SramIO(rData: UInt, rwData: UInt) extends Bundle[SramIO]
+  class SramModule extends Module:
+    given Module = this
+    val io = IO(SramIO(
+      rData = Output(UInt(Width(8))),
+      rwData = Output(UInt(Width(8)))
+    ))
+    val mem = SRAM(UInt(Width(8)), 4)(1, 1, 1)
+    val r = mem.readPorts(0).read(1.U(Width(2)))
+    io.rData := r
+    mem.writePorts(0).write(2.U(Width(2)), 5.U(Width(8)))
+    val rw = mem.readwritePorts(0).read(3.U(Width(2)))
+    mem.readwritePorts(0).writeData := 0.U(Width(8))
+    io.rwData := rw
+
+  val elaborator = new Elaborator
+  val m = new SramModule
+  val d = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(d)
+  val expected = Seq(
+    module(
+      "SramModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("rData", false, u(8)),
+          ("rwData", false, u(8))
+        ))
+      ),
+      Seq(
+        mem("mem", u(8), 4, Seq("r0"), Seq("w0"), Seq("rw0")),
+        wire("mem_r_en", IR.VecType(1, IR.BoolType)),
+        wire("mem_r_addr", IR.VecType(1, IR.UIntType(Some(Width(2))))),
+        wire("mem_r_data", IR.VecType(1, u(8))),
+        wire("mem_w_en", IR.VecType(1, IR.BoolType)),
+        wire("mem_w_addr", IR.VecType(1, IR.UIntType(Some(Width(2))))),
+        wire("mem_w_data", IR.VecType(1, u(8))),
+        wire("mem_rw_en", IR.VecType(1, IR.BoolType)),
+        wire("mem_rw_addr", IR.VecType(1, IR.UIntType(Some(Width(2))))),
+        wire("mem_rw_wmode", IR.VecType(1, IR.BoolType)),
+        wire("mem_rw_wdata", IR.VecType(1, u(8))),
+        wire("mem_rw_rdata", IR.VecType(1, u(8))),
+        IR.Connect(sf(sf(ref("mem"), "r0"), "en"), si(ref("mem_r_en"), 0)),
+        IR.Connect(sf(sf(ref("mem"), "r0"), "addr"), si(ref("mem_r_addr"), 0)),
+        IR.Connect(si(ref("mem_r_data"), 0), sf(sf(ref("mem"), "r0"), "data")),
+        IR.Connect(sf(sf(ref("mem"), "w0"), "en"), si(ref("mem_w_en"), 0)),
+        IR.Connect(sf(sf(ref("mem"), "w0"), "addr"), si(ref("mem_w_addr"), 0)),
+        IR.Connect(sf(sf(ref("mem"), "w0"), "data"), si(ref("mem_w_data"), 0)),
+        IR.Connect(sf(sf(ref("mem"), "w0"), "mask"), lit("UInt<1>(1)")),
+        IR.Connect(sf(sf(ref("mem"), "rw0"), "en"), si(ref("mem_rw_en"), 0)),
+        IR.Connect(sf(sf(ref("mem"), "rw0"), "addr"), si(ref("mem_rw_addr"), 0)),
+        IR.Connect(sf(sf(ref("mem"), "rw0"), "wmode"), si(ref("mem_rw_wmode"), 0)),
+        IR.Connect(sf(sf(ref("mem"), "rw0"), "wdata"), si(ref("mem_rw_wdata"), 0)),
+        IR.Connect(si(ref("mem_rw_rdata"), 0), sf(sf(ref("mem"), "rw0"), "rdata")),
+        IR.Connect(sf(sf(ref("mem"), "rw0"), "wmask"), lit("UInt<1>(1)")),
+        IR.Connect(si(ref("mem_r_en"), 0), lit("Bool(true)")),
+        IR.Connect(si(ref("mem_r_addr"), 0), lit("UInt<2>(1)")),
+        IR.Connect(sf(ref("io"), "rData"), si(ref("mem_r_data"), 0)),
+        IR.Connect(si(ref("mem_w_en"), 0), lit("Bool(true)")),
+        IR.Connect(si(ref("mem_w_addr"), 0), lit("UInt<2>(2)")),
+        IR.Connect(si(ref("mem_w_data"), 0), lit("UInt<8>(5)")),
+        IR.Connect(si(ref("mem_rw_en"), 0), lit("Bool(true)")),
+        IR.Connect(si(ref("mem_rw_wmode"), 0), lit("Bool(false)")),
+        IR.Connect(si(ref("mem_rw_addr"), 0), lit("UInt<2>(3)")),
+        IR.Connect(si(ref("mem_rw_wdata"), 0), lit("UInt<8>(0)")),
+        IR.Connect(sf(ref("io"), "rwData"), si(ref("mem_rw_rdata"), 0))
+      )
+    )
+  )
+  println("=" * 50)
+  println("SRAM Check:")
+  println(rendered)
+  assertDesigns("SRAM Check", d, expected)
+  println("=" * 50)
+
 object ModuleChecksSpec extends TestSuite:
   val tests = Tests {
     test("simple_module_test") { simple_module_test() }
@@ -1520,4 +1609,5 @@ object ModuleChecksSpec extends TestSuite:
     test("bit_select_check") { bit_select_check() }
     test("bitwise_reverse_check") { bitwise_reverse_check() }
     test("mux_and_concat_check") { mux_and_concat_check() }
+    test("sram_check") { sram_check() }
   }
