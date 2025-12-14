@@ -13,7 +13,8 @@ object IR:
       Lt, Leq, Gt, Geq, Eq, Neq,
       DShl, DShr,
       And, Or, Xor, Not,
-      Cat, Pad, Shl, Shr, Head, Tail, Bits
+      Cat, Pad, Shl, Shr, Head, Tail, Bits,
+      Mux, AsUInt, AsBool
 
     def opName: String = this.productPrefix.toLowerCase()
 

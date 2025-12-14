@@ -261,7 +261,7 @@ private[hdl] object ModuleOps:
     mod.getBuilder.addRaw(raw)
     new WhenDSL(mod, raw)
 
-  private def primOp[R <: HWData, T <: HWData](result: R, op: IR.PrimOp, args: Seq[T], consts: Seq[Int], mod: Module): R =
+  private def primOp[R <: HWData](result: R, op: IR.PrimOp, args: Seq[HWData], consts: Seq[Int], mod: Module): R =
     result.setNodeKind(NodeKind.PrimOp)
     val name = mod.getBuilder.allocateName(None, op.opName)
     mod.register(result, Some(name))
@@ -270,17 +270,43 @@ private[hdl] object ModuleOps:
     result.setIRExpr(expr)
     result
 
-  def prim2Op[R <: HWData, T <: HWData](result: R, op: IR.PrimOp, lhs: T, rhs: T, mod: Module): R =
+  def prim2Op[R <: HWData, T <: HWData](
+    result: R, op: IR.PrimOp, lhs: T, rhs: T, mod: Module
+  ): R =
     primOp(result, op, Seq(lhs, rhs), Seq(), mod)
 
-  def prim1Op1Const[R <: HWData, T <: HWData](result: R, op: IR.PrimOp, lhs: T, const: Int, mod: Module): R =
+  def prim1Op1Const[R <: HWData, T <: HWData](
+    result: R, op: IR.PrimOp, lhs: T, const: Int, mod: Module
+  ): R =
     primOp(result, op, Seq(lhs), Seq(const), mod)
 
-  def prim1Op2Const[R <: HWData, T <: HWData](result: R, op: IR.PrimOp, lhs: T, a: Int, b: Int, mod: Module): R =
+  def prim1Op2Const[R <: HWData, T <: HWData](
+    result: R, op: IR.PrimOp, lhs: T, a: Int, b: Int, mod: Module
+  ): R =
     primOp(result, op, Seq(lhs), Seq(a, b), mod)
 
-  def prim1Op[R <: HWData, T <: HWData](result: R, op: IR.PrimOp, lhs: T, mod: Module): R =
+  def prim1Op[R <: HWData, T <: HWData](
+    result: R, op: IR.PrimOp, lhs: T, mod: Module
+  ): R =
     primOp(result, op, Seq(lhs), Seq(), mod)
+
+  def mux[T <: HWData](cond: Bool, tval: T, fval: T, mod: Module): T =
+    primOp(HWAggregate.cloneData(tval), IR.PrimOp.Mux, Seq(cond, tval, fval), Seq.empty, mod)
+
+  def asUInt(value: HWData, mod: Module): UInt =
+    prim1Op(UInt(), IR.PrimOp.AsUInt, value, mod)
+
+  def concatBits(values: Seq[HWData], mod: Module): UInt =
+    val flat = values.flatMap {
+      case u: UInt      => Seq(u)
+      case b: Bool      => Seq(asUInt(b, mod))
+      case c: Clock     => Seq(asUInt(c, mod))
+      case r: Reset     => Seq(asUInt(r, mod))
+      case v: Vec[?]    => Seq(asUInt(v, mod))
+      case b: Bundle[?] => Seq(asUInt(b, mod))
+    }
+    if flat.isEmpty then throw new IllegalArgumentException("Cannot concat empty sequence")
+    primOp(UInt(), IR.PrimOp.Cat, flat, Seq.empty, mod)
 
 // def cat[T <: HWData](x: Seq[T], mod: Module): T =
 // primUInt(IR.PrimOp.Cat, x, Seq.empty, mod)
@@ -414,6 +440,9 @@ extension (lhs: UInt)
   def bits(hi: Int, lo: Int)(using m: Module): UInt =
     ModuleOps.prim1Op2Const(UInt(), IR.PrimOp.Tail, lhs, lo, hi, m)
 
+  def asBool(using m: Module): Bool =
+    ModuleOps.prim1Op(Bool(), IR.PrimOp.AsBool, lhs, m)
+
 extension (lhs: Bool)
   def ===(rhs: Bool)(using m: Module): Bool =
     ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, m)
@@ -432,6 +461,24 @@ extension (lhs: Bool)
 
   def unary_!(using m: Module): Bool =
     ModuleOps.prim1Op(Bool(), IR.PrimOp.Not, lhs, m)
+
+  def asUInt(using m: Module): UInt =
+    ModuleOps.asUInt(lhs, m)
+
+def Mux[T <: HWData](cond: Bool, tval: T, fval: T)(using m: Module): T =
+  ModuleOps.mux(cond, tval, fval, m)
+
+extension (xs: Seq[HWData])
+  def Cat(using m: Module): UInt =
+    ModuleOps.concatBits(xs, m)
+
+extension (v: Vec[?])
+  def Cat(using m: Module): UInt =
+    ModuleOps.concatBits(v.elems.asInstanceOf[Seq[HWData]], m)
+
+extension (h: HWData)
+  def asUInt(using m: Module): UInt =
+    ModuleOps.asUInt(h, m)
 
 final class WhenDSL(private val mod: Module, private val current: RawWhen):
   def elsewhen(cond: Bool)(block: => Unit): WhenDSL =

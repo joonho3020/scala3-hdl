@@ -1354,6 +1354,62 @@ def queue(): Unit =
   assertDesigns("Queue Check nested bundle", d2, expected2)
   println("=" * 50)
 
+def mux_and_concat_check(): Unit =
+  final case class MuxConcatIO(a: UInt, b: UInt, sel: Bool, out: UInt, cat: UInt) extends Bundle[MuxConcatIO]
+  class MuxConcat extends Module:
+    given Module = this
+    val io = IO(MuxConcatIO(
+      a = Input(UInt(Width(4))),
+      b = Input(UInt(Width(4))),
+      sel = Input(Bool()),
+      out = Output(UInt(Width(4))),
+      cat = Output(UInt(Width(8)))
+    ))
+    io.out := Mux(io.sel, io.a, io.b)
+    io.cat := Cat(Seq(io.a, io.b))
+
+    io.out := io.asUInt
+
+  val elaborator = new Elaborator
+  val m = new MuxConcat
+  val d = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(d)
+  val expected = Seq(
+    module(
+      "MuxConcat",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("a", true, u(4)),
+          ("b", true, u(4)),
+          ("sel", true, IR.BoolType),
+          ("out", false, u(4)),
+          ("cat", false, u(8))
+        ))
+      ),
+      Seq(
+        IR.Connect(
+          sf(ref("io"), "out"),
+          IR.DoPrim(IR.PrimOp.Mux, Seq(sf(ref("io"), "sel"), sf(ref("io"), "a"), sf(ref("io"), "b")))
+        ),
+        IR.Connect(
+          sf(ref("io"), "cat"),
+          IR.DoPrim(IR.PrimOp.Cat, Seq(sf(ref("io"), "a"), sf(ref("io"), "b")))
+        ),
+        IR.Connect(
+          sf(ref("io"), "out"),
+          IR.DoPrim(IR.PrimOp.AsUInt, Seq(ref("io")))
+        ),
+      )
+    )
+  )
+  println("=" * 50)
+  println("Mux and Concat Check:")
+  println(rendered)
+  assertDesigns("Mux and Concat Check", d, expected)
+  println("=" * 50)
+
 @main def demo(): Unit =
   simple_module_test()
   list_operation_check()
@@ -1371,4 +1427,5 @@ def queue(): Unit =
   comparison_operator_check()
   vec_check()
   queue()
+  mux_and_concat_check()
 // mixed_vec()

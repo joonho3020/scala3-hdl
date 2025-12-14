@@ -51,8 +51,9 @@
     - [x] on two hardware data : add, subtract, mult, division, remainder, less than, less or equal to, greater than, greater or equal to, equal, not equal, dynamic shift left, dynamic shift right, and, or, xor, concatentate
     - [x] on one hardware data and one integer: pad, shift left, shift right, head, tail
     - [x] on one hardware data and two integers: bits
-    - [ ] Concatenation, bitwise or/and reduction, mux implementation
+    - [x] Concatenation, bitwise or/and reduction, mux implementation
 - [x] Test against reference IR
+- [x] Conversion operators
 - [ ] Memories
     - Make the port API explicit (no inferred ports)
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
