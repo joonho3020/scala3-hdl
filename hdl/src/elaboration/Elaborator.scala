@@ -191,7 +191,11 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
 
   private def emitChirrtlExpr(e: IR.Expr): String = e match
     case IR.Ref(name)       => name.value
-    case IR.Literal(value)  => value.value
+    case IR.Literal(value)  =>
+      value.value match
+        case "Bool(true)" => "UInt<1>(0h1)"
+        case "Bool(false)" => "UInt<1>(0h0)"
+        case other => other
     case IR.DontCare        => "invalidate"
     case IR.SubIndex(expr, value) => s"${emitChirrtlExpr(expr)}[$value]"
     case IR.SubAccess(expr, index) => s"${emitChirrtlExpr(expr)}[${emitChirrtlExpr(index)}]"
