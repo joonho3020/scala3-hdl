@@ -81,15 +81,15 @@ private[hdl] object ModuleOps:
     mod.register(t, None)
     t
 
-  def wireInit[T <: HWData](t: T, init: T, name: Option[String], mod: Module): T =
-    val wireName = mod.getBuilder.allocateName(name, "wireinit")
+  def wireInit[T <: HWData](t: T, name: Option[String], mod: Module): T =
+    val initExpr = exprFor(t, mod)
     val inst = HWAggregate.cloneData(t)
+    val wireName = mod.getBuilder.allocateName(name, "wireinit")
     inst.setNodeKind(NodeKind.Wire)
     mod.register(inst, Some(wireName))
 
     val clockExpr = exprFor(mod.getImplicitClock, mod)
     val resetExpr = exprFor(mod.getImplicitReset, mod)
-    val initExpr = exprFor(init, mod)
     mod.getBuilder.addStmt(IR.WireInit(IR.Identifier(wireName), irTypeOf(inst), clockExpr, resetExpr, initExpr))
     inst
 

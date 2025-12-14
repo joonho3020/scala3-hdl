@@ -1,11 +1,52 @@
 package riscv
 
-import java.io.{ByteArrayOutputStream, PrintStream}
-import java.nio.file.{Files, Path}
-import hdl.CacheableModule
-import hdl.StableHash
-import hdl.Elaborator
-import hdl.Module
+import java.io.{File, PrintWriter}
+import scala.sys.process.*
+import hdl._
+
+def writeChirrtl(filename: String, content: String): Unit =
+  val dir = new File("test-outputs/chirrtl")
+  dir.mkdirs()
+  val pw = new PrintWriter(new File(dir, filename))
+  pw.write(content)
+  pw.close()
+
+def runFirtool(firFile: String): (Int, String) =
+  val cmd = Seq(
+    "firtool",
+    "--format=fir",
+    "--verify-each=true",
+    "--split-verilog",
+    "-o", "test-outputs/verilog",
+    s"test-outputs/chirrtl/$firFile"
+  )
+  val output = new StringBuilder
+  val exitCode = cmd.!(ProcessLogger(s => output.append(s + "\n"), s => output.append(s + "\n")))
+  (exitCode, output.toString)
 
 @main def main(): Unit =
-  println("Hello world")
+  val p = CoreParams(
+    pcBits = 64,
+    xlenBits = 64,
+    coreWidth = 2,
+    cacheLineBytes = 64,
+    icacheFetchBytes = 2 * 4,
+    instBytes = 4
+  )
+
+  val frontend = new Frontend(p)
+
+
+
+
+  val elaborator = new Elaborator
+  val designs = elaborator.elaborate(frontend)
+
+  val top_name = frontend.moduleName
+  val top_name_hashed = designs.map(_.name.value).filter(_.contains(top_name)).head
+
+  val chirrtl = elaborator.emitChirrtl(designs, top_name_hashed)
+  val fir_filename = s"${top_name}.fir"
+
+  writeChirrtl(fir_filename, chirrtl)
+  val (exitCode, output) = runFirtool(fir_filename)
