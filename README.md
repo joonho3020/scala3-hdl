@@ -792,15 +792,82 @@ In theory, we can add support for important Scala library types in the future fo
 
 ---
 
----
+## SRAMs
 
-users should be able to specify the port interface
-behavioral makes programming easy, but also a nightmare for the designers to reason about things like portcount
+In chisel, SRAMs were modeled as SyncReadMemory which was a behavioral model of SRAMs.
+This made programming easy, but also caused problems as the number of read, write, readwrite ports were inferred by the compiler.
+Often times, a read and a write port could be merged into a readwrite port by the compiler if it could prove that the enable signals of a read and write port are mutually exclusive.
+However, this analysis is pessimistic in nature, i.e. there are cases when the mutual exculsivity can't be proved by static analysis of the enable signals.
+We would like to avoid these problems in the new HDL frontend.
+
+On the other hand, we we could implement a fully structural SRAM implementation like below:
 
 ```scala
-class SRAM[T <: HWData]
+// Declare a 2 read, 2 write, 2 read-write ported SRAM with 8-bit UInt data members
+val mem = SRAM(1024, UInt(8.W), 2, 2, 2)
+
+// Whenever we want to read from the first read port
+mem.readPorts(0).address := 100.U
+mem.readPorts(0).enable := true.B
+
+// Read data is returned one cycle after enable is driven
+val foo = WireInit(UInt(8.W), mem.readPorts(0).data)
+
+// Whenever we want to write to the second write port
+mem.writePorts(1).address := 5.U
+mem.writePorts(1).enable := true.B
+mem.writePorts(1).data := 12.U
+
+// Whenever we want to read or write to the third read-write port
+// Write:
+mem.readwritePorts(2).address := 5.U
+mem.readwritePorts(2).enable := true.B
+mem.readwritePorts(2).isWrite := true.B
+mem.readwritePorts(2).writeData := 100.U
+
+// Read:
+mem.readwritePorts(2).address := 5.U
+mem.readwritePorts(2).enable := true.B
+mem.readwritePorts(2).isWrite := false.B
+val bar = WireInit(UInt(8.W), mem.readwritePorts(2).readData)
+```
+
+This makes everything explicit at the cost of some ergonomics.
+Also, under the hood, `SRAM`s are just a wrapper around `SyncReadMemory`.
+So it's more of a hacked on solution rather than a clean one.
+
+I think we can do better than both approaches:
+
+```scala
+class SRAM[T <: HWData](x: T, entries: Int)(portInfo: ???)
 
 
+val sram = SRAM(UInt(3.W), 4)(num_read_ports: Int, num_write_ports: Int, num_readwrite_ports: Int)
 
+when (???)
+    sram.readport(0).read(addr)
+otherwise
+    sram.readport(0).read(addr)
+
+sram.readport(0).read(addr)
+
+sram.readport(1).read(addr)
+
+sram.write(2).write(addr, data)
+
+when (read)
+    sram.readwrite(3).read(addr)
+otherwise
+    sram.readwrite(3).write(addr)
+
+
+val port_id = Reg(UInt(...))
+... some logic to update port_id
+
+sram.readwrite(port_id).read(addr)
 
 ```
+
+If we have APIs that look something like the above, we can use `read`, `write` functions to implicitly set the `enable`, `address`, `writedata` signals.
+Furthermore, we can add port arbitration logic by enabling us to index into ports by hardware constructs (`port_id` in the above example).
+Finally, the SRAMs are still structural in nature.
