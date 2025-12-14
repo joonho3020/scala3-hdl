@@ -300,7 +300,14 @@ extension (lhs: UInt)
     ModuleOps.prim1Op1Const(UInt(), IR.PrimOp.Tail, lhs, n, m)
 
   def bits(hi: Int, lo: Int)(using m: Module): UInt =
-    ModuleOps.prim1Op2Const(UInt(), IR.PrimOp.Tail, lhs, lo, hi, m)
+    ModuleOps.prim1Op2Const(UInt(), IR.PrimOp.Bits, lhs, hi, lo, m)
+
+  def apply(idx: Int)(using m: Module): UInt =
+    ModuleOps.prim1Op2Const(UInt(), IR.PrimOp.Bits, lhs, idx, idx, m)
+
+  def apply(idx: UInt)(using m: Module): UInt =
+    val shifted = ModuleOps.prim2Op(UInt(), IR.PrimOp.DShr, lhs, idx, m)
+    ModuleOps.prim1Op2Const(UInt(), IR.PrimOp.Bits, shifted, 0, 0, m)
 
   def asBool(using m: Module): Bool =
     ModuleOps.prim1Op(Bool(), IR.PrimOp.AsBool, lhs, m)

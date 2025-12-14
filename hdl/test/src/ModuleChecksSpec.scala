@@ -32,6 +32,8 @@ private def and(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.And, Seq(
 private def eqv(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Eq, Seq(a, b))
 private def neqv(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Neq, Seq(a, b))
 private def not(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
+private def bits(a: IR.Expr, hi: Int, lo: Int): IR.Expr = IR.DoPrim(IR.PrimOp.Bits, Seq(a), Seq(hi, lo))
+private def dshr(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.DShr, Seq(a, b))
 private def reverseBits(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
 private def rem(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Rem, Seq(a, b))
 
@@ -1352,6 +1354,54 @@ def queue_check(): Unit =
   assertDesigns("Queue Check nested bundle", d2, expected2)
   println("=" * 50)
 
+def bit_select_check(): Unit =
+  final case class BitSelectIO(in: UInt, idx: UInt, constSel: UInt, dynSel: UInt) extends Bundle[BitSelectIO]
+  class BitSelect extends Module:
+    given Module = this
+    val io = IO(BitSelectIO(
+      in = Input(UInt(Width(4))),
+      idx = Input(UInt(Width(2))),
+      constSel = Output(UInt(Width(1))),
+      dynSel = Output(UInt(Width(1)))
+    ))
+    io.constSel := io.in(2)
+    io.dynSel := io.in(io.idx)
+
+  val elaborator = new Elaborator
+  val m = new BitSelect
+  val d = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(d)
+  val expected = Seq(
+    module(
+      "BitSelect",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("in", true, u(4)),
+          ("idx", true, u(2)),
+          ("constSel", false, u(1)),
+          ("dynSel", false, u(1))
+        ))
+      ),
+      Seq(
+        IR.Connect(
+          sf(ref("io"), "constSel"),
+          bits(sf(ref("io"), "in"), 2, 2)
+        ),
+        IR.Connect(
+          sf(ref("io"), "dynSel"),
+          bits(dshr(sf(ref("io"), "in"), sf(ref("io"), "idx")), 0, 0)
+        )
+      )
+    )
+  )
+  println("=" * 50)
+  println("Bit Select Check:")
+  println(rendered)
+  assertDesigns("Bit Select Check", d, expected)
+  println("=" * 50)
+
 def bitwise_reverse_check(): Unit =
   final case class ReverseIO(in: UInt, out: UInt) extends Bundle[ReverseIO]
   class ReverseModule extends Module:
@@ -1467,6 +1517,7 @@ object ModuleChecksSpec extends TestSuite:
     test("comparison_operator_check") { comparison_operator_check() }
     test("vec_check") { vec_check() }
     test("queue_check") { queue_check() }
+    test("bit_select_check") { bit_select_check() }
     test("bitwise_reverse_check") { bitwise_reverse_check() }
     test("mux_and_concat_check") { mux_and_concat_check() }
   }
