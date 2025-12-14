@@ -57,21 +57,21 @@ object UOp:
       pc = UInt(p.pcBits.W),
       inst = UInt(p.xlenBits.W))
 
-case class CoreIf(insts: Vec[Valid[UOp]]) extends Bundle[CoreIf]
+case class FetchIf(insts: Vec[Valid[UOp]]) extends Bundle[FetchIf]
 
-object CoreIf:
-  def apply(p: CoreParams): CoreIf =
-    CoreIf(
+object FetchIf:
+  def apply(p: CoreParams): FetchIf =
+    FetchIf(
       insts = Vec(Seq.fill(p.coreWidth)(Valid(UOp(p))))
     )
 
-case class FrontendIf(icache: ICacheIf, core: CoreIf) extends Bundle[FrontendIf]
+case class FrontendIf(icache: ICacheIf, core: FetchIf) extends Bundle[FrontendIf]
 
 object FrontendIf:
   def apply(p: CoreParams): FrontendIf =
     FrontendIf(
       icache = ICacheIf(p),
-      core = CoreIf(p)
+      core = FetchIf(p)
     )
 
 trait CoreCacheable(p: CoreParams) extends CacheableModule:
@@ -105,11 +105,13 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
 
     // Stage 2 - icache resp
     val s2_vpc = RegNext(s1_vpc)
+    val s2_valid = Reg(Bool())
     val s2_fetch_mask = p.fetchMask(s2_vpc)
+    s2_valid := DontCare
 
     io.core.insts.zipWithIndex.foreach((uop, idx) => {
 // uop.valid := io.icache.resp.insts(idx).valid && s2_fetch_mask(idx)
-      uop.valid := io.icache.resp.insts(idx).valid
+      uop.valid := s2_valid && io.icache.resp.insts(idx).valid
       uop.bits.inst := io.icache.resp.insts(idx).bits
       uop.bits.pc   := s2_vpc + (p.instBytes * idx).U
     })
