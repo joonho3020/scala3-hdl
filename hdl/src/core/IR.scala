@@ -16,7 +16,10 @@ private[hdl] object IR:
       Cat, Pad, Shl, Shr, Head, Tail, Bits,
       Mux, AsUInt, AsBool
 
-    def opName: String = this.productPrefix.toLowerCase()
+    def opName: String = this match
+      case AsUInt => "asUInt"
+      case AsBool => "asBool"
+      case _ => this.productPrefix.toLowerCase()
 
   enum ReadUnderWrite:
     case Undefined, Old, New

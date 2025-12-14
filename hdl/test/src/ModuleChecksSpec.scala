@@ -1345,7 +1345,9 @@ def queue_check(): Unit =
         ),
         IR.When(
           and(enqFire2, deqFire2),
-          Seq.empty,
+          Seq(
+            IR.Skip
+          ),
           Seq(
             IR.When(
               and(enqFire2, eqv(rem(add(ref("enq_ptr"), lit("UInt(1)")), lit("UInt(4)")), ref("deq_ptr"))),
