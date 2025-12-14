@@ -56,7 +56,8 @@
 - [x] Conversion operators
 - [x] Memories
     - Make the port API explicit (no inferred ports)
-- [ ] CHIRRTL emission
+- [x] CHIRRTL emission
+- [ ] Enums
 - [ ] Switch statements
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
 - [ ] Mixed vectors
