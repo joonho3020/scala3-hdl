@@ -989,35 +989,6 @@ object ChirrtlEmissionSpec extends TestSuite:
     (exitCode, output.toString)
 
   val tests = Tests {
-    test("Adder CHIRRTL emission") {
-      val elaborator = new Elaborator(log = _ => ())
-      val adder = new Adder(2)
-      val designs = elaborator.elaborate(adder)
-      val chirrtl = elaborator.emitChirrtl(designs, "Adder")
-      println("=" * 50)
-      println("Adder CHIRRTL:")
-      println(chirrtl)
-      writeChirrtl("Adder.fir", chirrtl)
-      assert(chirrtl.contains("FIRRTL version 3.3.0"))
-      assert(chirrtl.contains("circuit Adder :"))
-      assert(chirrtl.contains("module Adder :"))
-    }
-
-    test("GCD CHIRRTL emission") {
-      val elaborator = new Elaborator(log = _ => ())
-      val gcd = new GCD
-      val designs = elaborator.elaborate(gcd)
-      val chirrtl = elaborator.emitChirrtl(designs, "GCD")
-      println("=" * 50)
-      println("GCD CHIRRTL:")
-      println(chirrtl)
-      writeChirrtl("GCD.fir", chirrtl)
-      assert(chirrtl.contains("FIRRTL version 3.3.0"))
-      assert(chirrtl.contains("circuit GCD :"))
-      assert(chirrtl.contains("when"))
-      assert(chirrtl.contains("else :"))
-    }
-
     test("Adder firtool validation") {
       val elaborator = new Elaborator(log = _ => ())
       val adder = new Adder(2)
@@ -1042,18 +1013,24 @@ object ChirrtlEmissionSpec extends TestSuite:
       if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
-    test("BitSel CHIRRTL emission") {
+    test("BitSel1 CHIRRTL emission") {
       val elaborator = new Elaborator(log = _ => ())
       val mod = new BitSel1
       val designs = elaborator.elaborate(mod)
       val chirrtl = elaborator.emitChirrtl(designs, "BitSel1")
       writeChirrtl("BitSel1.fir", chirrtl)
-      assert(chirrtl.contains("circuit BitSel1 :"))
+      val (exitCode, output) = runFirtool("BitSel1.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+    }
+
+    test("BitSel2 CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
       val mod2 = new BitSel2
       val designs2 = elaborator.elaborate(mod2)
       val chirrtl2 = elaborator.emitChirrtl(designs2, "BitSel2")
       writeChirrtl("BitSel2.fir", chirrtl2)
-      assert(chirrtl2.contains("circuit BitSel2 :"))
+      val (exitCode, output) = runFirtool("BitSel2.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
     test("Cache CHIRRTL emission") {
@@ -1062,7 +1039,8 @@ object ChirrtlEmissionSpec extends TestSuite:
       val designs = elaborator.elaborate(cache)
       val chirrtl = elaborator.emitChirrtl(designs, "Cache")
       writeChirrtl("Cache.fir", chirrtl)
-      assert(chirrtl.contains("circuit Cache :"))
+      val (exitCode, output) = runFirtool("Cache.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
     test("Const CHIRRTL emission") {
@@ -1071,7 +1049,8 @@ object ChirrtlEmissionSpec extends TestSuite:
       val designs = elaborator.elaborate(mod)
       val chirrtl = elaborator.emitChirrtl(designs, "Const")
       writeChirrtl("Const.fir", chirrtl)
-      assert(chirrtl.contains("circuit Const :"))
+      val (exitCode, output) = runFirtool("Const.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
     test("Counter CHIRRTL emission") {
@@ -1080,7 +1059,8 @@ object ChirrtlEmissionSpec extends TestSuite:
       val designs = elaborator.elaborate(mod)
       val chirrtl = elaborator.emitChirrtl(designs, "Counter")
       writeChirrtl("Counter.fir", chirrtl)
-      assert(chirrtl.contains("circuit Counter :"))
+      val (exitCode, output) = runFirtool("Counter.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
     test("DecoupledMux CHIRRTL emission") {
@@ -1089,7 +1069,8 @@ object ChirrtlEmissionSpec extends TestSuite:
       val designs = elaborator.elaborate(mod)
       val chirrtl = elaborator.emitChirrtl(designs, "DecoupledMux")
       writeChirrtl("DecoupledMux.fir", chirrtl)
-      assert(chirrtl.contains("circuit DecoupledMux :"))
+      val (exitCode, output) = runFirtool("DecoupledMux.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
     test("DynamicIndexing CHIRRTL emission") {
@@ -1099,6 +1080,8 @@ object ChirrtlEmissionSpec extends TestSuite:
       val chirrtl = elaborator.emitChirrtl(designs, "DynamicIndexing")
       writeChirrtl("DynamicIndexing.fir", chirrtl)
       assert(chirrtl.contains("circuit DynamicIndexing :"))
+      val (exitCode, output) = runFirtool("DynamicIndexing.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
     test("Fir CHIRRTL emission") {
@@ -1107,7 +1090,8 @@ object ChirrtlEmissionSpec extends TestSuite:
       val designs = elaborator.elaborate(mod)
       val chirrtl = elaborator.emitChirrtl(designs, "Fir")
       writeChirrtl("Fir.fir", chirrtl)
-      assert(chirrtl.contains("circuit Fir :"))
+      val (exitCode, output) = runFirtool("Fir.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
     test("Hierarchy CHIRRTL emission") {
@@ -1116,7 +1100,8 @@ object ChirrtlEmissionSpec extends TestSuite:
       val designs = elaborator.elaborate(mod)
       val chirrtl = elaborator.emitChirrtl(designs, "Hierarchy")
       writeChirrtl("Hierarchy.fir", chirrtl)
-      assert(chirrtl.contains("circuit Hierarchy :"))
+      val (exitCode, output) = runFirtool("Hierarchy.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
     test("NestedWhen CHIRRTL emission") {
@@ -1125,7 +1110,8 @@ object ChirrtlEmissionSpec extends TestSuite:
       val designs = elaborator.elaborate(nested)
       val chirrtl = elaborator.emitChirrtl(designs, "NestedWhen")
       writeChirrtl("NestedWhen.fir", chirrtl)
-      assert(chirrtl.contains("circuit NestedWhen :"))
+      val (exitCode, output) = runFirtool("NestedWhen.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
     test("NestedWhen auxiliary modules CHIRRTL emission") {
@@ -1148,7 +1134,8 @@ object ChirrtlEmissionSpec extends TestSuite:
         val designs = elaborator.elaborate(m)
         val chirrtl = elaborator.emitChirrtl(designs, m.moduleName)
         writeChirrtl(s"${m.moduleName}.fir", chirrtl)
-        assert(chirrtl.contains(s"circuit ${m.moduleName} :"))
+        val (exitCode, output) = runFirtool(s"${m.moduleName}.fir")
+        if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
       }
     }
 
@@ -1158,21 +1145,28 @@ object ChirrtlEmissionSpec extends TestSuite:
       val designs = elaborator.elaborate(mod)
       val chirrtl = elaborator.emitChirrtl(designs, "PointerChasing")
       writeChirrtl("PointerChasing.fir", chirrtl)
-      assert(chirrtl.contains("circuit PointerChasing :"))
+      val (exitCode, output) = runFirtool(s"PointerChasing.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
-    test("Queue CHIRRTL emission") {
+    test("Queue1 CHIRRTL emission") {
       val elaborator = new Elaborator(log = _ => ())
       val mod = new MyQueue(2)
       val designs = elaborator.elaborate(mod)
       val chirrtl = elaborator.emitChirrtl(designs, "MyQueue")
       writeChirrtl("MyQueue.fir", chirrtl)
-      assert(chirrtl.contains("circuit MyQueue :"))
+      val (exitCode, output) = runFirtool(s"MyQueue.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+    }
+
+    test("Queue2 CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
       val custom = new MyCustomQueue(UInt(Width(3)), 4)
       val designs2 = elaborator.elaborate(custom)
       val chirrtl2 = elaborator.emitChirrtl(designs2, "MyCustomQueue")
       writeChirrtl("MyCustomQueue.fir", chirrtl2)
-      assert(chirrtl2.contains("circuit MyCustomQueue :"))
+      val (exitCode, output) = runFirtool(s"MyCustomQueue.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
     test("RegFile CHIRRTL emission") {
@@ -1181,12 +1175,18 @@ object ChirrtlEmissionSpec extends TestSuite:
       val designs = elaborator.elaborate(mod)
       val chirrtl = elaborator.emitChirrtl(designs, "RegFile")
       writeChirrtl("RegFile.fir", chirrtl)
-      assert(chirrtl.contains("circuit RegFile :"))
+      val (exitCode, output) = runFirtool(s"RegFile.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+    }
+
+    test("NestedIndex CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
       val nested = new NestedIndex
       val designs2 = elaborator.elaborate(nested)
       val chirrtl2 = elaborator.emitChirrtl(designs2, "NestedIndex")
       writeChirrtl("NestedIndex.fir", chirrtl2)
-      assert(chirrtl2.contains("circuit NestedIndex :"))
+      val (exitCode, output) = runFirtool(s"NestedIndex.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
     test("ShiftRegister CHIRRTL emission") {
@@ -1195,7 +1195,8 @@ object ChirrtlEmissionSpec extends TestSuite:
       val designs = elaborator.elaborate(mod)
       val chirrtl = elaborator.emitChirrtl(designs, "TopModule")
       writeChirrtl("TopModule.fir", chirrtl)
-      assert(chirrtl.contains("circuit TopModule :"))
+      val (exitCode, output) = runFirtool(s"TopModule.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
 
     test("SRAM CHIRRTL emission") {
@@ -1211,7 +1212,8 @@ object ChirrtlEmissionSpec extends TestSuite:
         val designs = elaborator.elaborate(m)
         val chirrtl = elaborator.emitChirrtl(designs, m.moduleName)
         writeChirrtl(s"${m.moduleName}.fir", chirrtl)
-        assert(chirrtl.contains(s"circuit ${m.moduleName} :"))
+        val (exitCode, output) = runFirtool(s"${m.moduleName}.fir")
+        if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
       }
     }
   }
