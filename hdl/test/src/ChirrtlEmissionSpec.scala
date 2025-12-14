@@ -3,6 +3,13 @@ package hdl
 import utest.*
 import java.io.{File, PrintWriter}
 import scala.sys.process.*
+import hdl.ModuleOps.*
+
+def boolLit(value: Boolean): Bool =
+  val b = Bool()
+  b.setNodeKind(NodeKind.Lit)
+  b.setLitVal(value)
+  b
 
 case class AdderIO(a: UInt, b: UInt, c: UInt) extends Bundle[AdderIO]
 
@@ -51,6 +58,914 @@ class GCD extends Module:
 
   io.outputGCD := x
   io.outputValid := y === 0.U
+
+case class BitSel1IO(in: UInt, out_hi: UInt, out_lo: UInt) extends Bundle[BitSel1IO]
+
+class BitSel1 extends Module:
+  given Module = this
+  val io = IO(BitSel1IO(
+    Input(UInt(Width(8))),
+    Output(UInt(Width(4))),
+    Output(UInt(Width(4)))
+  ))
+  io.out_hi := ModuleOps.prim1Op2Const(UInt(Width(4)), IR.PrimOp.Bits, io.in, 7, 4, summon[Module])
+  io.out_lo := ModuleOps.prim1Op2Const(UInt(Width(4)), IR.PrimOp.Bits, io.in, 3, 0, summon[Module])
+
+case class BitSel2IO(in: UInt, bit3: Bool) extends Bundle[BitSel2IO]
+
+class BitSel2 extends Module:
+  given Module = this
+  val io = IO(BitSel2IO(
+    Input(UInt(Width(8))),
+    Output(Bool())
+  ))
+  io.bit3 := io.in(3).asBool
+
+case class DataMemIO(
+  writeEnable: Bool,
+  writeAddr: UInt,
+  writeData: UInt,
+  readAddr: UInt,
+  readData: UInt
+) extends Bundle[DataMemIO]
+
+class DataMem(depth: Int, width: Int) extends Module:
+  given Module = this
+  val io = IO(DataMemIO(
+    Input(Bool()),
+    Input(UInt(Width(log2Ceil(depth)))),
+    Input(UInt(Width(width))),
+    Input(UInt(Width(log2Ceil(depth)))),
+    Output(UInt(Width(width)))
+  ))
+  val mem = SRAM(UInt(Width(width)), depth)(1, 1, 0)
+  io.readData := mem.readPorts(0).read(io.readAddr, !io.writeEnable)
+  when(io.writeEnable) {
+    mem.writePorts(0).write(io.writeAddr, io.writeData)
+  }
+
+case class CacheIO(
+  reqAddr: UInt,
+  reqRead: Bool,
+  reqWrite: Bool,
+  reqData: UInt,
+  respData: UInt,
+  respValid: Bool,
+  memAddr: UInt,
+  memRead: Bool,
+  memWrite: Bool,
+  memDataOut: UInt,
+  memDataIn: UInt
+) extends Bundle[CacheIO]
+
+class Cache(addrWidth: Int = 8, dataWidth: Int = 8, cacheSize: Int = 8) extends Module:
+  given Module = this
+  private val indexWidth = log2Ceil(cacheSize)
+  private val tagWidth = addrWidth - indexWidth - 2
+  val io = IO(CacheIO(
+    Input(UInt(Width(addrWidth))),
+    Input(Bool()),
+    Input(Bool()),
+    Input(UInt(Width(dataWidth))),
+    Output(UInt(Width(dataWidth))),
+    Output(Bool()),
+    Output(UInt(Width(addrWidth))),
+    Output(Bool()),
+    Output(Bool()),
+    Output(UInt(Width(dataWidth))),
+    Input(UInt(Width(dataWidth)))
+  ))
+  val tagMem = SRAM(UInt(Width(tagWidth)), cacheSize)(1, 1, 0)
+  val dataMem = Module(new DataMem(cacheSize, dataWidth))
+  val sIdle = 0.U(Width(2))
+  val sMemRead = 1.U(Width(2))
+  val sWait = 2.U(Width(2))
+  val state = RegInit(sIdle)
+  val reqTag = ModuleOps.prim1Op2Const(UInt(Width(tagWidth)), IR.PrimOp.Bits, io.reqAddr, addrWidth - 1, indexWidth + 2, summon[Module])
+  val reqIndex = ModuleOps.prim1Op2Const(UInt(Width(indexWidth)), IR.PrimOp.Bits, io.reqAddr, indexWidth + 1, 2, summon[Module])
+  val tagRead = tagMem.readPorts(0)
+  val tagWrite = tagMem.writePorts(0)
+  val storedTag = tagRead.read(reqIndex, boolLit(true))
+  io.respValid := boolLit(false)
+  io.respData := 0.U(Width(dataWidth))
+  io.memAddr := 0.U(Width(addrWidth))
+  io.memRead := boolLit(false)
+  io.memWrite := boolLit(false)
+  io.memDataOut := 0.U(Width(dataWidth))
+  dataMem.io.writeEnable := boolLit(false)
+  dataMem.io.writeAddr := reqIndex
+  dataMem.io.writeData := io.reqData
+  dataMem.io.readAddr := reqIndex
+  when(state === sIdle) {
+    val hit = (storedTag === reqTag) && (storedTag =/= 0.U(Width(tagWidth)))
+    when(hit) {
+      when(io.reqRead) {
+        io.respData := dataMem.io.readData
+        io.respValid := boolLit(true)
+      }
+      when(io.reqWrite) {
+        dataMem.io.writeEnable := boolLit(true)
+      }
+    }.otherwise {
+      state := sMemRead
+      io.memAddr := io.reqAddr
+      io.memRead := boolLit(true)
+    }
+  }.elsewhen(state === sMemRead) {
+    state := sWait
+  }.elsewhen(state === sWait) {
+    tagWrite.write(reqIndex, reqTag)
+    dataMem.io.writeEnable := boolLit(true)
+    dataMem.io.writeAddr := reqIndex
+    dataMem.io.writeData := io.memDataIn
+    io.respData := io.memDataIn
+    io.respValid := boolLit(true)
+    state := sIdle
+  }
+
+case class ConstIO(
+  input: UInt,
+  outSum: UInt,
+  outAnd: UInt,
+  outOr: UInt,
+  outXor: UInt
+) extends Bundle[ConstIO]
+
+class Const(length: Int) extends Module:
+  given Module = this
+  val io = IO(ConstIO(
+    Input(UInt(Width(8))),
+    Output(UInt(Width(8))),
+    Output(UInt(Width(8))),
+    Output(UInt(Width(8))),
+    Output(UInt(Width(8)))
+  ))
+  val constant1 = 42.U(Width(8))
+  val constant2 = 15.U(Width(8))
+  val constant3 = Lit(UInt(Width(8)))(BigInt("10101010", 2))
+  val a = io.input + constant1 + constant2
+  val b = (io.input + constant1) & constant3
+  val c = (io.input + constant1) | constant3
+  val d = (io.input + constant1) ^ constant3
+  io.outSum := RegNext(a)
+  io.outAnd := RegNext(b)
+  io.outOr := RegNext(c)
+  io.outXor := RegNext(d)
+
+case class CounterIO(start: Bool, out: UInt) extends Bundle[CounterIO]
+
+class Counter(length: Int) extends Module:
+  given Module = this
+  val io = IO(CounterIO(
+    Input(Bool()),
+    Output(UInt(Width(length)))
+  ))
+  val cntr = RegInit(0.U(Width(length)))
+  cntr := cntr + 1.U
+  io.out := cntr
+
+case class Agg(x: UInt, y: UInt) extends Bundle[Agg]
+case class DecoupledMuxIO(
+  a: Decoupled[Agg],
+  b: Decoupled[Agg],
+  c: Decoupled[Agg]
+) extends Bundle[DecoupledMuxIO]
+
+object DecoupledMuxIO:
+  def apply(): DecoupledMuxIO =
+    val agg = Agg(UInt(Width(2)), UInt(Width(2)))
+    DecoupledMuxIO(
+      Flipped(Decoupled(agg)),
+      Flipped(Decoupled(agg)),
+      Decoupled(agg)
+    )
+
+class DecoupledMux extends Module:
+  given Module = this
+  val io = IO(DecoupledMuxIO())
+  io.c.bits := io.b.bits
+  when(io.a.valid) {
+    io.c.bits := io.a.bits
+  }
+  io.c.valid := io.a.valid || io.b.valid
+  io.a.ready := io.c.ready
+  io.b.ready := io.c.ready && !io.a.valid
+
+case class OutputBundle(x: UInt, y: UInt) extends Bundle[OutputBundle]
+
+case class DynamicIndexingIO(addr: UInt, out: OutputBundle) extends Bundle[DynamicIndexingIO]
+
+class DynamicIndexing extends Module:
+  given Module = this
+  val io = IO(DynamicIndexingIO(
+    Input(UInt(Width(2))),
+    Output(OutputBundle(UInt(Width(2)), UInt(Width(3))))
+  ))
+  val arr_a = Reg(Vec.fill(4)(UInt(Width(3))))
+  val arr_b = Reg(Vec.fill(8)(OutputBundle(UInt(Width(2)), UInt(Width(3)))))
+  io.out := arr_b(arr_a(io.addr))
+
+case class FirIO(in: UInt, valid: Bool, out: UInt, consts: Vec[UInt]) extends Bundle[FirIO]
+
+object FirIO:
+  def apply(length: Int): FirIO =
+    FirIO(
+      Input(UInt(Width(4))),
+      Input(Bool()),
+      Output(UInt(Width(4))),
+      Input(Vec.fill(length)(UInt(Width(4))))
+    )
+
+class Fir(length: Int) extends Module:
+  given Module = this
+  val io = IO(FirIO(length))
+  val taps = Seq(io.in) ++ Seq.fill(io.consts.length - 1)(RegInit(0.U(Width(4))))
+  taps.zip(taps.tail).foreach { case (a, b) => when(io.valid) { b := a } }
+  io.out := taps.zip(io.consts.elems).map { case (a, b) => a * b }.reduce(_ + _)
+
+case class MyBundle(in: UInt, out: UInt) extends Bundle[MyBundle]
+
+class A extends Module:
+  given Module = this
+  val io = IO(MyBundle(Input(UInt(Width(2))), Output(UInt(Width(2)))))
+  io.out := RegNext(io.in)
+
+class C extends Module:
+  given Module = this
+  val io = IO(MyBundle(Input(UInt(Width(2))), Output(UInt(Width(2)))))
+  io.out := RegNext(io.in)
+
+class B extends Module:
+  given Module = this
+  val io = IO(MyBundle(Input(UInt(Width(2))), Output(UInt(Width(2)))))
+  val c = Module(new C)
+  c.io.in := io.in
+  io.out := RegNext(c.io.out)
+
+class Top extends Module:
+  given Module = this
+  val io = IO(MyBundle(Input(UInt(Width(2))), Output(UInt(Width(2)))))
+  val a = Module(new A)
+  a.io.in := io.in
+  val b = Module(new B)
+  b.io.in := a.io.out
+  io.out := b.io.out
+
+case class NestedWhenIO(a: UInt, b: UInt, c: UInt, sel: UInt, output: UInt) extends Bundle[NestedWhenIO]
+
+class NestedWhen extends Module:
+  given Module = this
+  val io = IO(NestedWhenIO(
+    Input(UInt(Width(2))),
+    Input(UInt(Width(2))),
+    Input(UInt(Width(2))),
+    Input(UInt(Width(2))),
+    Output(UInt(Width(2)))
+  ))
+  when(io.sel === 0.U(Width(2))) {
+    io.output := io.a
+  }.elsewhen(io.sel === 1.U(Width(2))) {
+    io.output := io.b
+  }.otherwise {
+    io.output := io.c
+  }
+
+case class LCS1IO(out: UInt) extends Bundle[LCS1IO]
+
+class LCS1 extends Module:
+  given Module = this
+  val io = IO(LCS1IO(
+    Output(UInt(Width(8)))
+  ))
+  val w = Wire(UInt(Width(8)))
+  w := 1.U(Width(8))
+  w := 2.U(Width(8))
+  io.out := w
+
+case class LCS2IO(cond: Bool, out: UInt) extends Bundle[LCS2IO]
+
+class LCS2 extends Module:
+  given Module = this
+  val io = IO(LCS2IO(
+    Input(Bool()),
+    Output(UInt(Width(8)))
+  ))
+  val reg = RegInit(0.U(Width(8)))
+  when(io.cond) {
+    reg := 42.U(Width(8))
+  }
+  reg := 99.U(Width(8))
+  io.out := reg
+
+case class LCS3IO(in: UInt, out: UInt) extends Bundle[LCS3IO]
+
+class LCS3 extends Module:
+  given Module = this
+  val io = IO(LCS3IO(
+    Input(UInt(Width(8))),
+    Output(UInt(Width(8)))
+  ))
+  val result = Wire(UInt(Width(8)))
+  result := 0.U(Width(8))
+  when(io.in === 1.U(Width(8))) {
+    result := 1.U(Width(8))
+    when(io.in === 1.U(Width(8))) {
+      result := 2.U(Width(8))
+    }
+  }
+  io.out := result
+
+case class LCS4IO(sel: UInt, out: UInt) extends Bundle[LCS4IO]
+
+class LCS4 extends Module:
+  given Module = this
+  val io = IO(LCS4IO(
+    Input(UInt(Width(2))),
+    Output(UInt(Width(8)))
+  ))
+  val out = Wire(UInt(Width(8)))
+  out := 0.U(Width(8))
+  when(io.sel === 0.U(Width(2))) { out := 10.U(Width(8)) }
+  when(io.sel === 1.U(Width(2))) { out := 20.U(Width(8)) }
+  when(io.sel === 2.U(Width(2))) { out := 30.U(Width(8)) }
+  io.out := out
+
+case class LCS5IO(a: Bool, b: Bool, c: Bool, out: UInt) extends Bundle[LCS5IO]
+
+class LCS5 extends Module:
+  given Module = this
+  val io = IO(LCS5IO(
+    Input(Bool()),
+    Input(Bool()),
+    Input(Bool()),
+    Output(UInt(Width(8)))
+  ))
+  val w = Wire(UInt(Width(8)))
+  w := 0.U(Width(8))
+  when(io.a) {
+    w := 1.U(Width(8))
+    when(io.b) {
+      w := 2.U(Width(8))
+      when(io.c) {
+        w := 3.U(Width(8))
+      }
+    }
+  }
+  io.out := w
+
+case class XY(x: UInt, y: UInt) extends Bundle[XY]
+case class LCS6IO(sel: UInt, out: XY) extends Bundle[LCS6IO]
+
+class LCS6 extends Module:
+  given Module = this
+  val io = IO(LCS6IO(
+    Input(UInt(Width(2))),
+    Output(XY(UInt(Width(8)), UInt(Width(8))))
+  ))
+  val temp = Wire(XY(UInt(Width(8)), UInt(Width(8))))
+  temp.x := 0.U(Width(8))
+  temp.y := 0.U(Width(8))
+  when(io.sel === 0.U(Width(2))) {
+    temp.x := 10.U(Width(8))
+  }.elsewhen(io.sel === 1.U(Width(2))) {
+    temp.y := 20.U(Width(8))
+  }.otherwise {
+    temp.x := 30.U(Width(8))
+    temp.y := 40.U(Width(8))
+  }
+  temp.x := 55.U(Width(8))
+  io.out := temp
+
+case class LCS7Inner(a: UInt, b: UInt) extends Bundle[LCS7Inner]
+case class LCS7IO(sel: Bool, out: LCS7Inner) extends Bundle[LCS7IO]
+
+class LCS7 extends Module:
+  given Module = this
+  val io = IO(LCS7IO(
+    Input(Bool()),
+    Output(LCS7Inner(UInt(Width(8)), UInt(Width(8))))
+  ))
+  val my_wire = Wire(LCS7Inner(UInt(Width(8)), UInt(Width(8))))
+  my_wire.a := 0.U(Width(8))
+  my_wire.b := 0.U(Width(8))
+  when(io.sel) {
+    my_wire.a := 10.U(Width(8))
+    my_wire.b := 20.U(Width(8))
+  }
+  my_wire.b := 99.U(Width(8))
+  io.out := my_wire
+
+case class LCS8IO(
+  a: UInt,
+  b: UInt,
+  c: UInt,
+  d: UInt,
+  sel: UInt,
+  output: UInt,
+  output_2: UInt
+) extends Bundle[LCS8IO]
+
+class LCS8 extends Module:
+  given Module = this
+  val io = IO(LCS8IO(
+    Input(UInt(Width(2))),
+    Input(UInt(Width(2))),
+    Input(UInt(Width(2))),
+    Input(UInt(Width(2))),
+    Input(UInt(Width(2))),
+    Output(UInt(Width(2))),
+    Output(UInt(Width(2)))
+  ))
+  io.output := DontCare
+  when(io.sel === 0.U(Width(2))) {
+    io.output := io.b
+    io.output := io.a
+  }.elsewhen(io.sel === 1.U(Width(2))) {
+    io.output := io.a
+    io.output := io.b
+  }.otherwise {
+    when(io.sel === 2.U(Width(2))) {
+      io.output := io.d
+      io.output := io.c
+    }
+    io.output := io.c
+    io.output := io.d
+  }
+  when(io.sel === 3.U(Width(2))) {
+    io.output_2 := io.c
+    io.output_2 := io.d
+    io.output_2 := io.b
+    io.output_2 := io.a
+  }
+  io.output_2 := io.c
+  io.output_2 := io.d
+
+case class LastConnectSemantics2IO(
+  a: UInt,
+  b: UInt,
+  c: UInt,
+  d: UInt,
+  sel: UInt,
+  output: UInt,
+  output_2: UInt
+) extends Bundle[LastConnectSemantics2IO]
+
+class LastConnectSemantics2 extends Module:
+  given Module = this
+  val io = IO(LastConnectSemantics2IO(
+    Input(UInt(Width(2))),
+    Input(UInt(Width(2))),
+    Input(UInt(Width(2))),
+    Input(UInt(Width(2))),
+    Input(UInt(Width(2))),
+    Output(UInt(Width(2))),
+    Output(UInt(Width(2)))
+  ))
+  io.output := DontCare
+  when(io.sel === 0.U(Width(2))) {
+    io.output := io.a
+  }.elsewhen(io.sel === 1.U(Width(2))) {
+    io.output := io.b
+  }.otherwise {
+    when(io.sel === 2.U(Width(2))) {
+      io.output := io.c
+    }
+    io.output := io.d
+  }
+  when(io.sel === 3.U(Width(2))) {
+    io.output_2 := io.a
+  }
+  io.output_2 := io.c
+
+case class WBdl(a: UInt, b: Vec[UInt]) extends Bundle[WBdl]
+case class X(c: Vec[WBdl], d: UInt, e: Decoupled[UInt]) extends Bundle[X]
+case class Y(e: X, f: Vec[UInt]) extends Bundle[Y]
+case class Z(g: Vec[Y], h: Vec[Y]) extends Bundle[Z]
+
+object Z:
+  def apply(): Z =
+    Z(
+      Vec.fill(2)(
+        Y(
+          X(
+            Vec.fill(2)(
+              WBdl(
+                UInt(Width(2)),
+                Flipped(Vec.fill(2)(UInt(Width(3))))
+              )
+            ),
+            Flipped(UInt(Width(3))),
+            Decoupled(UInt(Width(2)))
+          ),
+          Vec.fill(3)(UInt(Width(2)))
+        )
+      ),
+      Flipped(Vec.fill(2)(
+        Y(
+          X(
+            Vec.fill(2)(
+              WBdl(
+                UInt(Width(2)),
+                Flipped(Vec.fill(2)(UInt(Width(3))))
+              )
+            ),
+            Flipped(UInt(Width(3))),
+            Decoupled(UInt(Width(2)))
+          ),
+          Vec.fill(3)(UInt(Width(2)))
+        )
+      ))
+    )
+
+class NestedBundleModule extends Module:
+  given Module = this
+  val io = IO(Z())
+  val reg = RegNext(io.h)
+  io.g := reg
+
+case class WireRegInsideWhenIO(a: UInt, b: UInt, out: UInt) extends Bundle[WireRegInsideWhenIO]
+
+class WireRegInsideWhen extends Module:
+  given Module = this
+  val io = IO(WireRegInsideWhenIO(
+    Input(UInt(Width(2))),
+    Input(UInt(Width(2))),
+    Output(UInt(Width(2)))
+  ))
+  when(io.a =/= io.b) {
+    val out = Wire(UInt(Width(2)))
+    out := io.a + io.b
+    val nxt = RegNext(out)
+    io.out := nxt
+  }.otherwise {
+    val out = Wire(UInt(Width(2)))
+    out := io.a - io.b
+    val nxt = RegInit(0.U(Width(2)))
+    when(io.b === 2.U(Width(2))) {
+      nxt := out
+    }
+    io.out := nxt
+  }
+
+case class MultiWhenIO(update: Bool, a: UInt, b: UInt, out: UInt, out_2: UInt) extends Bundle[MultiWhenIO]
+
+class MultiWhen extends Module:
+  given Module = this
+  val io = IO(MultiWhenIO(
+    Input(Bool()),
+    Input(UInt(Width(3))),
+    Input(UInt(Width(3))),
+    Output(UInt(Width(3))),
+    Output(UInt(Width(3)))
+  ))
+  io.out := DontCare
+  io.out_2 := DontCare
+  when(io.update) {
+    val out = Wire(UInt(Width(3)))
+    out := io.a + io.b
+    val nxt = RegNext(out)
+    io.out := nxt
+  }.otherwise {
+    io.out := io.a + io.b
+  }
+  when(io.update) {
+    val out = Wire(UInt(Width(3)))
+    out := io.a + io.b
+    val nxt = RegNext(out)
+    io.out_2 := nxt
+  }.otherwise {
+    io.out_2 := io.a - io.b
+  }
+
+case class SRAMModuleIO(
+  wr_en: Bool,
+  wr_addr: UInt,
+  wr_data: UInt,
+  rd_addr: UInt,
+  rd_data: UInt
+) extends Bundle[SRAMModuleIO]
+
+class SRAMModule(depth: Int, width: Int) extends Module:
+  given Module = this
+  val io = IO(SRAMModuleIO(
+    Input(Bool()),
+    Input(UInt(Width(log2Ceil(depth)))),
+    Input(UInt(Width(width))),
+    Input(UInt(Width(log2Ceil(depth)))),
+    Output(UInt(Width(width)))
+  ))
+  val mem = SRAM(UInt(Width(width)), depth)(1, 1, 0)
+  when(io.wr_en) {
+    mem.writePorts(0).write(io.wr_addr, io.wr_data)
+  }
+  io.rd_data := mem.readPorts(0).read(io.rd_addr, boolLit(true))
+
+case class ChaserIO(
+  start: Bool,
+  done: Bool,
+  sram_rd_addr: UInt,
+  sram_rd_data: UInt,
+  final_addr: UInt
+) extends Bundle[ChaserIO]
+
+class Chaser(addrWidth: Int, steps: Int) extends Module:
+  given Module = this
+  val io = IO(ChaserIO(
+    Input(Bool()),
+    Output(Bool()),
+    Output(UInt(Width(log2Ceil(steps)))),
+    Input(UInt(Width(addrWidth))),
+    Output(UInt(Width(addrWidth)))
+  ))
+  val sIdle = 0.U(Width(2))
+  val sChasing = 1.U(Width(2))
+  val sDone = 2.U(Width(2))
+  val state = RegInit(sIdle)
+  val currentAddr = Reg(UInt(Width(addrWidth)))
+  val step = RegInit(0.U(Width(log2Ceil(steps + 1))))
+  io.done := state === sDone
+  io.sram_rd_addr := 0.U(Width(log2Ceil(steps)))
+  io.final_addr := currentAddr
+  when(state === sIdle) {
+    when(io.start) {
+      currentAddr := 0.U(Width(addrWidth))
+      step := 0.U(Width(log2Ceil(steps + 1)))
+      state := sChasing
+    }
+  }.elsewhen(state === sChasing) {
+    when(step < steps.U(Width(log2Ceil(steps + 1)))) {
+      io.sram_rd_addr := currentAddr
+      currentAddr := io.sram_rd_data
+      step := step + 1.U(Width(log2Ceil(steps + 1)))
+    }.otherwise {
+      state := sDone
+    }
+  }
+
+case class PointerChasingIO(start: Bool, done: Bool, final_addr: UInt) extends Bundle[PointerChasingIO]
+
+class PointerChasing extends Module:
+  given Module = this
+  val addrWidth = 4
+  val sramDepth = 8
+  val chasingSteps = 4
+  val io = IO(PointerChasingIO(
+    Input(Bool()),
+    Output(Bool()),
+    Output(UInt(Width(addrWidth)))
+  ))
+  val sram = SRAM(UInt(Width(addrWidth)), sramDepth)(1, 1, 0)
+  val initDone = RegInit(boolLit(false))
+  val initCntr = RegInit(0.U(Width(log2Ceil(sramDepth + 1))))
+  sram.writePorts(0).enable := boolLit(false)
+  sram.writePorts(0).address := 0.U(Width(log2Ceil(sramDepth)))
+  sram.writePorts(0).data := 0.U(Width(addrWidth))
+  when(!initDone) {
+    sram.writePorts(0).enable := boolLit(true)
+    sram.writePorts(0).address := initCntr
+    sram.writePorts(0).data := initCntr + 1.U(Width(addrWidth))
+    initCntr := initCntr + 1.U(Width(log2Ceil(sramDepth + 1)))
+    when(initCntr === (sramDepth - 1).U(Width(log2Ceil(sramDepth)))) {
+      initDone := boolLit(true)
+    }
+  }
+  val chaser = Module(new Chaser(addrWidth, chasingSteps))
+  chaser.io.start := io.start && initDone
+  io.done := chaser.io.done
+  io.final_addr := chaser.io.final_addr
+  sram.readPorts(0).enable := boolLit(true)
+  sram.readPorts(0).address := chaser.io.sram_rd_addr
+  chaser.io.sram_rd_data := sram.readPorts(0).data
+
+case class BundleQueue(a: UInt, b: UInt) extends Bundle[BundleQueue]
+
+case class MyQueueIO(in: Decoupled[BundleQueue], out: Decoupled[BundleQueue]) extends Bundle[MyQueueIO]
+
+class MyQueue(length: Int) extends Module:
+  given Module = this
+  val io = IO(MyQueueIO(
+    Flipped(Decoupled(BundleQueue(UInt(Width(3)), UInt(Width(2))))),
+    Decoupled(BundleQueue(UInt(Width(3)), UInt(Width(2))))
+  ))
+  val q = Module(new Queue(BundleQueue(UInt(Width(3)), UInt(Width(2))), length))
+  q.io.enq.valid := io.in.valid
+  q.io.enq.bits := io.in.bits
+  io.in.ready := q.io.enq.ready
+  io.out.valid := q.io.deq.valid
+  io.out.bits := q.io.deq.bits
+  q.io.deq.ready := io.out.ready
+
+case class MyCustomQueueIO[T <: HWData](enq: Decoupled[T], deq: Decoupled[T]) extends Bundle[MyCustomQueueIO[T]]
+
+class MyCustomQueue[T <: HWData](data: T, entries: Int) extends Module:
+  given Module = this
+  val io = IO(MyCustomQueueIO(
+    Flipped(Decoupled(data)),
+    Decoupled(data)
+  ))
+  val addrBits = log2Ceil(entries + 1)
+  val mem = Reg(Vec.fill(entries)(data))
+  val enq_ptr = RegInit(0.U(Width(addrBits)))
+  val deq_ptr = RegInit(0.U(Width(addrBits)))
+  val full = RegInit(boolLit(false))
+  val empty = (enq_ptr === deq_ptr) && !full
+  io.enq.ready := !full
+  io.deq.valid := !empty
+  io.deq.bits := mem(deq_ptr)
+  val enq_fire = io.enq.valid && io.enq.ready
+  val deq_fire = io.deq.valid && io.deq.ready
+  val almost_full = (enq_ptr + 1.U(Width(addrBits))) % entries.U(Width(addrBits)) === deq_ptr
+  when(enq_fire) {
+    enq_ptr := (enq_ptr + 1.U(Width(addrBits))) % entries.U(Width(addrBits))
+    mem(enq_ptr) := io.enq.bits
+  }
+  when(deq_fire) {
+    deq_ptr := (deq_ptr + 1.U(Width(addrBits))) % entries.U(Width(addrBits))
+  }
+  when(enq_fire && deq_fire) {
+  }.elsewhen(enq_fire && almost_full) {
+    full := boolLit(true)
+  }.elsewhen(deq_fire) {
+    full := boolLit(false)
+  }
+
+case class RegFileIO(addr: UInt, data: UInt) extends Bundle[RegFileIO]
+
+class RegFile extends Module:
+  given Module = this
+  val io = IO(RegFileIO(
+    Input(UInt(Width(4))),
+    Output(UInt(Width(2)))
+  ))
+  val regfile = Reg(Vec.fill(16)(UInt(Width(2))))
+  io.data := regfile(io.addr)
+
+case class NestedIndexIO(addr: UInt, data: UInt) extends Bundle[NestedIndexIO]
+
+class NestedIndex extends Module:
+  given Module = this
+  val io = IO(NestedIndexIO(
+    Input(UInt(Width(4))),
+    Output(UInt(Width(3)))
+  ))
+  val regfile_1 = Reg(Vec.fill(16)(UInt(Width(2))))
+  val regfile_2 = Reg(Vec.fill(4)(UInt(Width(3))))
+  io.data := regfile_2(regfile_1(io.addr))
+
+case class ProcessorBundle(in: UInt, out: UInt) extends Bundle[ProcessorBundle]
+
+class Processor(width: Int) extends Module:
+  given Module = this
+  val io = IO(ProcessorBundle(Input(UInt(Width(width))), Output(UInt(Width(width)))))
+  io.out := io.in + 1.U(Width(width))
+
+case class TopModuleIO(in: UInt, out1: UInt, out2: UInt) extends Bundle[TopModuleIO]
+
+class TopModule extends Module:
+  given Module = this
+  val io = IO(TopModuleIO(
+    Input(UInt(Width(8))),
+    Output(UInt(Width(8))),
+    Output(UInt(Width(8)))
+  ))
+  val proc0 = Module(new Processor(8))
+  val proc1 = Module(new Processor(8))
+  proc0.io.in := io.in
+  proc1.io.in := io.in
+  io.out1 := proc0.io.out
+  io.out2 := proc1.io.out
+
+case class OneReadOneWriteIO(
+  ren: Bool,
+  raddr: UInt,
+  rdata: Vec[UInt],
+  wen: Bool,
+  waddr: UInt,
+  wdata: Vec[UInt],
+  wmask: Vec[Bool]
+) extends Bundle[OneReadOneWriteIO]
+
+object OneReadOneWriteIO:
+  def apply(width: Int): OneReadOneWriteIO =
+    OneReadOneWriteIO(
+      Input(Bool()),
+      Input(UInt(Width(3))),
+      Output(Vec.fill(4)(UInt(Width(width)))),
+      Input(Bool()),
+      Input(UInt(Width(3))),
+      Input(Vec.fill(4)(UInt(Width(width)))),
+      Input(Vec.fill(4)(Bool()))
+    )
+
+class OneReadOneWritePortSRAM(width: Int) extends Module:
+  given Module = this
+  val io = IO(OneReadOneWriteIO(width))
+  val mem = SRAM(Vec.fill(4)(UInt(Width(width))), 8)(1, 1, 0)
+  when(io.wen) {
+    mem.writePorts(0).write(io.waddr, io.wdata)
+  }
+  io.rdata := mem.readPorts(0).read(io.raddr, io.ren)
+
+class SinglePortSRAM(width: Int) extends Module:
+  given Module = this
+  val io = IO(OneReadOneWriteIO(width))
+  val mem = SRAM(Vec.fill(4)(UInt(Width(width))), 8)(1, 1, 0)
+  when(io.wen) {
+    mem.writePorts(0).write(io.waddr, io.wdata)
+  }
+  io.rdata := mem.readPorts(0).read(io.raddr, !io.wen)
+
+case class AggregateBundle(a: UInt, b: UInt) extends Bundle[AggregateBundle]
+
+object AggregateBundle:
+  def apply(): AggregateBundle = AggregateBundle(UInt(Width(2)), UInt(Width(3)))
+
+case class AggregateSRAMIO(
+  raddr: UInt,
+  rdata: Vec[AggregateBundle],
+  wen: Bool,
+  waddr: UInt,
+  wdata: Vec[AggregateBundle],
+  wmask: Vec[Bool]
+) extends Bundle[AggregateSRAMIO]
+
+class AggregateSRAM(width: Int) extends Module:
+  given Module = this
+  val io = IO(AggregateSRAMIO(
+    Input(UInt(Width(3))),
+    Output(Vec.fill(4)(AggregateBundle())),
+    Input(Bool()),
+    Input(UInt(Width(3))),
+    Input(Vec.fill(4)(AggregateBundle())),
+    Input(Vec.fill(4)(Bool()))
+  ))
+  val mem = SRAM(Vec.fill(4)(AggregateBundle()), 8)(1, 1, 0)
+  when(io.wen) {
+    mem.writePorts(0).write(io.waddr, io.wdata)
+  }
+  io.rdata := mem.readPorts(0).read(io.raddr, !io.wen)
+
+case class DualReadSingleWritePortSRAMIO(
+  raddr_0: UInt,
+  raddr_1: UInt,
+  rdata_0: Vec[UInt],
+  rdata_1: Vec[UInt],
+  wen: Bool,
+  waddr: UInt,
+  wdata: Vec[UInt],
+  wmask: Vec[Bool]
+) extends Bundle[DualReadSingleWritePortSRAMIO]
+
+class DualReadSingleWritePortSRAM(width: Int) extends Module:
+  given Module = this
+  val io = IO(DualReadSingleWritePortSRAMIO(
+    Input(UInt(Width(3))),
+    Input(UInt(Width(3))),
+    Output(Vec.fill(4)(UInt(Width(width)))),
+    Output(Vec.fill(4)(UInt(Width(width)))),
+    Input(Bool()),
+    Input(UInt(Width(3))),
+    Input(Vec.fill(4)(UInt(Width(width)))),
+    Input(Vec.fill(4)(Bool()))
+  ))
+  val mem = SRAM(Vec.fill(4)(UInt(Width(width))), 8)(2, 1, 0)
+  when(io.wen) {
+    mem.writePorts(0).write(io.waddr, io.wdata)
+  }
+  io.rdata_0 := mem.readPorts(0).read(io.raddr_0, !io.wen)
+  io.rdata_1 := mem.readPorts(1).read(io.raddr_1, !io.wen)
+
+case class OneReadOneReadWritePortSRAMIO(
+  raddr_0: UInt,
+  raddr_1: UInt,
+  rdata_0: Vec[UInt],
+  rdata_1: Vec[UInt],
+  ren: Bool,
+  wen: Bool,
+  waddr: UInt,
+  wdata: Vec[UInt],
+  wmask: Vec[Bool]
+) extends Bundle[OneReadOneReadWritePortSRAMIO]
+
+class OneReadOneReadWritePortSRAM(width: Int) extends Module:
+  given Module = this
+  val io = IO(OneReadOneReadWritePortSRAMIO(
+    Input(UInt(Width(3))),
+    Input(UInt(Width(3))),
+    Output(Vec.fill(4)(UInt(Width(width)))),
+    Output(Vec.fill(4)(UInt(Width(width)))),
+    Input(Bool()),
+    Input(Bool()),
+    Input(UInt(Width(3))),
+    Input(Vec.fill(4)(UInt(Width(width)))),
+    Input(Vec.fill(4)(Bool()))
+  ))
+  val mem = SRAM(Vec.fill(4)(UInt(Width(width))), 8)(2, 1, 0)
+  when(io.wen) {
+    mem.writePorts(0).write(io.waddr, io.wdata)
+  }
+  io.rdata_0 := mem.readPorts(0).read(io.raddr_0, !io.wen)
+  io.rdata_1 := mem.readPorts(1).read(io.raddr_1, !io.wen && !io.ren)
 
 object ChirrtlEmissionSpec extends TestSuite:
   def writeChirrtl(filename: String, content: String): Unit =
@@ -125,5 +1040,178 @@ object ChirrtlEmissionSpec extends TestSuite:
       println("firtool output:")
       println(output)
       if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+    }
+
+    test("BitSel CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new BitSel1
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "BitSel1")
+      writeChirrtl("BitSel1.fir", chirrtl)
+      assert(chirrtl.contains("circuit BitSel1 :"))
+      val mod2 = new BitSel2
+      val designs2 = elaborator.elaborate(mod2)
+      val chirrtl2 = elaborator.emitChirrtl(designs2, "BitSel2")
+      writeChirrtl("BitSel2.fir", chirrtl2)
+      assert(chirrtl2.contains("circuit BitSel2 :"))
+    }
+
+    test("Cache CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val cache = new Cache()
+      val designs = elaborator.elaborate(cache)
+      val chirrtl = elaborator.emitChirrtl(designs, "Cache")
+      writeChirrtl("Cache.fir", chirrtl)
+      assert(chirrtl.contains("circuit Cache :"))
+    }
+
+    test("Const CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new Const(2)
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "Const")
+      writeChirrtl("Const.fir", chirrtl)
+      assert(chirrtl.contains("circuit Const :"))
+    }
+
+    test("Counter CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new Counter(2)
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "Counter")
+      writeChirrtl("Counter.fir", chirrtl)
+      assert(chirrtl.contains("circuit Counter :"))
+    }
+
+    test("DecoupledMux CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new DecoupledMux
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "DecoupledMux")
+      writeChirrtl("DecoupledMux.fir", chirrtl)
+      assert(chirrtl.contains("circuit DecoupledMux :"))
+    }
+
+    test("DynamicIndexing CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new DynamicIndexing
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "DynamicIndexing")
+      writeChirrtl("DynamicIndexing.fir", chirrtl)
+      assert(chirrtl.contains("circuit DynamicIndexing :"))
+    }
+
+    test("Fir CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new Fir(4)
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "Fir")
+      writeChirrtl("Fir.fir", chirrtl)
+      assert(chirrtl.contains("circuit Fir :"))
+    }
+
+    test("Hierarchy CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new Top
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "Hierarchy")
+      writeChirrtl("Hierarchy.fir", chirrtl)
+      assert(chirrtl.contains("circuit Hierarchy :"))
+    }
+
+    test("NestedWhen CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val nested = new NestedWhen
+      val designs = elaborator.elaborate(nested)
+      val chirrtl = elaborator.emitChirrtl(designs, "NestedWhen")
+      writeChirrtl("NestedWhen.fir", chirrtl)
+      assert(chirrtl.contains("circuit NestedWhen :"))
+    }
+
+    test("NestedWhen auxiliary modules CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mods = Seq(
+        new LCS1,
+        new LCS2,
+        new LCS3,
+        new LCS4,
+        new LCS5,
+        new LCS6,
+        new LCS7,
+        new LCS8,
+        new LastConnectSemantics2,
+        new NestedBundleModule,
+        new WireRegInsideWhen,
+        new MultiWhen
+      )
+      mods.foreach { m =>
+        val designs = elaborator.elaborate(m)
+        val chirrtl = elaborator.emitChirrtl(designs, m.moduleName)
+        writeChirrtl(s"${m.moduleName}.fir", chirrtl)
+        assert(chirrtl.contains(s"circuit ${m.moduleName} :"))
+      }
+    }
+
+    test("PointerChasing CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new PointerChasing
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "PointerChasing")
+      writeChirrtl("PointerChasing.fir", chirrtl)
+      assert(chirrtl.contains("circuit PointerChasing :"))
+    }
+
+    test("Queue CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new MyQueue(2)
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "MyQueue")
+      writeChirrtl("MyQueue.fir", chirrtl)
+      assert(chirrtl.contains("circuit MyQueue :"))
+      val custom = new MyCustomQueue(UInt(Width(3)), 4)
+      val designs2 = elaborator.elaborate(custom)
+      val chirrtl2 = elaborator.emitChirrtl(designs2, "MyCustomQueue")
+      writeChirrtl("MyCustomQueue.fir", chirrtl2)
+      assert(chirrtl2.contains("circuit MyCustomQueue :"))
+    }
+
+    test("RegFile CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new RegFile
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "RegFile")
+      writeChirrtl("RegFile.fir", chirrtl)
+      assert(chirrtl.contains("circuit RegFile :"))
+      val nested = new NestedIndex
+      val designs2 = elaborator.elaborate(nested)
+      val chirrtl2 = elaborator.emitChirrtl(designs2, "NestedIndex")
+      writeChirrtl("NestedIndex.fir", chirrtl2)
+      assert(chirrtl2.contains("circuit NestedIndex :"))
+    }
+
+    test("ShiftRegister CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new TopModule
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "TopModule")
+      writeChirrtl("TopModule.fir", chirrtl)
+      assert(chirrtl.contains("circuit TopModule :"))
+    }
+
+    test("SRAM CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mods = Seq(
+        new SinglePortSRAM(2),
+        new OneReadOneWritePortSRAM(2),
+        new AggregateSRAM(2),
+        new DualReadSingleWritePortSRAM(2),
+        new OneReadOneReadWritePortSRAM(2)
+      )
+      mods.foreach { m =>
+        val designs = elaborator.elaborate(m)
+        val chirrtl = elaborator.emitChirrtl(designs, m.moduleName)
+        writeChirrtl(s"${m.moduleName}.fir", chirrtl)
+        assert(chirrtl.contains(s"circuit ${m.moduleName} :"))
+      }
     }
   }

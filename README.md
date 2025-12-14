@@ -54,8 +54,9 @@
     - [x] Concatenation, bitwise or/and reduction, mux implementation
 - [x] Test against reference IR
 - [x] Conversion operators
-- [ ] Memories
+- [x] Memories
     - Make the port API explicit (no inferred ports)
+- [ ] CHIRRTL emission
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
 - [ ] Mixed vectors
 - [ ] Per-class caching??
