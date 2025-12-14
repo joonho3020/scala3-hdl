@@ -16,3 +16,8 @@ object examples extends ScalaModule {
   def scalaVersion = SCALAVERSION
   override def moduleDeps = Seq(hdl)
 }
+
+object riscv extends ScalaModule {
+  def scalaVersion = SCALAVERSION
+  override def moduleDeps = Seq(hdl)
+}
