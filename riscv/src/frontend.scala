@@ -13,17 +13,19 @@ case class CoreParams(
 
   def xlenBytes: Int = xlenBits / 8
 
-  def icacheFetchInstCount: Int = icacheFetchBytes / xlenBytes
+  def icacheFetchInstCount: Int = icacheFetchBytes / instBytes
 
   def fetchWidth: Int = coreWidth
-  def fetchBytes: Int = coreWidth * xlenBytes
-  def coreInstBytes: Int = xlenBytes
+  def fetchBytes: Int = coreWidth * instBytes
+  def coreInstBytes: Int = instBytes
 
   def fetchAlign(addr: UInt)(using m: Module) = ~(~addr | (fetchBytes-1).U)
   def blockAlign(addr: UInt)(using m: Module) = ~(~addr | (cacheLineBytes-1).U)
   def nextFetch(addr: UInt)(using m: Module) = fetchAlign(addr) + fetchBytes.U
   def fetchMask(addr: UInt)(using m: Module) = {
-    val idx = addr.bits(log2Ceil(fetchWidth)+log2Ceil(coreInstBytes)-1, log2Ceil(coreInstBytes))
+    val idx = addr.bits(
+      log2Ceil(fetchWidth)+log2Ceil(coreInstBytes)-1,
+      log2Ceil(coreInstBytes))
     ((1 << fetchWidth)-1).U << idx
   }
 
@@ -103,7 +105,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     io.core.insts.zipWithIndex.foreach((uop, idx) => {
 // uop.valid := io.icache.resp.insts(idx).valid && s2_fetch_mask(idx)
       uop.valid := io.icache.resp.insts(idx).valid
-      uop.bits  := io.icache.resp.insts(idx).bits
+      uop.bits.inst := io.icache.resp.insts(idx).bits
+      uop.bits.pc   := s2_pc + (p.instBytes * idx).U
     })
-
   }
