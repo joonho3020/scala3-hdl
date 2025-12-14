@@ -30,6 +30,7 @@ object IR:
   sealed trait Expr extends Serializable
   final case class Ref(name: Identifier) extends Expr
   final case class Literal(value: Identifier) extends Expr
+  final case object DontCare extends Expr
   final case class DoPrim(op: PrimOp, args: Seq[Expr], consts: Seq[Int] = Seq.empty) extends Expr
   final case class SubIndex(expr: Expr, value: Int) extends Expr
   final case class SubAccess(expr: Expr, index: Expr) extends Expr
@@ -44,6 +45,7 @@ object IR:
   final case class Connect(loc: Expr, expr: Expr) extends Stmt
   final case class When(cond: Expr, conseq: Seq[Stmt], var alt: Seq[Stmt]) extends Stmt
   final case class Inst(name: Identifier, module: Identifier) extends Stmt
+  final case class Invalid(expr: Expr) extends Stmt
 
   final case class Port(name: Identifier, direction: Direction, tpe: Type) extends Serializable
   final case class Module(name: Identifier, ports: Seq[Port], body: Seq[Stmt]) extends Serializable

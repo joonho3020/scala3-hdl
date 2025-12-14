@@ -105,6 +105,7 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
   private def emitExpr(e: IR.Expr): String = e match
     case IR.Ref(name)       => name.value
     case IR.Literal(value)  => value.value
+    case IR.DontCare        => "DontCare"
     case IR.SubIndex(expr, value) => s"${emitExpr(expr)}[$value]"
     case IR.SubAccess(expr, index) => s"${emitExpr(expr)}[${emitExpr(index)}]"
     case IR.SubField(expr, field) => s"${emitExpr(expr)}.${field.value}"
@@ -127,6 +128,8 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
         sb.append(s"${prefix}node ${name.value} = ${emitExpr(value)}\n")
       case IR.Connect(loc, expr) =>
         sb.append(s"${prefix}connect ${emitExpr(loc)}, ${emitExpr(expr)}\n")
+      case IR.Invalid(expr) =>
+        sb.append(s"${prefix}invalidate ${emitExpr(expr)}\n")
       case IR.When(cond, conseq, alt) =>
         sb.append(s"${prefix}when ${emitExpr(cond)}:\n")
         conseq.foreach(s => emitStmt(s, indent + 1, sb))

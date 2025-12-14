@@ -113,6 +113,38 @@ def regnext_check(): Unit =
   assertDesigns("RegNext Check", designs, expected)
   println("=" * 50)
 
+def dontcare_check(): Unit =
+  class DontCareModule extends Module:
+    given Module = this
+    val io = IO(SimpleIO(Input(UInt(Width(4))), Output(UInt(Width(4)))))
+    io.out := DontCare
+
+  val elaborator = new Elaborator
+  val m = new DontCareModule
+  val designs = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(designs)
+  val expected = Seq(
+    module(
+      "DontCareModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("in", true, u(4)),
+          ("out", false, u(4))
+        ))
+      ),
+      Seq(
+        IR.Invalid(sf(ref("io"), "out"))
+      )
+    )
+  )
+  println("=" * 50)
+  println("DontCare Check:")
+  println(rendered)
+  assertDesigns("DontCare Check", designs, expected)
+  println("=" * 50)
+
 def list_operation_check(): Unit =
   final case class MultBySumIO(a: UInt, b: UInt, sum: Seq[UInt]) extends Bundle[MultBySumIO]
   object MultBySumIO:
@@ -1379,6 +1411,7 @@ object ModuleChecksSpec extends TestSuite:
   val tests = Tests {
     test("simple_module_test") { simple_module_test() }
     test("regnext_check") { regnext_check() }
+    test("dontcare_check") { dontcare_check() }
     test("list_operation_check") { list_operation_check() }
     test("nested_module_check") { nested_module_check() }
     test("nested_bundle_check") { nested_bundle_check() }

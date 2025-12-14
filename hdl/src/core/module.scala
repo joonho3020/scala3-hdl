@@ -161,6 +161,7 @@ private[hdl] object ModuleOps:
     case _: Bool => IR.BoolType
     case _: Clock => IR.ClockType
     case _: Reset => IR.ResetType
+    case _: DontCare.type => throw new IllegalArgumentException("DontCare has no concrete type")
     case v: Vec[?] =>
       val elemType = v.elems.headOption.map(irTypeOf).getOrElse(IR.BoolType)
       IR.VecType(v.length, elemType)
@@ -246,19 +247,23 @@ private[hdl] object ModuleOps:
     inst
 
   def connect[T <: HWData](dst: T, src: T, mod: Module): Unit =
-    (dst, src) match
-      case (dv: Vec[?], sv: Vec[?]) =>
-        val dElems = dv.elems
-        val sElems = sv.elems
-        val len = math.min(dElems.length, sElems.length)
-        var i = 0
-        while i < len do
-          connect(dElems(i).asInstanceOf[HWData], sElems(i).asInstanceOf[HWData], mod)
-          i += 1
-      case _ =>
-        val lhs = locFor(dst, mod)
-        val rhs = exprFor(src, mod)
-        mod.getBuilder.addStmt(IR.Connect(lhs, rhs))
+    if src eq DontCare then
+      val lhs = locFor(dst, mod)
+      mod.getBuilder.addStmt(IR.Invalid(lhs))
+    else
+      (dst, src) match
+        case (dv: Vec[?], sv: Vec[?]) =>
+          val dElems = dv.elems
+          val sElems = sv.elems
+          val len = math.min(dElems.length, sElems.length)
+          var i = 0
+          while i < len do
+            connect(dElems(i).asInstanceOf[HWData], sElems(i).asInstanceOf[HWData], mod)
+            i += 1
+        case _ =>
+          val lhs = locFor(dst, mod)
+          val rhs = exprFor(src, mod)
+          mod.getBuilder.addStmt(IR.Connect(lhs, rhs))
 
   def when(cond: Bool, mod: Module)(block: => Unit): WhenDSL =
     val condExpr = exprFor(cond, mod)
@@ -312,6 +317,7 @@ private[hdl] object ModuleOps:
       case r: Reset     => Seq(asUInt(r, mod))
       case v: Vec[?]    => Seq(asUInt(v, mod))
       case b: Bundle[?] => Seq(asUInt(b, mod))
+      case _: DontCare.type => Seq.empty
     }
     if flat.isEmpty then throw new IllegalArgumentException("Cannot concat empty sequence")
     primOp(UInt(), IR.PrimOp.Cat, flat, Seq.empty, mod)
@@ -334,7 +340,8 @@ private[hdl] object ModuleOps:
     data.getIRExpr.getOrElse(IR.Ref(refFor(data, current)))
 
   def exprFor(data: HWData, current: Module): IR.Expr =
-    if data.kind == NodeKind.Lit then IR.Literal(formatLiteral(data, data.literal.getOrElse("")))
+    if data eq DontCare then IR.DontCare
+    else if data.kind == NodeKind.Lit then IR.Literal(formatLiteral(data, data.literal.getOrElse("")))
     else data.getIRExpr.getOrElse(IR.Ref(refFor(data, current)))
 
   def emitPortDecl[T <: HWData](name: String, tpe: T): Seq[IR.Port] =

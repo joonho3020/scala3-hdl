@@ -102,6 +102,12 @@ sealed class Reset extends HWData:
 object Reset:
   def apply(): Reset = new Reset
 
+object DontCare extends HWData:
+  def setLitVal(payload: Any): Unit = ()
+  def getLitVal: Any =
+    throw new NoSuchElementException("DontCare does not carry a literal value")
+  override def toString(): String = "DontCare"
+
 sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnce[T]:
   def iterator: Iterator[T] = elems.iterator
 

@@ -72,6 +72,8 @@ object HWAggregate:
         Clock()
       case r: Reset =>
         Reset()
+      case _: DontCare.type =>
+        DontCare
       case v: Vec[?] =>
         val elems = v.elems.zipWithIndex.map { case (e, idx) =>
           transformAny(e, indexPath(path, idx), ctx.map(expr => IR.SubIndex(expr, idx)), f).asInstanceOf[HWData]
