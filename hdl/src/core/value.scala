@@ -252,7 +252,7 @@ object Flipped:
   def apply[T <: HWData](t: T): T =
     Input(t)
 
-object HWLiteral:
+private[hdl] object HWLiteral:
   def set(data: Any, value: Any): Unit =
     (data, value) match
       case (u: UInt, v: BigInt) => u.setLitVal(v)

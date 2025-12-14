@@ -1,6 +1,6 @@
 package hdl
 
-object IR:
+private[hdl] object IR:
   opaque type Identifier = String
   object Identifier:
     def apply(value: String): Identifier = value
