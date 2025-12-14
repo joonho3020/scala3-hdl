@@ -109,8 +109,10 @@ case class CacheIO(
   reqRead: Bool,
   reqWrite: Bool,
   reqData: UInt,
+
   respData: UInt,
   respValid: Bool,
+
   memAddr: UInt,
   memRead: Bool,
   memWrite: Bool,
@@ -137,34 +139,51 @@ class Cache(addrWidth: Int = 8, dataWidth: Int = 8, cacheSize: Int = 8) extends 
   ))
   val tagMem = SRAM(UInt(Width(tagWidth)), cacheSize)(1, 1, 0)
   val dataMem = Module(new DataMem(cacheSize, dataWidth))
+
   val sIdle = 0.U(Width(2))
   val sMemRead = 1.U(Width(2))
   val sWait = 2.U(Width(2))
   val state = RegInit(sIdle)
-  val reqTag = ModuleOps.prim1Op2Const(UInt(Width(tagWidth)), IR.PrimOp.Bits, io.reqAddr, addrWidth - 1, indexWidth + 2, summon[Module])
-  val reqIndex = ModuleOps.prim1Op2Const(UInt(Width(indexWidth)), IR.PrimOp.Bits, io.reqAddr, indexWidth + 1, 2, summon[Module])
+
+  val reqTag = io.reqAddr(addrWidth - 1, indexWidth + 2)
+  val reqIndex = io.reqAddr(indexWidth + 1, 2)
   val tagRead = tagMem.readPorts(0)
   val tagWrite = tagMem.writePorts(0)
-  val storedTag = tagRead.read(reqIndex, boolLit(true))
+
+  val reqTagReg    = Reg(UInt(tagWidth.W))
+  val reqIndexReg  = Reg(UInt(indexWidth.W))
+  val reqDataReg   = Reg(UInt(dataWidth.W))
+  val writeBackTag = Reg(UInt(tagWidth.W))
+  val writeBackData = Reg(UInt(dataWidth.W))
+
+  val storedTag = tagRead.read(reqIndex, state === sIdle || state === sWait)
+  val hit = (storedTag === reqTag) && (storedTag =/= 0.U)
+
+  dataMem.io.readAddr := reqIndex
+  dataMem.io.writeEnable := boolLit(false)
+  dataMem.io.writeAddr := 0.U
+  dataMem.io.writeData := 0.U
   io.respValid := boolLit(false)
   io.respData := 0.U(Width(dataWidth))
+
   io.memAddr := 0.U(Width(addrWidth))
   io.memRead := boolLit(false)
   io.memWrite := boolLit(false)
   io.memDataOut := 0.U(Width(dataWidth))
-  dataMem.io.writeEnable := boolLit(false)
-  dataMem.io.writeAddr := reqIndex
-  dataMem.io.writeData := io.reqData
-  dataMem.io.readAddr := reqIndex
+
   when(state === sIdle) {
-    val hit = (storedTag === reqTag) && (storedTag =/= 0.U(Width(tagWidth)))
+    reqTagReg := reqTag
+    reqIndexReg := reqIndex
+    reqDataReg := io.reqData
+
     when(hit) {
       when(io.reqRead) {
         io.respData := dataMem.io.readData
         io.respValid := boolLit(true)
-      }
-      when(io.reqWrite) {
+      } .elsewhen (io.reqWrite) {
         dataMem.io.writeEnable := boolLit(true)
+        dataMem.io.writeAddr := reqIndex
+        dataMem.io.writeData := io.reqData
       }
     }.otherwise {
       state := sMemRead
@@ -173,11 +192,13 @@ class Cache(addrWidth: Int = 8, dataWidth: Int = 8, cacheSize: Int = 8) extends 
     }
   }.elsewhen(state === sMemRead) {
     state := sWait
+    io.memRead := boolLit(false)
   }.elsewhen(state === sWait) {
     tagWrite.write(reqIndex, reqTag)
     dataMem.io.writeEnable := boolLit(true)
     dataMem.io.writeAddr := reqIndex
     dataMem.io.writeData := io.memDataIn
+
     io.respData := io.memDataIn
     io.respValid := boolLit(true)
     state := sIdle
