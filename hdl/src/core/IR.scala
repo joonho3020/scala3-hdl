@@ -43,7 +43,7 @@ private[hdl] object IR:
   final case class Wire(name: Identifier, tpe: Type) extends Stmt
   final case class WireInit(name: Identifier, tpe: Type, clock: Expr, reset: Expr, init: Expr) extends Stmt
   final case class Reg(name: Identifier, tpe: Type, clock: Expr) extends Stmt
-  final case class RegInit(name: Identifier, tpe: Type, clock: Expr, reset: Expr, init: Expr) extends Stmt
+  final case class RegReset(name: Identifier, tpe: Type, clock: Expr, reset: Expr, init: Expr) extends Stmt
   final case class DefNode(name: Identifier, value: Expr) extends Stmt
   final case class Connect(loc: Expr, expr: Expr) extends Stmt
   final case class When(cond: Expr, conseq: Seq[Stmt], var alt: Seq[Stmt]) extends Stmt
@@ -63,3 +63,4 @@ private[hdl] object IR:
 
   final case class Port(name: Identifier, direction: Direction, tpe: Type) extends Serializable
   final case class Module(name: Identifier, ports: Seq[Port], body: Seq[Stmt]) extends Serializable
+  final case class Circuit(name: Identifier, modules: Seq[Module]) extends Serializable

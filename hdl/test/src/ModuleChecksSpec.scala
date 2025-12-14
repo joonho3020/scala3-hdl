@@ -17,8 +17,8 @@ private def module(name: String, ports: Seq[IR.Port], body: Seq[IR.Stmt]): IR.Mo
   IR.Module(id(name), ports, body)
 private def wire(name: String, tpe: IR.Type): IR.Stmt = IR.Wire(id(name), tpe)
 private def reg(name: String, tpe: IR.Type, clock: IR.Expr): IR.Stmt = IR.Reg(id(name), tpe, clock)
-private def regInit(name: String, tpe: IR.Type, clock: IR.Expr, reset: IR.Expr, init: IR.Expr): IR.Stmt =
-  IR.RegInit(id(name), tpe, clock, reset, init)
+private def regReset(name: String, tpe: IR.Type, clock: IR.Expr, reset: IR.Expr, init: IR.Expr): IR.Stmt =
+  IR.RegReset(id(name), tpe, clock, reset, init)
 private def ref(name: String): IR.Expr = IR.Ref(id(name))
 private def inst(name: String, module: String): IR.Stmt = IR.Inst(id(name), id(module))
 private def sf(e: IR.Expr, field: String): IR.Expr = e match
@@ -1203,9 +1203,9 @@ def queue_check(): Unit =
       ),
       Seq(
         reg("mem", IR.VecType(4, u(3)), ref("clock")),
-        regInit("enq_ptr", u(3), ref("clock"), ref("reset"), lit("UInt<3>(0)")),
-        regInit("deq_ptr", u(3), ref("clock"), ref("reset"), lit("UInt<3>(0)")),
-        regInit("full", IR.BoolType, ref("clock"), ref("reset"), lit("Bool(false)")),
+        regReset("enq_ptr", u(3), ref("clock"), ref("reset"), lit("UInt<3>(0)")),
+        regReset("deq_ptr", u(3), ref("clock"), ref("reset"), lit("UInt<3>(0)")),
+        regReset("full", IR.BoolType, ref("clock"), ref("reset"), lit("Bool(false)")),
         IR.Connect(sf(enqField, "ready"), not(ref("full"))),
         IR.Connect(sf(deqField, "valid"), not(and(eqv(ref("enq_ptr"), ref("deq_ptr")), not(ref("full"))))),
         IR.Connect(deqBits, sa(ref("mem"), ref("deq_ptr"))),
@@ -1320,9 +1320,9 @@ def queue_check(): Unit =
       ),
       Seq(
         reg("mem", IR.VecType(4, bitsType), ref("clock")),
-        regInit("enq_ptr", u(3), ref("clock"), ref("reset"), lit("UInt<3>(0)")),
-        regInit("deq_ptr", u(3), ref("clock"), ref("reset"), lit("UInt<3>(0)")),
-        regInit("full", IR.BoolType, ref("clock"), ref("reset"), lit("Bool(false)")),
+        regReset("enq_ptr", u(3), ref("clock"), ref("reset"), lit("UInt<3>(0)")),
+        regReset("deq_ptr", u(3), ref("clock"), ref("reset"), lit("UInt<3>(0)")),
+        regReset("full", IR.BoolType, ref("clock"), ref("reset"), lit("Bool(false)")),
         IR.Connect(sf(enqField2, "ready"), not(ref("full"))),
         IR.Connect(sf(deqField2, "valid"), not(and(eqv(ref("enq_ptr"), ref("deq_ptr")), not(ref("full"))))),
         IR.Connect(deqBits2, sa(ref("mem"), ref("deq_ptr"))),

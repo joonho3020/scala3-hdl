@@ -85,6 +85,23 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
   def emitAll(designs: Seq[ElaboratedDesign]): String =
     designs.map(emit).mkString("\n")
 
+  def emitChirrtl(designs: Seq[ElaboratedDesign], topName: String): String =
+    val sb = new StringBuilder
+    sb.append("FIRRTL version 3.3.0\n")
+    sb.append(s"circuit $topName :\n")
+    designs.foreach { design =>
+      val isTop = design.ir.name.value == topName
+      emitChirrtlModule(design.ir, isTop, sb)
+    }
+    sb.toString
+
+  private def emitChirrtlModule(m: IR.Module, isTop: Boolean, sb: StringBuilder): Unit =
+    sb.append(s"  module ${m.name.value} :\n")
+    m.ports.foreach(p => sb.append(s"    ${emitChirrtlPort(p, isTop)}\n"))
+    sb.append("\n")
+    m.body.foreach(stmt => emitChirrtlStmt(stmt, indent = 2, sb))
+    sb.append("\n")
+
   private def emitPort(p: IR.Port): String =
     val dirStr = if p.direction == Direction.In then "input" else "output"
     s"$dirStr ${p.name.value} : ${emitType(p.tpe)}"
@@ -122,7 +139,7 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
         sb.append(s"${prefix}wire ${name.value} : ${emitType(tpe)} with reset : ${emitExpr(reset)} init : ${emitExpr(init)}\n")
       case IR.Reg(name, tpe, clock) =>
         sb.append(s"${prefix}reg ${name.value} : ${emitType(tpe)}, ${emitExpr(clock)}\n")
-      case IR.RegInit(name, tpe, clock, reset, init) =>
+      case IR.RegReset(name, tpe, clock, reset, init) =>
         sb.append(s"${prefix}reg ${name.value} : ${emitType(tpe)}, ${emitExpr(clock)} with reset : ${emitExpr(reset)} init : ${emitExpr(init)}\n")
       case IR.DefNode(name, value) =>
         sb.append(s"${prefix}node ${name.value} = ${emitExpr(value)}\n")
@@ -141,6 +158,77 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
       case IR.Mem(name, tpe, depth, rlat, wlat, readers, writers, readwriters, ruw) =>
         sb.append(s"${prefix}mem ${name.value}:\n")
         sb.append(s"${prefix}  data-type => ${emitType(tpe)}\n")
+        sb.append(s"${prefix}  depth => $depth\n")
+        sb.append(s"${prefix}  read-latency => $rlat\n")
+        sb.append(s"${prefix}  write-latency => $wlat\n")
+        readers.foreach(r => sb.append(s"${prefix}  reader => ${r.value}\n"))
+        writers.foreach(w => sb.append(s"${prefix}  writer => ${w.value}\n"))
+        readwriters.foreach(rw => sb.append(s"${prefix}  readwriter => ${rw.value}\n"))
+        val ruwStr = ruw match
+          case IR.ReadUnderWrite.Undefined => "undefined"
+          case IR.ReadUnderWrite.Old => "old"
+          case IR.ReadUnderWrite.New => "new"
+        sb.append(s"${prefix}  read-under-write => $ruwStr\n")
+
+  private def emitChirrtlPort(p: IR.Port, isTop: Boolean): String =
+    val dirStr = if p.direction == Direction.In then "input" else "output"
+    s"$dirStr ${p.name.value} : ${emitChirrtlType(p.tpe, isTop)}"
+
+  private def emitChirrtlType(t: IR.Type, isTop: Boolean): String = t match
+    case IR.UIntType(w) => w.map(v => s"UInt<$v>").getOrElse("UInt")
+    case IR.BoolType    => "UInt<1>"
+    case IR.ClockType   => "Clock"
+    case IR.ResetType   => if isTop then "UInt<1>" else "Reset"
+    case IR.VecType(len, elem) => s"${emitChirrtlType(elem, isTop)}[$len]"
+    case IR.BundleType(fields) =>
+      val inner = fields.map { f =>
+        val dirPrefix = if f.flipped then "flip " else ""
+        s"$dirPrefix${f.name.value} : ${emitChirrtlType(f.tpe, isTop)}"
+      }.mkString(", ")
+      s"{ $inner }"
+
+  private def emitChirrtlExpr(e: IR.Expr): String = e match
+    case IR.Ref(name)       => name.value
+    case IR.Literal(value)  => value.value
+    case IR.DontCare        => "invalidate"
+    case IR.SubIndex(expr, value) => s"${emitChirrtlExpr(expr)}[$value]"
+    case IR.SubAccess(expr, index) => s"${emitChirrtlExpr(expr)}[${emitChirrtlExpr(index)}]"
+    case IR.SubField(expr, field) => s"${emitChirrtlExpr(expr)}.${field.value}"
+    case IR.DoPrim(op, args, consts) =>
+      val parts = args.map(emitChirrtlExpr) ++ consts.map(_.toString)
+      s"${op.opName}(${parts.mkString(", ")})"
+
+  private def emitChirrtlStmt(stmt: IR.Stmt, indent: Int, sb: StringBuilder): Unit =
+    val prefix = "    " * indent
+    stmt match
+      case IR.Wire(name, tpe) =>
+        sb.append(s"${prefix}wire ${name.value} : ${emitChirrtlType(tpe, false)}\n")
+      case IR.WireInit(name, tpe, clock, reset, init) =>
+        sb.append(s"${prefix}wire ${name.value} : ${emitChirrtlType(tpe, false)}\n")
+        sb.append(s"${prefix}connect ${name.value}, ${emitChirrtlExpr(init)}\n")
+      case IR.Reg(name, tpe, clock) =>
+        sb.append(s"${prefix}reg ${name.value} : ${emitChirrtlType(tpe, false)}, ${emitChirrtlExpr(clock)}\n")
+      case IR.RegReset(name, tpe, clock, reset, init) =>
+        sb.append(s"${prefix}regreset ${name.value} : ${emitChirrtlType(tpe, false)}, ${emitChirrtlExpr(clock)}, ${emitChirrtlExpr(reset)}, ${emitChirrtlExpr(init)}\n")
+      case IR.DefNode(name, value) =>
+        sb.append(s"${prefix}node ${name.value} = ${emitChirrtlExpr(value)}\n")
+      case IR.Connect(loc, expr) =>
+        sb.append(s"${prefix}connect ${emitChirrtlExpr(loc)}, ${emitChirrtlExpr(expr)}\n")
+      case IR.Invalid(expr) =>
+        sb.append(s"${prefix}invalidate ${emitChirrtlExpr(expr)}\n")
+      case IR.When(cond, conseq, alt) =>
+        sb.append(s"${prefix}when ${emitChirrtlExpr(cond)} :\n")
+        conseq.foreach(s => emitChirrtlStmt(s, indent + 1, sb))
+        if alt.nonEmpty then
+          sb.append(s"${prefix}else :\n")
+          alt.foreach(s => emitChirrtlStmt(s, indent + 1, sb))
+      case IR.Inst(name, module) =>
+        sb.append(s"${prefix}inst ${name.value} of ${module.value}\n")
+        sb.append(s"${prefix}connect ${name.value}.clock, clock\n")
+        sb.append(s"${prefix}connect ${name.value}.reset, reset\n")
+      case IR.Mem(name, tpe, depth, rlat, wlat, readers, writers, readwriters, ruw) =>
+        sb.append(s"${prefix}mem ${name.value} :\n")
+        sb.append(s"${prefix}  data-type => ${emitChirrtlType(tpe, false)}\n")
         sb.append(s"${prefix}  depth => $depth\n")
         sb.append(s"${prefix}  read-latency => $rlat\n")
         sb.append(s"${prefix}  write-latency => $wlat\n")

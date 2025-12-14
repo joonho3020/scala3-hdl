@@ -72,7 +72,7 @@ private[hdl] object ModuleOps:
 
     val clockExpr = exprFor(mod.getImplicitClock, mod)
     val resetExpr = exprFor(mod.getImplicitReset, mod)
-    mod.getBuilder.addStmt(IR.RegInit(IR.Identifier(regName), irTypeOf(inst), clockExpr, resetExpr, initExpr))
+    mod.getBuilder.addStmt(IR.RegReset(IR.Identifier(regName), irTypeOf(inst), clockExpr, resetExpr, initExpr))
     inst
 
   def lit[T <: HWData](t: T, payload: HostTypeOf[T], mod: Module): T =
