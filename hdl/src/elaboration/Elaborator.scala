@@ -176,8 +176,6 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
         sb.append(s"${prefix}printf(${emitExpr(clock)}, ${emitExpr(enable)}, \"$format\"$argsStr) : ${name.value}\n")
       case IR.Assert(name, clock, enable, pred, message) =>
         sb.append(s"${prefix}assert(${emitExpr(clock)}, ${emitExpr(enable)}, ${emitExpr(pred)}, \"$message\") : ${name.value}\n")
-      case IR.Stop(name, clock, enable, exitCode) =>
-        sb.append(s"${prefix}stop(${emitExpr(clock)}, ${emitExpr(enable)}, $exitCode) : ${name.value}\n")
 
   private def emitChirrtlPort(p: IR.Port, isTop: Boolean): String =
     val dirStr = if p.direction == Direction.In then "input" else "output"

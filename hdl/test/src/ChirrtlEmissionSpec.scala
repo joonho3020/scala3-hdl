@@ -764,6 +764,48 @@ class MyCustomQueue[T <: HWData](data: T, entries: Int) extends Module:
     full := false.B
   }
 
+case class PrintfTestIO(in: UInt, out: UInt) extends Bundle[PrintfTestIO]
+
+class PrintfTest extends Module:
+  given Module = this
+  val io = IO(PrintfTestIO(
+    Input(UInt(Width(8))),
+    Output(UInt(Width(8)))
+  ))
+  val counter = RegInit(0.U(Width(8)))
+  counter := counter + 1.U(Width(8))
+  Printf("counter = %d, in = %d\\n", counter, io.in)
+  io.out := counter
+
+case class AssertTestIO(a: UInt, b: UInt, out: UInt) extends Bundle[AssertTestIO]
+
+class AssertTest extends Module:
+  given Module = this
+  val io = IO(AssertTestIO(
+    Input(UInt(Width(8))),
+    Input(UInt(Width(8))),
+    Output(UInt(Width(8)))
+  ))
+  Assert(io.a =/= io.b, "a and b must be different")
+  io.out := io.a + io.b
+
+case class PrintfAssertCombinedIO(in: UInt, enable: Bool, out: UInt) extends Bundle[PrintfAssertCombinedIO]
+
+class PrintfAssertCombined extends Module:
+  given Module = this
+  val io = IO(PrintfAssertCombinedIO(
+    Input(UInt(Width(8))),
+    Input(Bool()),
+    Output(UInt(Width(8)))
+  ))
+  val counter = RegInit(0.U(Width(8)))
+  when(io.enable) {
+    counter := counter + 1.U(Width(8))
+    Printf("incrementing counter to %d\\n", counter + 1.U(Width(8)))
+  }
+  Assert(counter < 100.U(Width(8)), "counter overflow")
+  io.out := counter
+
 case class RegFileIO(addr: UInt, data: UInt) extends Bundle[RegFileIO]
 
 class RegFile extends Module:
@@ -1189,5 +1231,65 @@ object ChirrtlEmissionSpec extends TestSuite:
         val (exitCode, output) = runFirtool(s"${m.moduleName}.fir")
         if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
       }
+    }
+
+    test("Printf CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new PrintfTest
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "PrintfTest")
+      println("Printf CHIRRTL:")
+      println(chirrtl)
+      writeChirrtl("PrintfTest.fir", chirrtl)
+      assert(chirrtl.contains("printf("))
+      val (exitCode, output) = runFirtool("PrintfTest.fir")
+      println("firtool output:")
+      println(output)
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+      val verilogFile = new File("test-outputs/verilog/PrintfTest.sv")
+      if !verilogFile.exists() then throw new java.lang.AssertionError("Verilog file should be generated")
+      val verilog = scala.io.Source.fromFile(verilogFile).mkString
+      if !(verilog.contains("$fwrite") || verilog.contains("fwrite")) then
+        throw new java.lang.AssertionError("Verilog should contain $fwrite for printf")
+    }
+
+    test("Assert CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new AssertTest
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "AssertTest")
+      println("Assert CHIRRTL:")
+      println(chirrtl)
+      writeChirrtl("AssertTest.fir", chirrtl)
+      assert(chirrtl.contains("assert("))
+      val (exitCode, output) = runFirtool("AssertTest.fir")
+      println("firtool output:")
+      println(output)
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+      val verilogFile = new File("test-outputs/verilog/AssertTest.sv")
+      if !verilogFile.exists() then throw new java.lang.AssertionError("Verilog file should be generated")
+      val verilog = scala.io.Source.fromFile(verilogFile).mkString
+      if !(verilog.contains("assert") || verilog.contains("Assert")) then
+        throw new java.lang.AssertionError("Verilog should contain assert statement")
+    }
+
+    test("Printf and Assert combined CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new PrintfAssertCombined
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "PrintfAssertCombined")
+      println("PrintfAssertCombined CHIRRTL:")
+      println(chirrtl)
+      writeChirrtl("PrintfAssertCombined.fir", chirrtl)
+      assert(chirrtl.contains("printf("))
+      assert(chirrtl.contains("assert("))
+      val (exitCode, output) = runFirtool("PrintfAssertCombined.fir")
+      println("firtool output:")
+      println(output)
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+      val verilogFile = new File("test-outputs/verilog/PrintfAssertCombined.sv")
+      if !verilogFile.exists() then throw new java.lang.AssertionError("Verilog file should be generated")
+      val verilog = scala.io.Source.fromFile(verilogFile).mkString
+      assert(verilog.contains("assert("))
     }
   }
