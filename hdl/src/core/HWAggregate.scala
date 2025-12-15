@@ -72,7 +72,7 @@ private[hdl] object HWAggregate:
         Clock()
       case r: Reset =>
         Reset()
-      case e: EnumType[?] =>
+      case e: HWEnum[?] =>
         e.cloneType
       case _: DontCare.type =>
         DontCare

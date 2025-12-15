@@ -1595,20 +1595,17 @@ def sram_check(): Unit =
 enum TestEnumOpcode:
   case Idle, Run, Wait
 
-given EnumMeta[TestEnumOpcode] = EnumMeta.fromValues[TestEnumOpcode](
-  Array[TestEnumOpcode](TestEnumOpcode.Idle, TestEnumOpcode.Run, TestEnumOpcode.Wait),
-  "TestEnumOpcode"
-)
-
 def enum_basic_check(): Unit =
-  final case class EnumIO(in: EnumType[TestEnumOpcode], out: EnumType[TestEnumOpcode]) extends Bundle[EnumIO]
+  final case class EnumIO(in: HWEnum[TestEnumOpcode], out: HWEnum[TestEnumOpcode]) extends Bundle[EnumIO]
+
+  TestEnumOpcode.values.foreach(x => println(x))
 
   class EnumModule extends Module:
     given Module = this
-    val io = IO(EnumIO(Input(EnumType[TestEnumOpcode]()), Output(EnumType[TestEnumOpcode]())))
-    val reg = RegInit(EnumType.lit[TestEnumOpcode](TestEnumOpcode.Idle))
-    when(io.in.asUInt === EnumType.lit[TestEnumOpcode](TestEnumOpcode.Run).asUInt) {
-      reg := EnumType.lit[TestEnumOpcode](TestEnumOpcode.Run)
+    val io = IO(EnumIO(Input(HWEnum(TestEnumOpcode)), Output(HWEnum(TestEnumOpcode))))
+    val reg = RegInit(TestEnumOpcode.Idle.toHWEnum)
+    when(io.in.asUInt === TestEnumOpcode.Run.toHWEnum.asUInt) {
+      reg := TestEnumOpcode.Wait.toHWEnum
     }
     io.out := reg
 
@@ -1636,7 +1633,7 @@ def enum_basic_check(): Unit =
               IR.DoPrim(IR.PrimOp.AsUInt, Seq(lit("UInt<2>(1)")))
             )
           ),
-          Seq(IR.Connect(ref("reg"), lit("UInt<2>(1)"))),
+          Seq(IR.Connect(ref("reg"), lit("UInt<2>(2)"))),
           Seq.empty
         ),
         IR.Connect(sf(ref("io"), "out"), ref("reg"))
