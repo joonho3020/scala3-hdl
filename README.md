@@ -57,9 +57,9 @@
 - [x] Memories
     - Make the port API explicit (no inferred ports)
 - [x] CHIRRTL emission
+- [x] Assertions, Prints
 - [x] Enums
     - [ ] Seamless operation btw enum & UInt
-- [ ] Assertions, Prints
 - [ ] Bulk connections
     - core/src/main/scala/chisel3/Data.scala
     - core/src/main/scala/chisel3/Aggregate.scala
