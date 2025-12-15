@@ -2,22 +2,28 @@ package riscv
 
 import hdl._
 
-case class ICacheReqIf(addr: UInt) extends Bundle[ICacheReqIf]
-case class ICacheRespIf(insts: Vec[UInt]) extends Bundle[ICacheRespIf]
-
 case class ICacheIf(
-  req: Valid[ICacheReqIf],
-  resp: Valid[ICacheRespIf]) extends Bundle[ICacheIf]
+  s0_vaddr: Valid[UInt],
+
+  s1_kill:  Bool,
+  s1_paddr: Valid[UInt],
+
+  s2_kill:  Bool,
+  s2_valid: Bool,
+  s2_insts: Vec[UInt],
+) extends Bundle[ICacheIf]
 
 object ICacheIf:
   def apply(p: CoreParams): ICacheIf =
     ICacheIf(
-      req = Output(Valid(ICacheReqIf(
-        addr = UInt(p.pcBits.W)
-      ))),
-      resp = Input(Valid(ICacheRespIf(
-        insts = Vec.fill(p.icacheFetchInstCount)(UInt(p.instBits.W))
-      )))
+      s0_vaddr = Output(Valid(UInt(p.pcBits.W))),
+
+      s1_kill  = Output(Bool()),
+      s1_paddr = Output(Valid(UInt(p.pcBits.W))),
+
+      s2_kill  = Output(Bool()),
+      s2_valid = Input(Bool()),
+      s2_insts = Flipped(Vec.fill(p.icacheFetchInstCount)(UInt(p.instBits.W)))
     )
 
 case class FetchBundle(
@@ -50,8 +56,8 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
 
     // Stage 0
     // - i$ tag lookup
-    io.icache.req.valid := true.B
-    io.icache.req.bits.addr := s0_vpc
+    io.icache.s0_vaddr.valid := true.B
+    io.icache.s0_vaddr.bits  := s0_vpc
 
     // Stage 1 - todo
     // - branch prediction & s0_vpc redirects
@@ -60,6 +66,10 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     val s1_vpc = RegNext(s0_vpc)
     val s1_valid = Reg(Bool())
     s1_valid := DontCare
+
+    io.icache.s1_paddr.valid := s1_valid
+    io.icache.s1_paddr.bits  := s1_vpc // no virtual memory for now
+    io.icache.s1_kill := DontCare
 
     when (s1_valid) {
       s0_vpc := p.nextFetch(s1_vpc)
@@ -75,25 +85,27 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     fetch_bundle := DontCare
     fetch_bundle.pc := s2_vpc
     fetch_bundle.insts.zipWithIndex.foreach((inst_val, idx) => {
-      inst_val.valid := s2_valid && io.icache.resp.valid && s2_fetch_mask(idx).asBool
-      inst_val.bits  := io.icache.resp.bits.insts(idx)
+      inst_val.valid := s2_valid && io.icache.s2_valid && s2_fetch_mask(idx).asBool
+      inst_val.bits  := io.icache.s2_insts(idx)
     })
+
+    io.icache.s2_kill := DontCare
 
     val fb = Module(new FetchBuffer(p, depth = 4))
     fb.io.clear := DontCare
 
-    fb.io.enq.valid := s2_valid && io.icache.resp.valid
+    fb.io.enq.valid := s2_valid && io.icache.s2_valid
     fb.io.enq.bits  := fetch_bundle
     f3_ready := fb.io.enq.ready
-
-    when (s2_valid && io.icache.resp.valid && !f3_ready) {
-      // Fetch buffer full, redirect
-      s0_vpc := s2_vpc
-    }
 
     io.uops.zip(fb.io.deq).foreach((io_uop, fb_uop) => {
       io_uop.valid := fb_uop.valid
       io_uop.bits  := fb_uop.bits
       fb_uop.ready := io_uop.ready
     })
+
+    when (s2_valid && io.icache.s2_valid && !f3_ready) {
+      // Fetch buffer full, redirect
+      s0_vpc := s2_vpc
+    }
   }
