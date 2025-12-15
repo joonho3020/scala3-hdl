@@ -171,6 +171,13 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
           case IR.ReadUnderWrite.Old => "old"
           case IR.ReadUnderWrite.New => "new"
         sb.append(s"${prefix}  read-under-write => $ruwStr\n")
+      case IR.Printf(name, clock, enable, format, args) =>
+        val argsStr = if args.nonEmpty then s", ${args.map(emitExpr).mkString(", ")}" else ""
+        sb.append(s"${prefix}printf(${emitExpr(clock)}, ${emitExpr(enable)}, \"$format\"$argsStr) : ${name.value}\n")
+      case IR.Assert(name, clock, enable, pred, message) =>
+        sb.append(s"${prefix}assert(${emitExpr(clock)}, ${emitExpr(enable)}, ${emitExpr(pred)}, \"$message\") : ${name.value}\n")
+      case IR.Stop(name, clock, enable, exitCode) =>
+        sb.append(s"${prefix}stop(${emitExpr(clock)}, ${emitExpr(enable)}, $exitCode) : ${name.value}\n")
 
   private def emitChirrtlPort(p: IR.Port, isTop: Boolean): String =
     val dirStr = if p.direction == Direction.In then "input" else "output"
@@ -248,3 +255,8 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
           case IR.ReadUnderWrite.Old => "old"
           case IR.ReadUnderWrite.New => "new"
         sb.append(s"${prefix}  read-under-write => $ruwStr\n")
+      case IR.Printf(name, clock, enable, format, args) =>
+        val argsStr = if args.nonEmpty then s", ${args.map(emitChirrtlExpr).mkString(", ")}" else ""
+        sb.append(s"${prefix}printf(${emitChirrtlExpr(clock)}, ${emitChirrtlExpr(enable)}, \"$format\"$argsStr) : ${name.value}\n")
+      case IR.Assert(name, clock, enable, pred, message) =>
+        sb.append(s"${prefix}assert(${emitChirrtlExpr(clock)}, ${emitChirrtlExpr(enable)}, ${emitChirrtlExpr(pred)}, \"$message\") : ${name.value}\n")

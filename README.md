@@ -59,9 +59,11 @@
 - [x] CHIRRTL emission
 - [x] Enums
     - [ ] Seamless operation btw enum & UInt
-- [ ] Switch statements
-- [ ] Bulk connections
 - [ ] Assertions, Prints
+- [ ] Bulk connections
+    - core/src/main/scala/chisel3/Data.scala
+    - core/src/main/scala/chisel3/Aggregate.scala
+- [ ] Switch statements
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
 - [ ] Mixed vectors
 - [ ] Per-class caching??

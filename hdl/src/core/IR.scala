@@ -64,6 +64,8 @@ private[hdl] object IR:
     readwriters: Seq[Identifier],
     readUnderWrite: ReadUnderWrite
   ) extends Stmt
+  final case class Printf(name: Identifier, clock: Expr, enable: Expr, format: String, args: Seq[Expr]) extends Stmt
+  final case class Assert(name: Identifier, clock: Expr, enable: Expr, predicate: Expr, message: String) extends Stmt
 
   final case class Port(name: Identifier, direction: Direction, tpe: Type) extends Serializable
   final case class Module(name: Identifier, ports: Seq[Port], body: Seq[Stmt]) extends Serializable

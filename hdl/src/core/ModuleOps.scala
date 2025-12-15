@@ -127,6 +127,20 @@ private[hdl] object ModuleOps:
     mod.getBuilder.addRaw(raw)
     new WhenDSL(mod, raw)
 
+  private[hdl] def printf(name: Option[String], format: String, args: Seq[HWData], mod: Module): Unit =
+    val printfName = mod.getBuilder.allocateName(name, "printf")
+    val clockExpr = exprFor(mod.getImplicitClock, mod)
+    val enableExpr = IR.DoPrim(IR.PrimOp.Not, Seq(exprFor(mod.getImplicitReset, mod)), Seq.empty)
+    val argExprs = args.map(exprFor(_, mod))
+    mod.getBuilder.addStmt(IR.Printf(IR.Identifier(printfName), clockExpr, enableExpr, format, argExprs))
+
+  private[hdl] def hwAssert(name: Option[String], cond: Bool, message: String, mod: Module): Unit =
+    val assertName = mod.getBuilder.allocateName(name, "assert")
+    val clockExpr = exprFor(mod.getImplicitClock, mod)
+    val enableExpr = IR.DoPrim(IR.PrimOp.Not, Seq(exprFor(mod.getImplicitReset, mod)), Seq.empty)
+    val predExpr = exprFor(cond, mod)
+    mod.getBuilder.addStmt(IR.Assert(IR.Identifier(assertName), clockExpr, enableExpr, predExpr, message))
+
   private def primOp[R <: HWData](result: R, op: IR.PrimOp, args: Seq[HWData], consts: Seq[Int], mod: Module): R =
     result.setNodeKind(NodeKind.PrimOp)
     val name = mod.getBuilder.allocateName(None, op.opName)

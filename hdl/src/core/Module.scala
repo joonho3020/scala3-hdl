@@ -76,8 +76,11 @@ abstract class Module:
       block
     }
 
-// protected inline def Cat[T <: HWData](inline t: Seq[T])(using WalkHW[T]): T =
-// ModuleOps.cat
+  protected inline def Printf(inline format: String, inline args: HWData*): Unit =
+    ${ ModuleMacros.printfImpl('format, 'args, 'this) }
+
+  protected inline def Assert(inline cond: Bool, inline message: String = ""): Unit =
+    ${ ModuleMacros.assertImpl('cond, 'message, 'this) }
 
 object Module:
   inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
@@ -146,3 +149,15 @@ object ModuleMacros:
   def moduleInstImpl[M <: Module: Type](gen: Expr[M], parent: Expr[Module])(using Quotes): Expr[M] =
     val nameOpt = findEnclosingValName
     '{ Module.instantiate($gen, $parent, ${Expr(nameOpt)}) }
+
+  def printfImpl(format: Expr[String], args: Expr[Seq[HWData]], mod: Expr[Module])(using Quotes): Expr[Unit] =
+    val nameOpt = findEnclosingValName
+    '{
+      ModuleOps.printf(${Expr(nameOpt)}, $format, $args, $mod)
+    }
+
+  def assertImpl(cond: Expr[Bool], message: Expr[String], mod: Expr[Module])(using Quotes): Expr[Unit] =
+    val nameOpt = findEnclosingValName
+    '{
+      ModuleOps.hwAssert(${Expr(nameOpt)}, $cond, $message, $mod)
+    }
