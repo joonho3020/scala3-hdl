@@ -1,6 +1,9 @@
 package hdl
 
-case class Decoupled[T <: HWData](valid: Bool, ready: Bool, bits: T) extends Bundle[Decoupled[T]]
+case class Decoupled[T <: HWData](valid: Bool, ready: Bool, bits: T) extends Bundle[Decoupled[T]]:
+  def fire(using m: Module): Bool =
+    ready && valid
+
 object Decoupled:
   def apply[T <: HWData](x: T): Decoupled[T] =
     Decoupled(

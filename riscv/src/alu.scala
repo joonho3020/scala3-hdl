@@ -2,74 +2,85 @@ package riscv
 
 import hdl._
 
-object AluOpCode:
-  val SZ_ALU_FN = 5
-  // def FN_X    = BitPat("b?????")
-  def FN_ADD  = 0.U
-  def FN_SL   = 1.U
-  def FN_SEQ  = 2.U
-  def FN_SNE  = 3.U
-  def FN_XOR  = 4.U
-  def FN_SR   = 5.U
-  def FN_OR   = 6.U
-  def FN_AND  = 7.U
-  def FN_CZEQZ = 8.U
-  def FN_CZNEZ = 9.U
-  def FN_SUB  = 10.U
-  def FN_SRA  = 11.U
-  def FN_SLT  = 12.U
-  def FN_SGE  = 13.U
-  def FN_SLTU = 14.U
-  def FN_SGEU = 15.U
-  def FN_UNARY = 16.U
-  def FN_ROL  = 17.U
-  def FN_ROR  = 18.U
-  def FN_BEXT = 19.U
+case class ALUParams(xlen: Int)
 
-  def FN_ANDN = 24.U
-  def FN_ORN  = 25.U
-  def FN_XNOR = 26.U
+object ALUParams:
+  def fnBits: Int = 5
 
-  def FN_MAX  = 28.U
-  def FN_MIN  = 29.U
-  def FN_MAXU = 30.U
-  def FN_MINU = 31.U
-  // def FN_MAXMIN = BitPat("b111??")
+  enum Opcode:
+    case
+      FN_ADD ,
+      FN_SL  ,
+      FN_SEQ ,
+      FN_SNE ,
+      FN_XOR ,
+      FN_SR  ,
+      FN_OR  ,
+      FN_AND ,
+      FN_CZE ,
+      FN_CZN ,
+      FN_SUB ,
+      FN_SRA ,
+      FN_SLT ,
+      FN_SGE ,
+      FN_SLTU,
+      FN_SGEU,
+      FN_UNA ,
+      FN_ROL ,
+      FN_ROR ,
+      FN_BEX
+// FN_ANDN = 24.U
+// FN_ORN  = 25.U
+// FN_XNOR = 26.U
+// 
+// FN_MAX  = 28.U
+// FN_MIN  = 29.U
+// FN_MAXU = 30.U
+// FN_MINU = 31.U
+// // ef FN_MAXMIN = BitPat("b111??")
+// 
+// FN_DIV  = FN_XOR
+// FN_DIVU = FN_SR
+// FN_REM  = FN_OR
+// FN_REMU = FN_AND
+// 
+// FN_MUL    = FN_ADD
+// FN_MULH   = FN_SL
+// FN_MULHSU = FN_SEQ
+// FN_MULHU  = FN_SNE
 
-  // Mul/div reuse some integer FNs
-  def FN_DIV  = FN_XOR
-  def FN_DIVU = FN_SR
-  def FN_REM  = FN_OR
-  def FN_REMU = FN_AND
-
-  def FN_MUL    = FN_ADD
-  def FN_MULH   = FN_SL
-  def FN_MULHSU = FN_SEQ
-  def FN_MULHU  = FN_SNE
-
-  def isOneOf(cmd: UInt, candidate: Seq[UInt])(using m: Module): Bool =
-    candidate.map(_ === cmd).reduce(_ || _)
+  def isOneOf(cmd: UInt, candidate: Seq[Opcode])(using m: Module): Bool =
+    candidate.map(_.toHWEnum.asUInt === cmd).reduce(_ || _)
 
   def isMulFN(fn: UInt, cmp: UInt)(using m: Module): Bool = fn(1,0) === cmp(1,0)
   def isSub(cmd: UInt)(using m: Module): Bool = cmd(3).asBool
-  def isCmp(cmd: UInt)(using m: Module): Bool = (cmd >= FN_SLT && cmd <= FN_SGEU)
-  def isMaxMin(cmd: UInt)(using m: Module): Bool = (cmd >= FN_MAX && cmd <= FN_MINU)
+  def isCmp(cmd: UInt)(using m: Module): Bool =
+    (cmd >= Opcode.FN_SLT.toHWEnum.asUInt && cmd <= Opcode.FN_SGEU.toHWEnum.asUInt)
+// def isMaxMin(cmd: UInt)(using m: Module): Bool =
+// (cmd >= Opcode.FN_MAX.toHWEnum.asUInt && cmd <= Opcode.FN_MINU.toHWEnum.asUInt)
   def cmpUnsigned(cmd: UInt)(using m: Module): Bool = cmd(1).asBool
   def cmpInverted(cmd: UInt)(using m: Module): Bool = cmd(0).asBool
   def cmpEq(cmd: UInt)(using m: Module): Bool = !cmd(3).asBool
-  def shiftReverse(cmd: UInt)(using m: Module) = !isOneOf(cmd, Seq(FN_SR, FN_SRA, FN_ROR, FN_BEXT))
-  def bwInvRs2(cmd: UInt)(using m: Module) = isOneOf(cmd, Seq(FN_ANDN, FN_ORN, FN_XNOR))
+// def shiftReverse(cmd: UInt)(using m: Module) =
+// !isOneOf(cmd, Seq(Opcode.FN_SR, Opcode.FN_SRA, Opcode.FN_ROR, Opcode.FN_BEXT))
+// def bwInvRs2(cmd: UInt)(using m: Module) = isOneOf(cmd, Seq(Opcode.FN_ANDN, Opcode.FN_ORN, Opcode.FN_XNOR))
 
-import AluOpCode._
+import ALUParams.Opcode._
+import ALUParams._
 
-case class ALUParams(xlen: Int)
-
-case class ALUIO(fn: UInt, in2: UInt, in1: UInt, out: UInt, adder_out: UInt, cmp_out: Bool) extends Bundle[ALUIO]
+case class ALUIO(
+  fn: UInt, // FIXME: use proper HWEnum
+  in2: UInt,
+  in1: UInt,
+  out: UInt,
+  adder_out: UInt,
+  cmp_out: Bool
+) extends Bundle[ALUIO]
 
 object ALUIO:
   def apply(p: ALUParams): ALUIO =
     ALUIO(
-      fn  = Input(UInt(SZ_ALU_FN.W)),
+      fn  = Input(UInt(ALUParams.fnBits.W)),
       in2 = Input(UInt(p.xlen.W)),
       in1 = Input(UInt(p.xlen.W)),
 
@@ -78,12 +89,11 @@ object ALUIO:
       cmp_out   = Output(Bool())
     )
 
-abstract class AbstractALU(p: ALUParams) extends Module:
+class ALU(p: ALUParams) extends Module:
   given Module = this
-  val io = IO(ALUIO(p))
-
-class ALU(p: ALUParams) extends AbstractALU(p):
   val xLen = p.xlen
+
+  val io = IO(ALUIO(p))
 
   // ADD, SUB
   val in2_inv = Mux(isSub(io.fn), ~io.in2, io.in2)
@@ -181,5 +191,3 @@ class ALU(p: ALUParams) extends AbstractALU(p):
   //   require(xLen == 64)
   //   when (io.dw === DW_32) { io.out := Cat(Fill(32, out(31)), out(31,0)) }
   // }
-  // 
-  // 

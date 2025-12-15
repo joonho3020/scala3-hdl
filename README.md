@@ -57,8 +57,11 @@
 - [x] Memories
     - Make the port API explicit (no inferred ports)
 - [x] CHIRRTL emission
-- [ ] Enums
+- [x] Enums
+    - [ ] Seamless operation btw enum & UInt
 - [ ] Switch statements
+- [ ] Bulk connections
+- [ ] Assertions, Prints
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
 - [ ] Mixed vectors
 - [ ] Per-class caching??
