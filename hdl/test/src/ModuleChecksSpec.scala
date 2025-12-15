@@ -1644,6 +1644,116 @@ def enum_basic_check(): Unit =
   println(rendered)
   assertDesigns("Enum Check", designs, expected)
 
+def switch_check(): Unit =
+  final case class SwitchIO(sel: UInt, out: UInt) extends Bundle[SwitchIO]
+  final case class SwitchEnumIO(in: HWEnum[TestEnumOpcode], out: HWEnum[TestEnumOpcode]) extends Bundle[SwitchEnumIO]
+
+  class SwitchUInt extends Module:
+    given Module = this
+    val io = IO(SwitchIO(Input(UInt(Width(2))), Output(UInt(Width(4)))))
+    val out = Wire(UInt(Width(4)))
+    out := 0.U(Width(4))
+    io.out := out
+    io.sel switch {
+      is(0.U(Width(2))) { out := 1.U(Width(4)) }
+      is(1.U(Width(2))) { out := 2.U(Width(4)) }
+      default { out := 3.U(Width(4)) }
+    }
+
+  class SwitchEnum extends Module:
+    given Module = this
+    val io = IO(SwitchEnumIO(Input(HWEnum(TestEnumOpcode)), Output(HWEnum(TestEnumOpcode))))
+    val reg = RegInit(TestEnumOpcode.Idle.toHWEnum)
+    reg switch {
+      is(TestEnumOpcode.Idle.toHWEnum) { reg := TestEnumOpcode.Run.toHWEnum }
+      is(TestEnumOpcode.Run.toHWEnum) { reg := TestEnumOpcode.Wait.toHWEnum }
+      default { reg := TestEnumOpcode.Idle.toHWEnum }
+    }
+    io.out := reg
+
+  val elaborator = new Elaborator
+  val modUInt = new SwitchUInt
+  val designsUInt = elaborator.elaborate(modUInt)
+  val expectedUInt = Seq(
+    module(
+      "SwitchUInt",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("sel", true, u(2)),
+          ("out", false, u(4))
+        ))
+      ),
+      Seq(
+        wire("out", u(4)),
+        IR.Connect(ref("out"), lit("UInt<4>(0)")),
+        IR.Connect(sf(ref("io"), "out"), ref("out")),
+        IR.When(
+          eqv(sf(ref("io"), "sel"), lit("UInt<2>(0)")),
+          Seq(
+            IR.Connect(ref("out"), lit("UInt<4>(1)"))
+          ),
+          Seq(
+            IR.When(
+              eqv(sf(ref("io"), "sel"), lit("UInt<2>(1)")),
+              Seq(
+                IR.Connect(ref("out"), lit("UInt<4>(2)"))
+              ),
+              Seq(
+                IR.Connect(ref("out"), lit("UInt<4>(3)"))
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+  val renderedUInt = elaborator.emitAll(designsUInt)
+  println(renderedUInt)
+  assertDesigns("Switch UInt Check", designsUInt, expectedUInt)
+
+  val elaborator2 = new Elaborator
+  val modEnum = new SwitchEnum
+  val designsEnum = elaborator2.elaborate(modEnum)
+  val expectedEnum = Seq(
+    module(
+      "SwitchEnum",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("in", true, u(2)),
+          ("out", false, u(2))
+        ))
+      ),
+      Seq(
+        regReset("reg", u(2), ref("clock"), ref("reset"), lit("UInt<2>(0)")),
+        IR.When(
+          eqv(ref("reg"), lit("UInt<2>(0)")),
+          Seq(
+            IR.Connect(ref("reg"), lit("UInt<2>(1)"))
+          ),
+          Seq(
+            IR.When(
+              eqv(ref("reg"), lit("UInt<2>(1)")),
+              Seq(
+                IR.Connect(ref("reg"), lit("UInt<2>(2)"))
+              ),
+              Seq(
+                IR.Connect(ref("reg"), lit("UInt<2>(0)"))
+              )
+            )
+          )
+        ),
+        IR.Connect(sf(ref("io"), "out"), ref("reg"))
+      )
+    )
+  )
+  val renderedEnum = elaborator2.emitAll(designsEnum)
+  println(renderedEnum)
+  assertDesigns("Switch Enum Check", designsEnum, expectedEnum)
+
 object ModuleChecksSpec extends TestSuite:
   val tests = Tests {
     test("simple_module_test") { simple_module_test() }
@@ -1668,5 +1778,6 @@ object ModuleChecksSpec extends TestSuite:
     test("bitwise_reverse_check") { bitwise_reverse_check() }
     test("mux_and_concat_check") { mux_and_concat_check() }
     test("enum_basic_check") { enum_basic_check() }
+    test("switch_check") { switch_check() }
 // test("sram_check") { sram_check() }
   }

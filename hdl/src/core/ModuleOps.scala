@@ -396,6 +396,17 @@ extension (h: HWData)
   def asUInt(using m: Module): UInt =
     ModuleOps.asUInt(h, m)
 
+extension [T <: HWData](selector: T)
+  inline infix def switch(inline body: SwitchBuilder[T] ?=> Unit)(using m: Module): Unit =
+    given SwitchBuilder[T] = new SwitchBuilder(selector, summon[Module])
+    body
+
+def is[T <: HWData](value: T)(block: => Unit)(using builder: SwitchBuilder[T]): Unit =
+  builder.addCase(value)(block)
+
+def default(block: => Unit)(using builder: SwitchBuilder[?]): Unit =
+  builder.addDefault(block)
+
 final class WhenDSL(private val mod: Module, private val current: RawWhen):
   def elsewhen(cond: Bool)(block: => Unit): WhenDSL =
     val body = mod.getBuilder.captureBody {
@@ -409,3 +420,35 @@ final class WhenDSL(private val mod: Module, private val current: RawWhen):
     current.alt = mod.getBuilder.captureBody {
       block
     }
+
+final class SwitchBuilder[T <: HWData](selector: T, mod: Module):
+  private var current: Option[WhenDSL] = None
+
+  def addCase(value: T)(block: => Unit): Unit =
+    val cond = SwitchBuilder.condition(selector, value, mod)
+    val next = current match
+      case None => ModuleOps.when(cond, mod) {
+        block
+      }
+      case Some(prev) => prev.elsewhen(cond) {
+        block
+      }
+    current = Some(next)
+
+  def addDefault(block: => Unit): Unit =
+    current match
+      case Some(prev) => prev.otherwise {
+        block
+      }
+      case None => ModuleOps.when(true.B, mod) {
+        block
+      }
+
+object SwitchBuilder:
+  def condition(selector: HWData, value: HWData, mod: Module): Bool = (selector, value) match
+    case (l: UInt, r: UInt) => ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, l, r, mod)
+    case (l: Bool, r: Bool) => ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, l, r, mod)
+    case (l: HWEnum[?], r: HWEnum[?]) =>
+      if l.enumObj != r.enumObj then throw new IllegalArgumentException("Enum type mismatch")
+      ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, l, r, mod)
+    case _ => throw new IllegalArgumentException("Switch only supports UInt, Bool, and Enum types")

@@ -984,6 +984,20 @@ class OneReadOneReadWritePortSRAM(width: Int) extends Module:
   io.rdata_0 := mem.readPorts(0).read(io.raddr_0, !io.wen)
   io.rdata_1 := mem.readPorts(1).read(io.raddr_1, !io.wen && !io.ren)
 
+final case class SwitchIO(sel: UInt, out: UInt) extends Bundle[SwitchIO]
+final case class SwitchEnumIO(in: HWEnum[TestEnumOpcode], out: HWEnum[TestEnumOpcode]) extends Bundle[SwitchEnumIO]
+
+class SwitchEnum extends Module:
+  given Module = this
+  val io = IO(SwitchEnumIO(Input(HWEnum(TestEnumOpcode)), Output(HWEnum(TestEnumOpcode))))
+  val reg = RegInit(TestEnumOpcode.Idle.toHWEnum)
+  reg switch {
+    is(TestEnumOpcode.Idle.toHWEnum) { reg := TestEnumOpcode.Run.toHWEnum }
+    is(TestEnumOpcode.Run.toHWEnum) { reg := TestEnumOpcode.Wait.toHWEnum }
+    default { reg := TestEnumOpcode.Idle.toHWEnum }
+  }
+  io.out := reg
+
 object ChirrtlEmissionSpec extends TestSuite:
   def writeChirrtl(filename: String, content: String): Unit =
     val dir = new File("test-outputs/chirrtl")
@@ -1291,5 +1305,15 @@ object ChirrtlEmissionSpec extends TestSuite:
       if !verilogFile.exists() then throw new java.lang.AssertionError("Verilog file should be generated")
       val verilog = scala.io.Source.fromFile(verilogFile).mkString
       assert(verilog.contains("assert("))
+    }
+
+    test("Switch emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new SwitchEnum
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "SwitchEnum")
+      writeChirrtl("SwitchEnum.fir", chirrtl)
+      val (exitCode, output) = runFirtool(s"SwitchEnum.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
   }

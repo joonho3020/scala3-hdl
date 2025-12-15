@@ -899,3 +899,32 @@ For both enums and switch statements, as we are using CHIRRTL for Verilog emissi
 However, in the future, if we have these types encoded in the IR, a new compiler stack can use these types instead of treating things uniformly.
 
 Suggest how we we can integrate support for enums and switch statements seamlessly into our framework.
+
+```scala
+enum FSMStates:
+    case Idle, Run
+
+val state = Reg(HWEnum(FSMState))
+
+state switch {
+    is FSMState.Idle.toHWEnum => {
+        // put logic here
+    }
+    is FSMState.Run.toHWEnum => {
+        // put logic here
+    }
+}
+
+
+val state2 = Reg(UInt(3.W))
+
+state2 switch {
+    is 0.U => {
+    }
+    is 1.U => {
+    }
+}
+```
+
+## Separate Types for OneHot
+
