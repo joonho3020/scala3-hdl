@@ -4,6 +4,7 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.Duration
+import hdl.IR.PrimOp
 
 final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String => Unit = println):
   private implicit val ec: ExecutionContext = ExecutionContext.global
@@ -207,7 +208,13 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     case IR.SubField(expr, field) => s"${emitChirrtlExpr(expr)}.${field.value}"
     case IR.DoPrim(op, args, consts) =>
       val parts = args.map(emitChirrtlExpr) ++ consts.map(_.toString)
-      s"${op.opName}(${parts.mkString(", ")})"
+      op match {
+        case PrimOp.AsBool =>
+          s"${parts.mkString(", ")}"
+        case _ =>
+          val parts = args.map(emitChirrtlExpr) ++ consts.map(_.toString)
+          s"${op.opName}(${parts.mkString(", ")})"
+      }
 
   private def emitChirrtlStmt(stmt: IR.Stmt, indent: Int, sb: StringBuilder): Unit =
     val prefix = "    " * indent

@@ -60,14 +60,17 @@
 - [x] Assertions, Prints
 - [x] Enums
     - [ ] Seamless operation btw enum & UInt
-- [ ] Bulk connections
-    - core/src/main/scala/chisel3/Data.scala
-    - core/src/main/scala/chisel3/Aggregate.scala
 - [ ] Switch statements
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
 - [ ] Mixed vectors
 - [ ] Per-class caching??
     - Currently, the caching is on a file basis as we are relying on hasing classfiles. Although this is robust, we can achieve finer-grained incrementalism by other methods
+    - Make caching more robust. Need to be pessemistic in nature. Never want cases where artifacts aren't invalidated even if they should be
+- [x] Bulk connections
+    - core/src/main/scala/chisel3/Data.scala
+    - core/src/main/scala/chisel3/Aggregate.scala
+    - Actually, the only case where this add value is when the LHS & RHS types don't match. If they do writing `:=` suffices
+    - In the future, we can separate out `<>` and `:=` to each represent "bulk connections with same type", and "single connection with same type". However, even in this case, I doubt that we should allow connections with different data types
 
 ## Misc Notes
 

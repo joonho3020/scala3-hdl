@@ -108,7 +108,8 @@ private[hdl] object ModuleOps:
         case (dv: Vec[?], sv: Vec[?]) =>
           val dElems = dv.elems
           val sElems = sv.elems
-          val len = math.min(dElems.length, sElems.length)
+          assert(dElems.length == sElems.length)
+          val len = dElems.length
           var i = 0
           while i < len do
             connect(dElems(i).asInstanceOf[HWData], sElems(i).asInstanceOf[HWData], mod)

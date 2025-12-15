@@ -77,7 +77,8 @@ class FetchBuffer(p: CoreParams, depth: Int) extends Module:
       val cur_ptr = deq_ptr + i.U
       val r = row(cur_ptr)
       val c = col(cur_ptr)
-      io.deq(i) := mem(r)(c)
+      io.deq(i).valid := mem(r)(c).valid
+      io.deq(i).bits  := mem(r)(c).bits
     }
 
     when (io.clear) {
