@@ -8,6 +8,7 @@ private[hdl] object ModuleOps:
     case _: Bool => IR.BoolType
     case _: Clock => IR.ClockType
     case _: Reset => IR.ResetType
+    case e: EnumType[?] => IR.UIntType(e.w)
     case v: Vec[?] =>
       val elemType = v.elems.headOption.map(irTypeOf).getOrElse(IR.BoolType)
       IR.VecType(v.length, elemType)
@@ -99,6 +100,11 @@ private[hdl] object ModuleOps:
       mod.getBuilder.addStmt(IR.Invalid(lhs))
     else
       (dst, src) match
+        case (de: EnumType[?], se: EnumType[?]) =>
+          ensureEnumCompat(de, se)
+          val lhs = locFor(de, mod)
+          val rhs = exprFor(se, mod)
+          mod.getBuilder.addStmt(IR.Connect(lhs, rhs))
         case (dv: Vec[?], sv: Vec[?]) =>
           val dElems = dv.elems
           val sElems = sv.elems
@@ -163,6 +169,7 @@ private[hdl] object ModuleOps:
       case c: Clock     => Seq(asUInt(c, mod))
       case r: Reset     => Seq(asUInt(r, mod))
       case v: Vec[?]    => Seq(asUInt(v, mod))
+      case e: EnumType[?] => Seq(asUInt(e, mod))
       case b: Bundle[?] => Seq(asUInt(b, mod))
       case _: DontCare.type => Seq.empty
     }
@@ -200,6 +207,7 @@ private[hdl] object ModuleOps:
     case _: Bool => "Bool"
     case _: Clock => "Clock"
     case _: Reset => "Reset"
+    case e: EnumType[?] => s"Enum<${e.meta.typeName}>"
     case v: Vec[?] =>
       val elemStr = v.elems.headOption.map(e => formatType(e)).getOrElse("?")
       s"Vec<${v.length}, $elemStr>"
@@ -221,6 +229,9 @@ private[hdl] object ModuleOps:
     case _: Bool => IR.Identifier(s"Bool($value)")
     case _: Clock => IR.Identifier(s"Clock($value)")
     case _: Reset => IR.Identifier(s"Reset($value)")
+    case e: EnumType[?] =>
+      val ord = value.asInstanceOf[scala.reflect.Enum].ordinal
+      IR.Identifier(e.w.map(w => s"UInt<$w>($ord)").getOrElse(s"UInt($ord)"))
     case _ => IR.Identifier(value.toString)
 
   private def dirPrefixOf(h: HWData): String =
@@ -231,6 +242,10 @@ private[hdl] object ModuleOps:
 
   def assignRefs[T](value: T, base: String): Unit =
     HWAggregate.foreach(value, base)((h, path) => h.setRef(IR.Identifier(path)))
+
+  private def ensureEnumCompat(a: EnumType[?], b: EnumType[?]): Unit =
+    if a.meta.typeName != b.meta.typeName then
+      throw new IllegalArgumentException("Enum type mismatch")
 
 extension [T <: HWData](dst: T)
   def :=(src: T)(using m: Module): Unit =
@@ -333,6 +348,20 @@ extension (lhs: Bool)
 
   def unary_!(using m: Module): Bool =
     ModuleOps.prim1Op(Bool(), IR.PrimOp.Not, lhs, m)
+
+  def asUInt(using m: Module): UInt =
+    ModuleOps.asUInt(lhs, m)
+
+extension [E <: scala.reflect.Enum] (lhs: EnumType[E])
+  def ===(rhs: EnumType[E])(using m: Module): Bool =
+    if lhs.meta.typeName != rhs.meta.typeName then
+      throw new IllegalArgumentException("Enum type mismatch")
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, m)
+
+  def =/=(rhs: EnumType[E])(using m: Module): Bool =
+    if lhs.meta.typeName != rhs.meta.typeName then
+      throw new IllegalArgumentException("Enum type mismatch")
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Neq, lhs, rhs, m)
 
   def asUInt(using m: Module): UInt =
     ModuleOps.asUInt(lhs, m)

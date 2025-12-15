@@ -72,6 +72,8 @@ private[hdl] object HWAggregate:
         Clock()
       case r: Reset =>
         Reset()
+      case e: EnumType[?] =>
+        e.cloneType
       case _: DontCare.type =>
         DontCare
       case v: Vec[?] =>

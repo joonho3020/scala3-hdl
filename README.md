@@ -874,3 +874,20 @@ sram.readwrite(port_id).read(addr)
 If we have APIs that look something like the above, we can use `read`, `write` functions to implicitly set the `enable`, `address`, `writedata` signals.
 Furthermore, we can add port arbitration logic by enabling us to index into ports by hardware constructs (`port_id` in the above example).
 Finally, the SRAMs are still structural in nature.
+
+---
+
+## Enums and Switch Statements
+
+Enums in Chisel are mapped to UInt literals.
+Innocuous as it may seem, this can cause problems when debugging as, FSM states are represented as random UInt values with no semantics.
+Similarly, the designer must bounce back and forth between the waveform viewer and the bus protocol specification to figure out the bus message types.
+It would be great if we can enable designers to define custom enums that are of HWData, use these as Bundle fields, Vec elements and so on.
+
+For switch statements, FIRRTL converts them to when/elsewhen/otherwise statements.
+Instead, it would be best if we can preserve the switch statement so that we can emit better Verilog (which can help the backend tools perform better optimizations).
+
+For both enums and switch statements, as we are using CHIRRTL for Verilog emission, we should still emit UInt literals and when/elsewhen/otherwise statements.
+However, in the future, if we have these types encoded in the IR, a new compiler stack can use these types instead of treating things uniformly.
+
+Suggest how we we can integrate support for enums and switch statements seamlessly into our framework.

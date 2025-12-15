@@ -3,6 +3,8 @@ package hdl
 import scala.deriving.*
 import scala.compiletime.*
 import scala.NamedTuple
+import scala.reflect.ClassTag
+import scala.language.implicitConversions
 import scala.util.NotGiven
 import scala.quoted.*
 
@@ -101,6 +103,56 @@ sealed class Reset extends HWData:
 
 object Reset:
   def apply(): Reset = new Reset
+
+trait EnumMeta[E <: scala.reflect.Enum]:
+  def values: Array[E]
+  def width: Width
+  def typeName: String
+  def fromOrdinal(idx: Int): E
+  def valueOf(name: String): E
+  def all: Seq[E] = values.toSeq
+
+private final class DefaultEnumMeta[E <: scala.reflect.Enum](vals: Array[E], tn: String) extends EnumMeta[E]:
+  private val nameMap = vals.map(v => v.toString -> v).toMap
+  val values: Array[E] = vals
+  val width: Width = Width(log2Ceil(math.max(1, values.length)))
+  val typeName: String = tn
+  def fromOrdinal(idx: Int): E = values(idx)
+  def valueOf(name: String): E = nameMap.getOrElse(name, throw new NoSuchElementException(name))
+
+object EnumMeta:
+  def fromValues[E <: scala.reflect.Enum](values: Array[E], name: String): EnumMeta[E] =
+    new DefaultEnumMeta[E](values, name)
+
+  inline given derived[E <: scala.reflect.Enum](using ClassTag[E]): EnumMeta[E] =
+    val cls = summon[ClassTag[E]].runtimeClass
+    val vals = cls.getEnumConstants.asInstanceOf[Array[E]]
+    new DefaultEnumMeta[E](vals, cls.getSimpleName)
+
+final class EnumType[E <: scala.reflect.Enum](val meta: EnumMeta[E]) extends HWData:
+  val w: Option[Width] = Some(meta.width)
+  def setLitVal(payload: Any): Unit = literal = Some(payload.asInstanceOf[E])
+  def getLitVal: E =
+    literal match
+      case Some(v) => v.asInstanceOf[E]
+      case None => throw new NoSuchElementException("Enum does not carry a literal value")
+  def cloneType: EnumType[E] = new EnumType[E](meta)
+  override def toString(): String = s"Enum(${meta.typeName}, $dir)"
+
+object EnumType:
+  def apply[E <: scala.reflect.Enum]()(using meta: EnumMeta[E]): EnumType[E] = new EnumType[E](meta)
+  def lit[E <: scala.reflect.Enum](value: E)(using meta: EnumMeta[E]): EnumType[E] =
+    val e = new EnumType[E](meta)
+    e.setNodeKind(NodeKind.Lit)
+    e.setLitVal(value)
+    e
+  def fromUInt[E <: scala.reflect.Enum](u: UInt)(using m: Module, meta: EnumMeta[E]): EnumType[E] =
+    val e = new EnumType[E](meta)
+    e.setIRExpr(ModuleOps.exprFor(u, m))
+    e
+
+given [E <: scala.reflect.Enum] (using meta: EnumMeta[E]): Conversion[E, EnumType[E]] with
+  def apply(value: E): EnumType[E] = EnumType.lit(value)
 
 object DontCare extends HWData:
   def setLitVal(payload: Any): Unit = ()
@@ -259,6 +311,8 @@ private[hdl] object HWLiteral:
       case (b: Bool, v: Boolean) => b.setLitVal(v)
       case (c: Clock, v: Boolean) => c.setLitVal(v)
       case (r: Reset, v: Boolean) => r.setLitVal(v)
+      case (e: EnumType[?], v: Enum[?]) =>
+        e.setLitVal(v)
       case (v: Vec[?], seq: Seq[?]) =>
         v.elems.zip(seq).foreach { case (e, v2) => set(e, v2) }
         v.literal = Some(seq)

@@ -2,6 +2,8 @@ package hdl
 
 import utest.*
 import scala.compiletime.testing.*
+import scala.reflect.ClassTag
+import hdl.ModuleOps.{given, *}
 
 final case class SimpleIO(in: UInt, out: UInt) extends Bundle[SimpleIO]
 
@@ -1590,6 +1592,61 @@ def sram_check(): Unit =
   assertDesigns("SRAM Check", d, expected)
   println("=" * 50)
 
+enum TestEnumOpcode:
+  case Idle, Run, Wait
+
+given EnumMeta[TestEnumOpcode] = EnumMeta.fromValues[TestEnumOpcode](
+  Array[TestEnumOpcode](TestEnumOpcode.Idle, TestEnumOpcode.Run, TestEnumOpcode.Wait),
+  "TestEnumOpcode"
+)
+
+def enum_basic_check(): Unit =
+  final case class EnumIO(in: EnumType[TestEnumOpcode], out: EnumType[TestEnumOpcode]) extends Bundle[EnumIO]
+
+  class EnumModule extends Module:
+    given Module = this
+    val io = IO(EnumIO(Input(EnumType[TestEnumOpcode]()), Output(EnumType[TestEnumOpcode]())))
+    val reg = RegInit(EnumType.lit[TestEnumOpcode](TestEnumOpcode.Idle))
+    when(io.in.asUInt === EnumType.lit[TestEnumOpcode](TestEnumOpcode.Run).asUInt) {
+      reg := EnumType.lit[TestEnumOpcode](TestEnumOpcode.Run)
+    }
+    io.out := reg
+
+  val elaborator = new Elaborator
+  val mod = new EnumModule
+  val designs = elaborator.elaborate(mod)
+  val expected = Seq(
+    module(
+      "EnumModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("in", true, u(2)),
+          ("out", false, u(2))
+        ))
+      ),
+      Seq(
+        regReset("reg", u(2), ref("clock"), ref("reset"), lit("UInt<2>(0)")),
+        IR.When(
+          IR.DoPrim(
+            IR.PrimOp.Eq,
+            Seq(
+              IR.DoPrim(IR.PrimOp.AsUInt, Seq(sf(ref("io"), "in"))),
+              IR.DoPrim(IR.PrimOp.AsUInt, Seq(lit("UInt<2>(1)")))
+            )
+          ),
+          Seq(IR.Connect(ref("reg"), lit("UInt<2>(1)"))),
+          Seq.empty
+        ),
+        IR.Connect(sf(ref("io"), "out"), ref("reg"))
+      )
+    )
+  )
+  val rendered = elaborator.emitAll(designs)
+  println(rendered)
+  assertDesigns("Enum Check", designs, expected)
+
 object ModuleChecksSpec extends TestSuite:
   val tests = Tests {
     test("simple_module_test") { simple_module_test() }
@@ -1613,5 +1670,6 @@ object ModuleChecksSpec extends TestSuite:
     test("bit_select_check") { bit_select_check() }
     test("bitwise_reverse_check") { bitwise_reverse_check() }
     test("mux_and_concat_check") { mux_and_concat_check() }
+    test("enum_basic_check") { enum_basic_check() }
 // test("sram_check") { sram_check() }
   }
