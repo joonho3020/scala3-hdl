@@ -101,6 +101,9 @@ class ALU(p: ALUParams) extends Module:
   val in1_and_in2 = io.in1 & in2_inv
   io.adder_out := io.in1 + in2_inv + isSub(io.fn).asUInt
 
+  io.cmp_out := DontCare
+  io.out     := DontCare
+
   // // SLT, SLTU
   // val slt =
   //   Mux(io.in1(xLen-1) === io.in2(xLen-1), io.adder_out(xLen-1),

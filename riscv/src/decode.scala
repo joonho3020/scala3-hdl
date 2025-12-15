@@ -21,7 +21,10 @@ class Decoder(p: CoreParams) extends Module:
 
     def aluOp(funct3: UInt, funct7: UInt): HWEnum[ALUParams.Opcode] =
       val op = Wire(new HWEnum(ALUParams.Opcode))
-      when(funct3 === 0.U(3.W) && funct7 === 0x20.U(7.W)) {
+      op := DontCare
+      when (funct3 === 0.U(3.W) && funct7 === 0.U(7.W)) {
+        op := FN_ADD.toHWEnum
+      } .elsewhen(funct3 === 0.U(3.W) && funct7 === 0x20.U(7.W)) {
         op := FN_SUB.toHWEnum
       }.elsewhen(funct3 === 1.U(3.W) && funct7 === 0.U(7.W)) {
         op := FN_SL.toHWEnum
@@ -48,6 +51,7 @@ class Decoder(p: CoreParams) extends Module:
 
       val enq_uop = enq.bits
       val deq_uop = deq.bits
+      deq_uop        := enq_uop
       deq_uop.opcode := enq_uop.inst(6,  0)
       deq_uop.funct3 := enq_uop.inst(14, 12)
       deq_uop.funct7 := enq_uop.inst(31, 25)

@@ -35,6 +35,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       f.ready := d.ready
     })
 
+    dec.io.deq.foreach(x => x.ready := false.B)
+
     val pipe0 = Module(new ALU(ALUParams(xlen = p.xlenBits)))
     dec.io.deq(0).ready := true.B
     pipe0.io.fn  := dec.io.deq(0).bits.aluOp.asUInt

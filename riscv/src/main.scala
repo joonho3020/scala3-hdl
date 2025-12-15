@@ -46,3 +46,4 @@ def runFirtool(firFile: String): (Int, String) =
 
   writeChirrtl(fir_filename, chirrtl)
   val (exitCode, output) = runFirtool(fir_filename)
+  println(output)
