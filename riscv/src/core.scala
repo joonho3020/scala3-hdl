@@ -73,6 +73,8 @@ object CoreTopIO:
 class CoreTop(p: CoreParams) extends Module with CoreCacheable(p):
   val io = IO(CoreTopIO(p))
   body {
+    dontTouch(io)
+
     val frontend = Module(new Frontend(p))
 
     io.mem := frontend.io.mem

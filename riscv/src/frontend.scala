@@ -50,6 +50,7 @@ object FrontendIf:
 class Frontend(p: CoreParams) extends Module:
   val io = IO(FrontendIf(p))
   body {
+    dontTouch(io)
 
     val f3_ready = Wire(Bool())
 

@@ -15,6 +15,7 @@ private[hdl] final class ModuleBuilder(val moduleBaseName: String):
   private val bodyStack = mutable.Stack[mutable.ArrayBuffer[RawStmt]]()
   bodyStack.push(mutable.ArrayBuffer.empty[RawStmt])
   private var tempCounter = 0
+  private val annotations = mutable.ArrayBuffer.empty[String]
 
   def freshName(prefix: String): String =
     tempCounter += 1
@@ -40,6 +41,7 @@ private[hdl] final class ModuleBuilder(val moduleBaseName: String):
   def addStmt(stmt: IR.Stmt): Unit = addRaw(RawLeaf(stmt))
   def addInst(name: String, mod: Module, base: String): Unit =
     addRaw(RawInst(name, mod, base))
+  def addDontTouch(target: String): Unit = annotations += target
 
   def captureBody(thunk: => Unit): Seq[RawStmt] =
     val buf = mutable.ArrayBuffer.empty[RawStmt]
@@ -54,7 +56,10 @@ private[hdl] final class ModuleBuilder(val moduleBaseName: String):
   def snapshot(label: String, instLabels: Map[Module, String]): ElaboratedDesign =
     val body = currentBody.toSeq.map(rawToIR(_, instLabels))
     val id = IR.Identifier(label)
-    val mod = IR.Module(id, ports.toSeq, body)
+    val annos = annotations.toSeq.map { target =>
+      IR.Annotation(IR.Identifier("firrtl.transforms.DontTouchAnnotation"), IR.AnnotationTarget(id, IR.Identifier(target)))
+    }
+    val mod = IR.Module(id, ports.toSeq, body, annos)
     ElaboratedDesign(id, mod)
 
   private def rawToIR(rs: RawStmt, instLabels: Map[Module, String]): IR.Stmt = rs match

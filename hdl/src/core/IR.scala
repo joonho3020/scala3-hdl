@@ -43,6 +43,9 @@ private[hdl] object IR:
   final case class SubAccess(expr: Expr, index: Expr) extends Expr
   final case class SubField(expr: Expr, field: Identifier) extends Expr
 
+  final case class AnnotationTarget(module: Identifier, path: Identifier) extends Serializable
+  final case class Annotation(cls: Identifier, target: AnnotationTarget) extends Serializable
+
   sealed trait Stmt extends Serializable
   case object Skip extends Stmt
   final case class Wire(name: Identifier, tpe: Type) extends Stmt
@@ -69,5 +72,5 @@ private[hdl] object IR:
   final case class Assert(name: Identifier, clock: Expr, enable: Expr, predicate: Expr, message: String) extends Stmt
 
   final case class Port(name: Identifier, direction: Direction, tpe: Type) extends Serializable
-  final case class Module(name: Identifier, ports: Seq[Port], body: Seq[Stmt]) extends Serializable
+  final case class Module(name: Identifier, ports: Seq[Port], body: Seq[Stmt], annotations: Seq[Annotation] = Seq.empty) extends Serializable
   final case class Circuit(name: Identifier, modules: Seq[Module]) extends Serializable

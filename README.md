@@ -61,10 +61,11 @@
 - [x] Switch statements
 - [x] Enums
     - [x] Seamless operation btw enum & UInt
+- [x] HWAggregate vs CloneType? Maybe just remove clonetype all together?
+- [x] DontTouch annos
 - [ ] Better naming macros...?
 - [ ] Fix caching support
     - Must invalidate parent modules when child modules are removed
-- [ ] HWAggregate vs CloneType?
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
 - [ ] Mixed vectors
 - [ ] Per-class caching??

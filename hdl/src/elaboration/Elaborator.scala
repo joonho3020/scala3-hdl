@@ -88,8 +88,14 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
 
   def emitChirrtl(designs: Seq[ElaboratedDesign], topName: String): String =
     val sb = new StringBuilder
+    val annotations = designs.flatMap(_.ir.annotations)
     sb.append("FIRRTL version 3.3.0\n")
-    sb.append(s"circuit $topName :\n")
+    if annotations.nonEmpty then
+      sb.append(s"circuit $topName :%[[\n")
+      sb.append(annotations.map(a => s"  ${emitAnnotation(a, topName)}").mkString(",\n"))
+      sb.append("\n]]\n")
+    else
+      sb.append(s"circuit $topName :\n")
     designs.foreach { design =>
       val isTop = design.ir.name.value == topName
       emitChirrtlModule(design.ir, isTop, sb)
@@ -223,7 +229,11 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
         case _ =>
           val parts = args.map(emitChirrtlExpr) ++ consts.map(_.toString)
           s"${op.opName}(${parts.mkString(", ")})"
-      }
+    }
+
+  private def emitAnnotation(anno: IR.Annotation, circuit: String): String =
+    val target = s"~$circuit|${anno.target.module.value}>${anno.target.path.value}"
+    s"""{"class":"${anno.cls.value}","target":"$target"}"""
 
   private def emitChirrtlStmt(stmt: IR.Stmt, indent: Int, sb: StringBuilder): Unit =
     val prefix = "    " * indent

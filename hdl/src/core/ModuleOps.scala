@@ -269,6 +269,27 @@ private[hdl] object ModuleOps:
     if a.enumObj != b.enumObj then
       throw new IllegalArgumentException("Enum type mismatch")
 
+  private def pathFromExpr(expr: IR.Expr): Option[String] = expr match
+    case IR.Ref(name) => Some(name.value)
+    case IR.SubField(inner, field) => pathFromExpr(inner).map(base => s"$base.${field.value}")
+    case IR.SubIndex(inner, value) => pathFromExpr(inner).map(base => s"$base[$value]")
+    case _ => None
+
+  def dontTouch[T <: HWData](data: T, mod: Module): T =
+    if data eq DontCare then
+      throw new IllegalArgumentException("Cannot annotate DontCare")
+    val base = pathFromExpr(locFor(data, mod)).getOrElse {
+      throw new IllegalArgumentException("dontTouch requires a static hardware reference")
+    }
+    HWAggregate.foreach(data, base) { (h, path) =>
+      h match
+        case _: Vec[?] | _: Bundle[?] =>
+          ()
+        case _ =>
+          mod.getBuilder.addDontTouch(path)
+    }
+    data
+
 extension [T <: HWData](dst: T)
   def :=(src: T)(using m: Module): Unit =
     ModuleOps.connect(dst, src, m)
@@ -408,6 +429,9 @@ extension [E <: scala.reflect.Enum] (lhs: HWEnum[E])
 
 def Mux[T <: HWData](cond: Bool, tval: T, fval: T)(using m: Module): T =
   ModuleOps.mux(cond, tval, fval, m)
+
+def dontTouch[T <: HWData](data: T)(using m: Module): T =
+  ModuleOps.dontTouch(data, m)
 
 extension (xs: Seq[HWData])
   def Cat(using m: Module): UInt =

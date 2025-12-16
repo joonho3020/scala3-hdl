@@ -58,6 +58,8 @@ class ICache(
   val ic = p.ic
 
   body {
+    dontTouch(io)
+
     val nSets = ic.nSets
     val nWays = ic.nWays
     assert((nSets & (nSets-1)) == 0)
@@ -138,7 +140,7 @@ class ICache(
     })
 
     val s1_tag_hit = s1_tag_hit_vec.reduce(_ || _)
-    val s1_tag_hit_oh = Cat(s1_tag_hit_vec).asOH
+    val s1_tag_hit_oh = Cat(s1_tag_hit_vec.reverse).asOH
     val s1_tag_hit_cnt = PopCount(s1_tag_hit_oh)
     Assert(s1_tag_hit_cnt <= 1.U, "Multiple tag hits in icache")
 
@@ -177,7 +179,7 @@ class ICache(
 
       val replace_data = Wire(VecDataEntry(nWays))
       replace_data := DontCare
-      replace_data(miss_victim) := Cat(io.mem.resp.bits.lineWords)
+      replace_data(miss_victim) := Cat(io.mem.resp.bits.lineWords.reverse)
       data_array.writePorts(0).write(miss_set, replace_data, write_mask)
 
       miss_busy := false.B
