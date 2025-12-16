@@ -65,7 +65,8 @@ private[hdl] object HWAggregate:
   private def transformHW(h: HWData, path: String, ctx: Option[IR.Expr], f: (HWData, String, HWData, Option[IR.Expr]) => HWData): HWData =
     val rebuilt: HWData = h match
       case u: UInt =>
-        if u.w.isDefined then UInt(u.w.get) else UInt()
+        val x = u.cloneType
+        x
       case b: Bool =>
         Bool()
       case c: Clock =>
@@ -73,7 +74,7 @@ private[hdl] object HWAggregate:
       case r: Reset =>
         Reset()
       case oh: OneHot =>
-        if oh.w.isDefined then OneHot(oh.w.get) else OneHot()
+        oh.cloneType
       case e: HWEnum[?] =>
         e.cloneType
       case _: DontCare.type =>

@@ -1,10 +1,39 @@
 package hdl
 
-sealed class Width(val value: Int) extends Serializable:
-  override def toString: String = s"${value}"
+object Width {
+  def apply(x: Int): Width = KnownWidth(x)
+  def apply(): Width = UnknownWidth()
+}
 
-object Width:
-  def apply(x: Int): Width = new Width(x)
+sealed abstract class Width:
+  type W = Int
+  def min(that:              Width): Width = this.op(that, _ min _)
+  def max(that:              Width): Width = this.op(that, _ max _)
+  def +(that:                Width): Width = this.op(that, _ + _)
+  def +(that:                Int):   Width = this.op(this, (a, b) => a + that)
+  def shiftRight(that:       Int): Width = this.op(this, (a, b) => 0.max(a - that))
+  def dynamicShiftLeft(that: Width): Width =
+    this.op(that, (a, b) => a + (1 << b) - 1)
+
+  def known: Boolean
+  def get:   W
+  protected def op(that: Width, f: (W, W) => W): Width
+
+sealed case class UnknownWidth() extends Width:
+  def known: Boolean = false
+  def get:   Int = None.get
+  def op(that: Width, f: (W, W) => W): Width = this
+  override def toString: String = ""
+
+sealed case class KnownWidth(value: Int) extends Width:
+  require(value >= 0)
+  def known: Boolean = true
+  def get:   Int = value
+  def op(that: Width, f: (W, W) => W): Width = that match {
+    case KnownWidth(x) => KnownWidth(f(value, x))
+    case _             => that
+  }
+  override def toString: String = s"<${value.toString}>"
 
 def log2Ceil(x: Int): Int =
   if x <= 1 then 0 else 32 - Integer.numberOfLeadingZeros(x - 1)

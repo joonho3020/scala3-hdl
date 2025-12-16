@@ -39,6 +39,8 @@ private def connectMaskField(dst: HWData, src: HWData)(using Module): Unit =
       ModuleOps.connect(du, su, summon[Module])
     case (db: Bool, sb: Bool) =>
       ModuleOps.connect(db, sb, summon[Module])
+    case (db: Bool, su: UInt) =>
+      ModuleOps.connect(db, su.asBool(using summon[Module]), summon[Module])
     case _ => ()
 
 final class SRAMReadPortHandle[T <: HWData](val enable: Bool, val address: UInt, val data: T)(using Module):
@@ -237,6 +239,7 @@ final class SRAM[T <: HWData](
         values(i) = maskProto(prod.productElement(i).asInstanceOf[HWData])
         i += 1
       rebuildProductLike(prod, values).asInstanceOf[HWData]
+    case _: Bool => Bool()
     case _ => UInt(Width(1))
 
   private val maskTemplate = maskProto(dataProto)
@@ -248,7 +251,10 @@ final class SRAM[T <: HWData](
     HWAggregate.foreach(value) { (leaf, _) =>
       leaf match
         case u: UInt =>
-          ModuleOps.connect(u, 0.U(u.w.getOrElse(Width(1))), m)
+          val w = u.getWidth match
+            case kw: KnownWidth => kw
+            case _ => Width(1)
+          ModuleOps.connect(u, 0.U(w), m)
         case b: Bool =>
           ModuleOps.connect(b, false.B, m)
         case _ => ()

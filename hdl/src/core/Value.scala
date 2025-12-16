@@ -22,7 +22,7 @@ object Direction:
     case Direction.Default => Direction.Flipped
     case Direction.Flipped => Direction.Default
 
-sealed trait HWData:
+sealed trait HWData extends Cloneable:
   var dir: Direction = Direction.Default
   def flip: Unit =
     this.dir = Direction.flip(this.dir)
@@ -30,8 +30,9 @@ sealed trait HWData:
   var literal: Option[Any] = None
   var kind: NodeKind = NodeKind.Unset
   var ref: Option[IR.Identifier] = None
-  private var owner: Option[Module] = None
-  private var irExpr: Option[IR.Expr] = None
+  var owner: Option[Module] = None
+  var irExpr: Option[IR.Expr] = None
+  var width: Width = Width()
 
   def setNodeKind(kind: NodeKind) = this.kind = kind
   def setLitVal(payload: Any): Unit
@@ -41,13 +42,21 @@ sealed trait HWData:
   def setOwner(m: Module): Unit = owner = Some(m)
   def getOwner: Option[Module] = owner
   def setIRExpr(expr: IR.Expr): Unit = irExpr = Some(expr)
-  def clearIRExpr(): Unit = irExpr = None
   def getIRExpr: Option[IR.Expr] = irExpr
+  def getWidth: Width = width
+  def setWidth(w: Width): Unit = width = w
+  override protected def clone(): this.type = super.clone().asInstanceOf[this.type]
 
-sealed class UInt(
-  val w: Option[Width]
-) extends HWData:
+  def cloneType: this.type =
+    val ret: this.type = this.clone()
+    ret.literal = None
+    ret.kind = NodeKind.Unset
+    ret.ref = None
+    ret.owner = None
+    ret.irExpr = None
+    ret
 
+sealed class UInt extends HWData:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[UInt]])
 
@@ -56,11 +65,16 @@ sealed class UInt(
       case Some(v) => v.asInstanceOf[HostTypeOf[UInt]]
       case None    => throw new NoSuchElementException("UInt does not carry a literal value")
 
-  override def toString(): String = s"UInt($w, $dir)"
+  override def toString(): String = s"UInt($getWidth, $dir)"
 
 object UInt:
-  def apply(w: Width): UInt = new UInt(Some(w))
-  def apply(): UInt = new UInt(None)
+  def apply(w: Width): UInt =
+    var ret = new UInt
+    ret.setWidth(w)
+    ret
+
+  def apply(): UInt =
+    new UInt
 
 sealed class Bool extends HWData:
   def setLitVal(payload: Any): Unit =
@@ -70,6 +84,8 @@ sealed class Bool extends HWData:
     literal match
       case Some(v) => v.asInstanceOf[HostTypeOf[Bool]]
       case None    => throw new NoSuchElementException("Bool does not carry a literal value")
+
+  this.width = Width(1)
 
   override def toString(): String = s"Bool($dir)"
 
@@ -86,6 +102,8 @@ sealed class Clock extends HWData:
       case Some(v) => v.asInstanceOf[HostTypeOf[Clock]]
       case None    => throw new NoSuchElementException("Clock does not carry a literal value")
 
+  this.width = Width(1)
+
   override def toString(): String = s"Clock($dir)"
 
 object Clock:
@@ -100,14 +118,14 @@ sealed class Reset extends HWData:
       case Some(v) => v.asInstanceOf[HostTypeOf[Reset]]
       case None    => throw new NoSuchElementException("Reset does not carry a literal value")
 
+  this.width = Width(1)
+
   override def toString(): String = s"Reset($dir)"
 
 object Reset:
   def apply(): Reset = new Reset
 
-sealed class OneHot(
-  val w: Option[Width]
-) extends HWData:
+sealed class OneHot extends HWData:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[OneHot]])
 
@@ -116,21 +134,27 @@ sealed class OneHot(
       case Some(v) => v.asInstanceOf[HostTypeOf[OneHot]]
       case None    => throw new NoSuchElementException("OneHot does not carry a literal value")
 
-  override def toString(): String = s"OneHot($w, $dir)"
+  override def toString(): String = s"OneHot($getWidth, $dir)"
 
 object OneHot:
-  def apply(w: Width): OneHot = new OneHot(Some(w))
-  def apply(): OneHot = new OneHot(None)
+  def apply(w: Width): OneHot =
+    var ret = new OneHot()
+    ret.setWidth(w)
+    ret
 
-class HWEnum[E <: scala.reflect.Enum](val enumObj: { def values: Array[E] }) extends HWData:
-  val w: Option[Width] = Some(Width(log2Ceil(math.max(1, enumObj.values.length))))
+  def apply(): OneHot =
+    OneHot(Width())
+
+class HWEnum[E <: scala.reflect.Enum](
+  val enumObj: { def values: Array[E] }
+) extends HWData:
   def setLitVal(payload: Any): Unit = literal = Some(payload.asInstanceOf[E])
   def getLitVal: E =
     literal match
       case Some(v) => v.asInstanceOf[E]
       case None => throw new NoSuchElementException("Enum does not carry a literal value")
-  def cloneType: HWEnum[E] = new HWEnum[E](enumObj)
-
+  override def cloneType: this.type = new HWEnum[E](enumObj).asInstanceOf[this.type]
+  this.width = Width(log2Ceil(math.max(1, enumObj.values.length)))
 
 extension [E <: scala.reflect.Enum](payload: E)
   inline def toHWEnum: HWEnum[E] =
@@ -212,6 +236,8 @@ sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnc
     elems.reduceOption(op)
 
   export elems.{ foreach, foldLeft, foldRight, exists, forall, count, mkString, zip, zipWithIndex }
+
+  this.width = if elems.nonEmpty then elems.map(_.getWidth).reduce(_ + _) else Width()
 
 object Vec:
   def apply[T <: HWData](elems: Seq[T]): Vec[T] = new Vec[T](elems)

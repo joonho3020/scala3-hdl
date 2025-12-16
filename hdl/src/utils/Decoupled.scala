@@ -30,8 +30,8 @@ class Queue[T <: HWData](x: T, entries: Int) extends Module:
     val addrBits = log2Ceil(entries + 1)
     val mem = Reg(Vec.fill(entries)(x))
 
-    val enq_ptr = RegInit(0.U(addrBits.W))
-    val deq_ptr = RegInit(0.U(addrBits.W))
+    val enq_ptr = RegInit(0.U(Width(addrBits)))
+    val deq_ptr = RegInit(0.U(Width(addrBits)))
     val full    = RegInit(false.B)
     val empty   = (enq_ptr === deq_ptr) && !full
 

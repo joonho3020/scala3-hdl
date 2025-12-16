@@ -108,11 +108,13 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     s"$dirStr ${p.name.value} : ${emitType(p.tpe)}"
 
   private def emitType(t: IR.Type): String = t match
-    case IR.UIntType(w) => w.map(v => s"UInt<$v>").getOrElse("UInt")
+    case IR.UIntType(w) =>
+      if w.known then s"UInt<${w.get}>" else "UInt"
     case IR.BoolType    => "Bool"
     case IR.ClockType   => "Clock"
     case IR.ResetType   => "Reset"
-    case IR.OneHotType(n) => s"OneHot<$n>"
+    case IR.OneHotType(w) =>
+      if w.known then s"OneHot<${w.get}>" else "OneHot"
     case IR.VecType(len, elem) => s"Vec<$len, ${emitType(elem)}>"
     case IR.BundleType(fields) =>
       val inner = fields.map { f =>
@@ -184,10 +186,13 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     s"$dirStr ${p.name.value} : ${emitChirrtlType(p.tpe, isTop)}"
 
   private def emitChirrtlType(t: IR.Type, isTop: Boolean): String = t match
+    case IR.UIntType(w) =>
+      if w.known then s"UInt<${w.get}>" else "UInt"
     case IR.BoolType    => "UInt<1>"
     case IR.ClockType   => "Clock"
     case IR.ResetType   => if isTop then "UInt<1>" else "Reset"
-    case IR.OneHotType(w) => w.map(v => s"UInt<$v>").getOrElse("UInt")
+    case IR.OneHotType(w) =>
+      if w.known then s"UInt<${w.get}>" else "UInt"
     case IR.VecType(len, elem) => s"${emitChirrtlType(elem, isTop)}[$len]"
     case IR.BundleType(fields) =>
       val inner = fields.map { f =>

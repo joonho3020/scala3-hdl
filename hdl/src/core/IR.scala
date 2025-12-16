@@ -25,11 +25,11 @@ private[hdl] object IR:
     case Undefined, Old, New
 
   sealed trait Type extends Serializable
-  final case class UIntType(width: Option[Width]) extends Type
+  final case class UIntType(width: Width) extends Type
   final case object BoolType extends Type
   final case object ClockType extends Type
   final case object ResetType extends Type
-  final case class OneHotType(width: Option[Width]) extends Type
+  final case class OneHotType(width: Width) extends Type
   final case class VecType(length: Int, elemType: Type) extends Type
   final case class BundleField(name: Identifier, flipped: Boolean, tpe: Type) extends Serializable
   final case class BundleType(fields: Seq[BundleField]) extends Type

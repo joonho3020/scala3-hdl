@@ -12,7 +12,7 @@ private def portIn(name: String, tpe: IR.Type): IR.Port = IR.Port(id(name), Dire
 private def portOut(name: String, tpe: IR.Type): IR.Port = IR.Port(id(name), Direction.Out, tpe)
 private val clockPort: IR.Port = portIn("clock", IR.ClockType)
 private val resetPort: IR.Port = portIn("reset", IR.ResetType)
-private def u(width: Int): IR.Type = IR.UIntType(Some(Width(width)))
+private def u(width: Int): IR.Type = IR.UIntType(Width(width))
 private def bundle(fields: (String, Boolean, IR.Type)*): IR.Type =
   IR.BundleType(fields.map { case (n, f, t) => IR.BundleField(id(n), f, t) })
 private def module(name: String, ports: Seq[IR.Port], body: Seq[IR.Stmt]): IR.Module =
@@ -29,12 +29,14 @@ private def sf(e: IR.Expr, field: String): IR.Expr = e match
 private def si(e: IR.Expr, idx: Int): IR.Expr = IR.SubIndex(e, idx)
 private def sa(e: IR.Expr, idx: IR.Expr): IR.Expr = IR.SubAccess(e, idx)
 private def lit(value: String): IR.Expr = IR.Literal(id(value))
-private def add(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Add, Seq(a, b))
+private def addPrim(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Add, Seq(a, b))
+private def add(a: IR.Expr, b: IR.Expr): IR.Expr = tail(addPrim(a, b), 1)
 private def and(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.And, Seq(a, b))
 private def eqv(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Eq, Seq(a, b))
 private def neqv(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Neq, Seq(a, b))
 private def not(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
 private def bits(a: IR.Expr, hi: Int, lo: Int): IR.Expr = IR.DoPrim(IR.PrimOp.Bits, Seq(a), Seq(hi, lo))
+private def tail(a: IR.Expr, n: Int): IR.Expr = IR.DoPrim(IR.PrimOp.Tail, Seq(a), Seq(n))
 private def dshr(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.DShr, Seq(a, b))
 private def reverseBits(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
 private def rem(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Rem, Seq(a, b))
@@ -1549,13 +1551,13 @@ def sram_check(): Unit =
       Seq(
         mem("mem", u(8), 4, Seq("r0"), Seq("w0"), Seq("rw0")),
         wire("mem_r_en", IR.VecType(1, IR.BoolType)),
-        wire("mem_r_addr", IR.VecType(1, IR.UIntType(Some(Width(2))))),
+        wire("mem_r_addr", IR.VecType(1, IR.UIntType(Width(2)))),
         wire("mem_r_data", IR.VecType(1, u(8))),
         wire("mem_w_en", IR.VecType(1, IR.BoolType)),
-        wire("mem_w_addr", IR.VecType(1, IR.UIntType(Some(Width(2))))),
+        wire("mem_w_addr", IR.VecType(1, IR.UIntType(Width(2)))),
         wire("mem_w_data", IR.VecType(1, u(8))),
         wire("mem_rw_en", IR.VecType(1, IR.BoolType)),
-        wire("mem_rw_addr", IR.VecType(1, IR.UIntType(Some(Width(2))))),
+        wire("mem_rw_addr", IR.VecType(1, IR.UIntType(Width(2)))),
         wire("mem_rw_wmode", IR.VecType(1, IR.BoolType)),
         wire("mem_rw_wdata", IR.VecType(1, u(8))),
         wire("mem_rw_rdata", IR.VecType(1, u(8))),

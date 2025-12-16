@@ -4,12 +4,12 @@ import scala.collection.mutable
 
 private[hdl] object ModuleOps:
   private[hdl] def irTypeOf(tpe: HWData): IR.Type = tpe match
-    case u: UInt => IR.UIntType(u.w)
+    case u: UInt => IR.UIntType(u.getWidth)
     case _: Bool => IR.BoolType
     case _: Clock => IR.ClockType
     case _: Reset => IR.ResetType
-    case oh: OneHot => IR.OneHotType(oh.w)
-    case e: HWEnum[?] => IR.UIntType(e.w)
+    case oh: OneHot => IR.OneHotType(oh.getWidth)
+    case e: HWEnum[?] => IR.UIntType(e.getWidth)
     case v: Vec[?] =>
       val elemType = v.elems.headOption.map(irTypeOf).getOrElse(IR.BoolType)
       IR.VecType(v.length, elemType)
@@ -176,13 +176,13 @@ private[hdl] object ModuleOps:
     primOp(HWAggregate.cloneData(tval), IR.PrimOp.Mux, Seq(cond, tval, fval), Seq.empty, mod)
 
   def asUInt(value: HWData, mod: Module): UInt =
-    prim1Op(UInt(), IR.PrimOp.AsUInt, value, mod)
+    prim1Op(UInt(value.getWidth), IR.PrimOp.AsUInt, value, mod)
 
   def ohToUInt(value: OneHot, mod: Module): UInt =
-    prim1Op(UInt(), IR.PrimOp.AsUInt, value, mod)
+    prim1Op(UInt(value.getWidth), IR.PrimOp.AsUInt, value, mod)
 
   def uintToOH(value: UInt, mod: Module): OneHot =
-    prim1Op(OneHot(), IR.PrimOp.AsUInt, value, mod)
+    prim1Op(OneHot(value.getWidth), IR.PrimOp.AsUInt, value, mod)
 
   def concatBits(values: Seq[HWData], mod: Module): UInt =
     val flat = values.flatMap {
@@ -196,11 +196,11 @@ private[hdl] object ModuleOps:
       case b: Bundle[?] => Seq(asUInt(b, mod))
       case _: DontCare.type => Seq.empty
     }
-    if flat.isEmpty then throw new IllegalArgumentException("Cannot concat empty sequence")
-    primOp(UInt(), IR.PrimOp.Cat, flat, Seq.empty, mod)
+    if flat.isEmpty then
+      throw new IllegalArgumentException("Cannot concat empty sequence")
 
-// def cat[T <: HWData](x: Seq[T], mod: Module): T =
-// primUInt(IR.PrimOp.Cat, x, Seq.empty, mod)
+    val width = values.map(_.getWidth).reduce(_ + _)
+    primOp(UInt(width), IR.PrimOp.Cat, flat, Seq.empty, mod)
 
 // def pad(lhs: UInt, width: Int, mod: Module): UInt =
 // primUInt(IR.PrimOp.Pad, Seq(lhs), Seq(width), mod)
@@ -226,14 +226,19 @@ private[hdl] object ModuleOps:
     Seq(IR.Port(IR.Identifier(name), dir, irTypeOf(tpe)))
 
   def formatLiteral(tpe: HWData, value: Any): IR.Identifier = tpe match
-    case u: UInt => IR.Identifier(u.w.map(w => s"UInt<$w>($value)").getOrElse(s"UInt($value)"))
+    case u: UInt =>
+      val w = u.getWidth
+      if w.known then IR.Identifier(s"UInt<${w.get}>($value)") else IR.Identifier(s"UInt($value)")
     case _: Bool => IR.Identifier(s"Bool($value)")
     case _: Clock => IR.Identifier(s"Clock($value)")
     case _: Reset => IR.Identifier(s"Reset($value)")
-    case oh: OneHot => IR.Identifier(oh.w.map(w => s"OneHot<$w>($value)").getOrElse(s"OneHot($value)"))
+    case oh: OneHot =>
+      val w = oh.getWidth
+      if w.known then IR.Identifier(s"OneHot<${w.get}>($value)") else IR.Identifier(s"OneHot($value)")
     case e: HWEnum[?] =>
       val ord = value.asInstanceOf[scala.reflect.Enum].ordinal
-      IR.Identifier(e.w.map(w => s"UInt<$w>($ord)").getOrElse(s"UInt($ord)"))
+      val w = e.getWidth
+      if w.known then IR.Identifier(s"UInt<${w.get}>($ord)") else IR.Identifier(s"UInt($ord)")
     case _ => IR.Identifier(value.toString)
 
   private def dirPrefixOf(h: HWData): String =
@@ -254,20 +259,30 @@ extension [T <: HWData](dst: T)
     ModuleOps.connect(dst, src, m)
 
 extension (lhs: UInt)
+  def +&(rhs: UInt)(using m: Module): UInt =
+    val w = lhs.getWidth.max(rhs.getWidth) + Width(1)
+    ModuleOps.prim2Op(UInt(w), IR.PrimOp.Add, lhs, rhs, m)
+
   def +(rhs: UInt)(using m: Module): UInt =
-    ModuleOps.prim2Op(UInt(), IR.PrimOp.Add, lhs, rhs, m)
+    (lhs +& rhs).tail(1)
 
   def -(rhs: UInt)(using m: Module): UInt =
-    ModuleOps.prim2Op(UInt(), IR.PrimOp.Sub, lhs, rhs, m)
+    (lhs -& rhs).tail(1)
+
+  def -&(rhs: UInt)(using m: Module): UInt =
+    val w = lhs.getWidth.max(rhs.getWidth) + Width(1)
+    ModuleOps.prim2Op(UInt(w), IR.PrimOp.Sub, lhs, rhs, m)
 
   def *(rhs: UInt)(using m: Module): UInt =
-    ModuleOps.prim2Op(UInt(), IR.PrimOp.Mul, lhs, rhs, m)
+    val w = lhs.getWidth + rhs.getWidth
+    ModuleOps.prim2Op(UInt(w), IR.PrimOp.Mul, lhs, rhs, m)
 
   def /(rhs: UInt)(using m: Module): UInt =
-    ModuleOps.prim2Op(UInt(), IR.PrimOp.Div, lhs, rhs, m)
+    ModuleOps.prim2Op(UInt(lhs.getWidth), IR.PrimOp.Div, lhs, rhs, m)
 
   def %(rhs: UInt)(using m: Module): UInt =
-    ModuleOps.prim2Op(UInt(), IR.PrimOp.Rem, lhs, rhs, m)
+    val w = lhs.getWidth.min(rhs.getWidth)
+    ModuleOps.prim2Op(UInt(w), IR.PrimOp.Rem, lhs, rhs, m)
 
   def <(rhs: UInt)(using m: Module): Bool =
     ModuleOps.prim2Op(Bool(), IR.PrimOp.Lt, lhs, rhs, m)
@@ -288,49 +303,57 @@ extension (lhs: UInt)
     ModuleOps.prim2Op(Bool(), IR.PrimOp.Neq, lhs, rhs, m)
 
   def <<(rhs: UInt)(using m: Module): UInt =
-    ModuleOps.prim2Op(UInt(), IR.PrimOp.DShl, lhs, rhs, m)
+    val w = lhs.getWidth.dynamicShiftLeft(rhs.getWidth)
+    ModuleOps.prim2Op(UInt(w), IR.PrimOp.DShl, lhs, rhs, m)
 
   def >>(rhs: UInt)(using m: Module): UInt =
-    ModuleOps.prim2Op(UInt(), IR.PrimOp.DShr, lhs, rhs, m)
+    ModuleOps.prim2Op(UInt(lhs.getWidth), IR.PrimOp.DShr, lhs, rhs, m)
 
   def <<(rhs: Int)(using m: Module): UInt =
-    ModuleOps.prim1Op1Const(UInt(), IR.PrimOp.Shl, lhs, rhs, m)
+    val w = lhs.getWidth + rhs
+    ModuleOps.prim1Op1Const(UInt(w), IR.PrimOp.Shl, lhs, rhs, m)
 
   def >>(rhs: Int)(using m: Module): UInt =
-    ModuleOps.prim1Op1Const(UInt(), IR.PrimOp.Shr, lhs, rhs, m)
+    val w = lhs.getWidth.shiftRight(rhs)
+    ModuleOps.prim1Op1Const(UInt(w), IR.PrimOp.Shr, lhs, rhs, m)
 
   def &(rhs: UInt)(using m: Module): UInt =
-    ModuleOps.prim2Op(UInt(), IR.PrimOp.And, lhs, rhs, m)
+    val w = lhs.getWidth.max(rhs.getWidth)
+    ModuleOps.prim2Op(UInt(w), IR.PrimOp.And, lhs, rhs, m)
 
   def |(rhs: UInt)(using m: Module): UInt =
-    ModuleOps.prim2Op(UInt(), IR.PrimOp.Or, lhs, rhs, m)
+    val w = lhs.getWidth.max(rhs.getWidth)
+    ModuleOps.prim2Op(UInt(w), IR.PrimOp.Or, lhs, rhs, m)
 
   def ^(rhs: UInt)(using m: Module): UInt =
-    ModuleOps.prim2Op(UInt(), IR.PrimOp.Xor, lhs, rhs, m)
+    val w = lhs.getWidth.max(rhs.getWidth)
+    ModuleOps.prim2Op(UInt(w), IR.PrimOp.Xor, lhs, rhs, m)
 
 // def pad(n: Int)(using m: Module): UInt =
 // ModuleOps.pad(lhs, n, m)
   def head(n: Int)(using m: Module): UInt =
-    ModuleOps.prim1Op1Const(UInt(), IR.PrimOp.Head, lhs, n, m)
+    ModuleOps.prim1Op1Const(UInt(Width(n)), IR.PrimOp.Head, lhs, n, m)
 
   def tail(n: Int)(using m: Module): UInt =
-    ModuleOps.prim1Op1Const(UInt(), IR.PrimOp.Tail, lhs, n, m)
+    val w = lhs.getWidth.shiftRight(n)
+    ModuleOps.prim1Op1Const(UInt(w), IR.PrimOp.Tail, lhs, n, m)
 
   def apply(hi: Int, lo: Int)(using m: Module): UInt =
-    ModuleOps.prim1Op2Const(UInt(), IR.PrimOp.Bits, lhs, hi, lo, m)
+    val w = Width(hi - lo + 1)
+    ModuleOps.prim1Op2Const(UInt(w), IR.PrimOp.Bits, lhs, hi, lo, m)
 
   def apply(idx: Int)(using m: Module): UInt =
-    ModuleOps.prim1Op2Const(UInt(), IR.PrimOp.Bits, lhs, idx, idx, m)
+    ModuleOps.prim1Op2Const(UInt(Width(1)), IR.PrimOp.Bits, lhs, idx, idx, m)
 
   def apply(idx: UInt)(using m: Module): UInt =
-    val shifted = ModuleOps.prim2Op(UInt(), IR.PrimOp.DShr, lhs, idx, m)
-    ModuleOps.prim1Op2Const(UInt(), IR.PrimOp.Bits, shifted, 0, 0, m)
+    val shifted = ModuleOps.prim2Op(UInt(lhs.getWidth), IR.PrimOp.DShr, lhs, idx, m)
+    ModuleOps.prim1Op2Const(UInt(Width(1)), IR.PrimOp.Bits, shifted, 0, 0, m)
 
   def asBool(using m: Module): Bool =
     ModuleOps.prim1Op(Bool(), IR.PrimOp.AsBool, lhs, m)
 
   def unary_~(using m: Module): UInt =
-    ModuleOps.prim1Op(UInt(), IR.PrimOp.Not, lhs, m)
+    ModuleOps.prim1Op(UInt(lhs.getWidth), IR.PrimOp.Not, lhs, m)
 
 extension (lhs: Bool)
   def ===(rhs: Bool)(using m: Module): Bool =
