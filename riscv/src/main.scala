@@ -5,7 +5,7 @@ import scala.sys.process.*
 import hdl._
 
 def writeChirrtl(filename: String, content: String): Unit =
-  val dir = new File("test-outputs/chirrtl")
+  val dir = new File("sim/test-outputs/chirrtl")
   dir.mkdirs()
   val pw = new PrintWriter(new File(dir, filename))
   pw.write(content)
@@ -17,8 +17,8 @@ def runFirtool(firFile: String): (Int, String) =
     "--format=fir",
     "--verify-each=true",
     "--split-verilog",
-    "-o", "test-outputs/verilog",
-    s"test-outputs/chirrtl/$firFile"
+    "-o", "sim/test-outputs/verilog",
+    s"sim/test-outputs/chirrtl/$firFile"
   )
   val output = new StringBuilder
   val exitCode = cmd.!(ProcessLogger(s => output.append(s + "\n"), s => output.append(s + "\n")))
@@ -37,7 +37,7 @@ def runFirtool(firFile: String): (Int, String) =
       cacheLineBytes = 64)
   )
 
-  val top = new CoreTop(p)
+  val top = new Tile(p)
 
   val elaborator = new Elaborator
   val designs = elaborator.elaborate(top)

@@ -295,10 +295,10 @@ fn main() -> std::io::Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
 
     let sv_file_path =
-        env::var("SV_FILE").unwrap_or_else(|_| "./build-dir/Top.sv".to_string());
+        env::var("SV_FILE").unwrap_or_else(|_| "./test-outputs/verilog/Tile.sv".to_string());
     let filelist_path =
-        env::var("FILELIST").unwrap_or_else(|_| "./build-dir/filelist.f".to_string());
-    let build_dir = env::var("BUILD_DIR").unwrap_or_else(|_| "build-dir".to_string());
+        env::var("FILELIST").unwrap_or_else(|_| "./test-outputs/verilog/filelist.f".to_string());
+    let build_dir = env::var("BUILD_DIR").unwrap_or_else(|_| "test-outputs/verilog".to_string());
 
     let mut cwd = env::current_dir()?;
     cwd.push(&build_dir);
@@ -408,7 +408,7 @@ fn main() -> std::io::Result<()> {
         .current_dir(&cwd)
         .arg("-shared")
         .arg("-o")
-        .arg("../libVdut.so")
+        .arg("../../libVdut.so")
         .arg(&format!("{}/verilated.o", obj_dir))
         .arg(&format!("{}/V{}__ALL.o", obj_dir, top))
         .arg(&format!("{}/verilated_threads.o", obj_dir))

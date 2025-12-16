@@ -6,7 +6,6 @@ fn main() {
 
     dut.poke_reset(1);
     dut.poke_clock(0);
-    dut.poke_io_in(0);
     dut.step();
     dut.poke_clock(1);
     dut.step();
@@ -14,15 +13,14 @@ fn main() {
     dut.poke_reset(0);
 
     for i in 0..10 {
-        dut.poke_io_in(1);
 
         dut.poke_clock(0);
         dut.step();
         dut.poke_clock(1);
         dut.step();
 
-        let out = dut.peek_io_out();
-        println!("Cycle {}: io_out = {}", i, out);
+        let out = dut.peek_io_alu_out();
+        println!("Cycle {}: io_alu_out = {}", i, out);
     }
 
     println!("Simulation completed at timestep {}", dut.timestep());

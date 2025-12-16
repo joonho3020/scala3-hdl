@@ -64,6 +64,7 @@
 - [x] HWAggregate vs CloneType? Maybe just remove clonetype all together?
 - [x] DontTouch annos
 - [ ] Better naming macros...?
+- [ ] Derive Rust testbench bindings given a Bundle case class
 - [ ] Fix caching support
     - Must invalidate parent modules when child modules are removed
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)

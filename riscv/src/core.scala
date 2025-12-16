@@ -70,7 +70,7 @@ object CoreTopIO:
       alu_cmp_out   = Output(Bool()),
     )
 
-class CoreTop(p: CoreParams) extends Module with CoreCacheable(p):
+class Tile(p: CoreParams) extends Module:
   val io = IO(CoreTopIO(p))
   body {
     dontTouch(io)
