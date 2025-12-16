@@ -47,7 +47,7 @@ object FrontendIf:
       uops = Vec.fill(p.coreWidth)(Decoupled(UOp(p)))
     )
 
-class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
+class Frontend(p: CoreParams) extends Module:
   val io = IO(FrontendIf(p))
   body {
 

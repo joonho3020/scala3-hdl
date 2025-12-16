@@ -58,9 +58,13 @@
     - Make the port API explicit (no inferred ports)
 - [x] CHIRRTL emission
 - [x] Assertions, Prints
+- [x] Switch statements
 - [x] Enums
-    - [ ] Seamless operation btw enum & UInt
-- [ ] Switch statements
+    - [x] Seamless operation btw enum & UInt
+- [ ] Better naming macros...?
+- [ ] Fix caching support
+    - Must invalidate parent modules when child modules are removed
+- [ ] HWAggregate vs CloneType?
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
 - [ ] Mixed vectors
 - [ ] Per-class caching??

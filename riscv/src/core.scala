@@ -24,7 +24,7 @@ object CoreIf:
       alu_cmp_out   = Output(Bool()),
     )
 
-class Core(p: CoreParams) extends Module with CoreCacheable(p):
+class Core(p: CoreParams) extends Module:
   val io = IO(CoreIf(p))
 
   body {

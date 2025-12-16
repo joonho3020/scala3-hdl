@@ -51,7 +51,7 @@ object ICacheBundle:
 
 class ICache(
   p: CoreParams,
-) extends Module with CoreCacheable(p):
+) extends Module:
   given Module = this
   val io = IO(ICacheBundle(p))
 
@@ -139,7 +139,8 @@ class ICache(
 
     val s1_tag_hit = s1_tag_hit_vec.reduce(_ || _)
     val s1_tag_hit_oh = Cat(s1_tag_hit_vec).asOH
-    Assert(PopCount(s1_tag_hit_oh) <= 1.U, "Multiple tag hits in icache")
+    val s1_tag_hit_cnt = PopCount(s1_tag_hit_oh)
+    Assert(s1_tag_hit_cnt <= 1.U, "Multiple tag hits in icache")
 
     val s1_hit_way = PriorityEncoder(s1_tag_hit_oh)
 
