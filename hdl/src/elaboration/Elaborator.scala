@@ -112,6 +112,7 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     case IR.BoolType    => "Bool"
     case IR.ClockType   => "Clock"
     case IR.ResetType   => "Reset"
+    case IR.OneHotType(n) => s"OneHot<$n>"
     case IR.VecType(len, elem) => s"Vec<$len, ${emitType(elem)}>"
     case IR.BundleType(fields) =>
       val inner = fields.map { f =>
@@ -183,10 +184,10 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     s"$dirStr ${p.name.value} : ${emitChirrtlType(p.tpe, isTop)}"
 
   private def emitChirrtlType(t: IR.Type, isTop: Boolean): String = t match
-    case IR.UIntType(w) => w.map(v => s"UInt<$v>").getOrElse("UInt")
     case IR.BoolType    => "UInt<1>"
     case IR.ClockType   => "Clock"
     case IR.ResetType   => if isTop then "UInt<1>" else "Reset"
+    case IR.OneHotType(w) => w.map(v => s"UInt<$v>").getOrElse("UInt")
     case IR.VecType(len, elem) => s"${emitChirrtlType(elem, isTop)}[$len]"
     case IR.BundleType(fields) =>
       val inner = fields.map { f =>
@@ -195,12 +196,15 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
       }.mkString(", ")
       s"{ $inner }"
 
+  private val OneHotLiteralPattern = """OneHot<(\d+)>\((\d+)\)""".r
+
   private def emitChirrtlExpr(e: IR.Expr): String = e match
     case IR.Ref(name)       => name.value
     case IR.Literal(value)  =>
       value.value match
         case "Bool(true)" => "UInt<1>(0h1)"
         case "Bool(false)" => "UInt<1>(0h0)"
+        case OneHotLiteralPattern(n, v) => s"UInt<$n>($v)"
         case other => other
     case IR.DontCare        => "invalidate"
     case IR.SubIndex(expr, value) => s"${emitChirrtlExpr(expr)}[$value]"

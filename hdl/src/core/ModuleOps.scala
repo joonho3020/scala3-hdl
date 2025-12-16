@@ -8,6 +8,7 @@ private[hdl] object ModuleOps:
     case _: Bool => IR.BoolType
     case _: Clock => IR.ClockType
     case _: Reset => IR.ResetType
+    case oh: OneHot => IR.OneHotType(oh.w)
     case e: HWEnum[?] => IR.UIntType(e.w)
     case v: Vec[?] =>
       val elemType = v.elems.headOption.map(irTypeOf).getOrElse(IR.BoolType)
@@ -177,12 +178,16 @@ private[hdl] object ModuleOps:
   def asUInt(value: HWData, mod: Module): UInt =
     prim1Op(UInt(), IR.PrimOp.AsUInt, value, mod)
 
+  def ohToUInt(value: OneHot, mod: Module): UInt =
+    prim1Op(UInt(), IR.PrimOp.AsUInt, value, mod)
+
   def concatBits(values: Seq[HWData], mod: Module): UInt =
     val flat = values.flatMap {
       case u: UInt      => Seq(u)
       case b: Bool      => Seq(asUInt(b, mod))
       case c: Clock     => Seq(asUInt(c, mod))
       case r: Reset     => Seq(asUInt(r, mod))
+      case oh: OneHot   => Seq(ohToUInt(oh, mod))
       case v: Vec[?]    => Seq(asUInt(v, mod))
       case e: HWEnum[?] => Seq(asUInt(e, mod))
       case b: Bundle[?] => Seq(asUInt(b, mod))
@@ -222,6 +227,7 @@ private[hdl] object ModuleOps:
     case _: Bool => "Bool"
     case _: Clock => "Clock"
     case _: Reset => "Reset"
+    case oh: OneHot => s"OneHot<${oh.n}>"
     case e: HWEnum[?] => s"Enum<${e.enumObj.getClass().getSimpleName()}>"
     case v: Vec[?] =>
       val elemStr = v.elems.headOption.map(e => formatType(e)).getOrElse("?")
@@ -244,6 +250,7 @@ private[hdl] object ModuleOps:
     case _: Bool => IR.Identifier(s"Bool($value)")
     case _: Clock => IR.Identifier(s"Clock($value)")
     case _: Reset => IR.Identifier(s"Reset($value)")
+    case oh: OneHot => IR.Identifier(oh.w.map(w => s"OneHot<$w>($value)").getOrElse(s"OneHot($value)"))
     case e: HWEnum[?] =>
       val ord = value.asInstanceOf[scala.reflect.Enum].ordinal
       IR.Identifier(e.w.map(w => s"UInt<$w>($ord)").getOrElse(s"UInt($ord)"))
@@ -451,4 +458,16 @@ object SwitchBuilder:
     case (l: HWEnum[?], r: HWEnum[?]) =>
       if l.enumObj != r.enumObj then throw new IllegalArgumentException("Enum type mismatch")
       ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, l, r, mod)
-    case _ => throw new IllegalArgumentException("Switch only supports UInt, Bool, and Enum types")
+    case (l: OneHot, r: OneHot) =>
+      ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, l, r, mod)
+    case _ => throw new IllegalArgumentException("Switch only supports UInt, Bool, Enum, and OneHot types")
+
+extension (lhs: OneHot)
+  def asUInt(using m: Module): UInt =
+    ModuleOps.ohToUInt(lhs, m)
+
+  def ===(rhs: OneHot)(using m: Module): Bool =
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, m)
+
+  def =/=(rhs: OneHot)(using m: Module): Bool =
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Neq, lhs, rhs, m)

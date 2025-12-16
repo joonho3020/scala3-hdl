@@ -29,6 +29,7 @@ private[hdl] object IR:
   final case object BoolType extends Type
   final case object ClockType extends Type
   final case object ResetType extends Type
+  final case class OneHotType(width: Option[Width]) extends Type
   final case class VecType(length: Int, elemType: Type) extends Type
   final case class BundleField(name: Identifier, flipped: Boolean, tpe: Type) extends Serializable
   final case class BundleType(fields: Seq[BundleField]) extends Type

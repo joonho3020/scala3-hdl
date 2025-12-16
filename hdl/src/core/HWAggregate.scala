@@ -72,6 +72,8 @@ private[hdl] object HWAggregate:
         Clock()
       case r: Reset =>
         Reset()
+      case oh: OneHot =>
+        if oh.w.isDefined then OneHot(oh.w.get) else OneHot()
       case e: HWEnum[?] =>
         e.cloneType
       case _: DontCare.type =>

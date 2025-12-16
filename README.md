@@ -926,5 +926,18 @@ state2 switch {
 }
 ```
 
+Later one, the IR should support switch, when/elsewhen/otherwise statements natively.
+FIRRTL maps these to only when/otherwise which creates nested muxes.
+
 ## Separate Types for OneHot
 
+One hot encoding should be separate types and converstions to/from UInt should be explicit.
+Should support operators such as PriorityEncoderOH, Mux1H etc.
+Unfortunately, should emit UInts for now as we are relying on CIRCT.
+
+This is similar for other encoding schemes such as graycode.
+
+## UInt Operators
+
+Operators such as `PopCount`, `PriorityEncoder`, `PriorityMux` should be native operators in the IR.
+For now, support these as libraries.

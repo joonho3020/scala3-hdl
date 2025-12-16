@@ -105,6 +105,23 @@ sealed class Reset extends HWData:
 object Reset:
   def apply(): Reset = new Reset
 
+sealed class OneHot(
+  val w: Option[Width]
+) extends HWData:
+  def setLitVal(payload: Any): Unit =
+    this.literal = Some(payload.asInstanceOf[HostTypeOf[OneHot]])
+
+  def getLitVal: HostTypeOf[OneHot] =
+    this.literal match
+      case Some(v) => v.asInstanceOf[HostTypeOf[OneHot]]
+      case None    => throw new NoSuchElementException("OneHot does not carry a literal value")
+
+  override def toString(): String = s"OneHot($w, $dir)"
+
+object OneHot:
+  def apply(w: Width): OneHot = new OneHot(Some(w))
+  def apply(): OneHot = new OneHot(None)
+
 class HWEnum[E <: scala.reflect.Enum](val enumObj: { def values: Array[E] }) extends HWData:
   val w: Option[Width] = Some(Width(log2Ceil(math.max(1, enumObj.values.length))))
   def setLitVal(payload: Any): Unit = literal = Some(payload.asInstanceOf[E])
@@ -202,10 +219,11 @@ object Vec:
   def fill[T <: HWData](n: Int)(gen: => T): Vec[T] = Vec(Seq.fill(n)(gen))
 
 type HostTypeOf[T] = T match
-  case UInt  => BigInt
-  case Bool  => Boolean
-  case Clock => Boolean
-  case Reset => Boolean
+  case UInt   => BigInt
+  case Bool   => Boolean
+  case Clock  => Boolean
+  case Reset  => Boolean
+  case OneHot => BigInt
   case Vec[t] => Seq[HostTypeOf[t]]
   case HWEnum[t] => t
   case _ =>
