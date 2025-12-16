@@ -13,7 +13,7 @@ case class MagicMemResp(
 
 case class MagicMemIf(
   req: Valid[MagicMemReq],
-  resp: MagicMemResp
+  resp: Valid[MagicMemResp]
 ) extends Bundle[MagicMemIf]
 
 object MagicMemReq:
@@ -27,8 +27,8 @@ object MagicMemResp:
 object MagicMemIf:
   def apply(p: CoreParams): MagicMemIf =
     MagicMemIf(
-      req  =   Valid(MagicMemReq (p)),
-      resp = Flipped(MagicMemResp(p))
+      req  =         Valid(MagicMemReq (p)),
+      resp = Flipped(Valid(MagicMemResp(p)))
     )
 
 case class TagEntry(valid: Bool, tag: UInt) extends Bundle[TagEntry]
@@ -73,10 +73,13 @@ class ICache(
     def VecTagEntry(entries: Int): Vec[TagEntry] =
       Vec.fill(entries)(TagEntry(tagBits))
 
+    def VecDataEntry(entries: Int): Vec[UInt] =
+      Vec.fill(entries)(UInt(ic.cacheLineBytes.W))
+
     val tag_array = SRAM(VecTagEntry(nWays), nSets)
                         (reads = 1, writes = 1, readwrites = 0)
 
-    val data_array = SRAM(Vec.fill(nWays)(UInt(ic.cacheLineBytes.W)), nSets)(
+    val data_array = SRAM(VecDataEntry(nWays), nSets)(
       reads = 1, writes = 1, readwrites = 0)
 
     val lfsr = RegInit(1.U(16.W))
@@ -88,6 +91,9 @@ class ICache(
     def tagOf(addr: UInt): UInt =
       addr(p.pcBits-1, lineOffBits + setIdxBits)
 
+    def clOffset(addr: UInt): UInt =
+      addr(lineOffBits-1, log2Ceil(p.instBytes))
+
    //  def wordOffsetInLine(addr: UInt): UInt =
    //    addr(lineOffBits-1, 2) // word offset within the line (0..wordsPerLine-1)
 
@@ -95,149 +101,108 @@ class ICache(
    //    // row inside each bank = wordOffset / banks
    //    wordOffsetInLine(addr) >> bankBits.U
 
-    // ---- Miss/Refill path (single outstanding) ----
-    // You said backing mem is 1-cycle magic. Model as a side module.
-    // Replace this with whatever "magic memory" you already have.
-// val mem = Module(new MagicIMem(p, depthWords = 1 << 16)) // example depth
-// mem.io.req.valid := false.B
-// mem.io.req.bits.addr := DontCare
     io.mem.req.valid := false.B
     io.mem.req.bits.addr := DontCare
 
     io.core.s2_valid := false.B
     io.core.s2_insts := DontCare
- 
-    val missBusy      = RegInit(false.B)
+
+    val miss_busy     = RegInit(false.B)
     val miss_set      = Reg(UInt(setIdxBits.W))
     val miss_tag      = Reg(UInt(tagBits.W))
     val miss_victim   = Reg(UInt(log2Ceil(nWays).W))
+    val miss_req_addr = Reg(UInt(p.pcBits.W))
 
-    val s0_valid = io.core.s0_vaddr.valid && !missBusy
+    // S0
+    // - Perform tag lookup
+    val s0_valid = io.core.s0_vaddr.valid && !miss_busy
     val s0_vaddr = io.core.s0_vaddr.bits
 
     val s0_set = setIdx(s0_vaddr)
 
-    val s1_tags = Wire(VecTagEntry(nWays))
-    s1_tags := DontCare
-
     when (s0_valid) {
-      s1_tags := tag_array.readPorts(0).read(s0_set)
+      tag_array.readPorts(0).read(s0_set)
     }
 
+    // S1
+    // - Match tags and check hit/miss
+    val s1_vaddr = RegNext(s0_vaddr)
     val s1_valid = RegNext(s0_valid) && !io.core.s1_kill && io.core.s1_paddr.valid
+    val s1_set   = setIdx(s1_vaddr)
+    val s1_paddr = io.core.s1_paddr.bits
+    val s1_paddr_tag = tagOf(s1_paddr)
+    val s1_tags = tag_array.readPorts(0).data
 
-    val tag_hit_vec = s1_tags.map(entry => {
-      entry.valid && (entry.tag === tagOf(io.core.s1_paddr.bits)) && s1_valid
+    val s1_tag_hit_vec = s1_tags.map(entry => {
+      entry.valid && (entry.tag === s1_paddr_tag) && s1_valid
     })
 
-    val tag_hit = tag_hit_vec.reduce(_ || _)
+    val s1_tag_hit = s1_tag_hit_vec.reduce(_ || _)
+    val s1_tag_hit_oh = Cat(s1_tag_hit_vec).asOH
+    Assert(PopCount(s1_tag_hit_oh) <= 1.U, "Multiple tag hits in icache")
 
+    val s1_hit_way = PriorityEncoder(s1_tag_hit_oh)
 
-   //  // Read all ways' tags + all ways' banked data in s0, register into s1.
-   //  val s1_valid = RegNext(s0_valid)
-   //  val s1_paddr = RegNext(s0_vaddr)   // baremetal => PA = VA
-   //  val s1_set   = RegNext(s0_set)
-   //  val s1_group = RegNext(s0_group)
+    when (s1_tag_hit) {
+      data_array.readPorts(0).read(s1_set)
+    }
 
-   //  val s1_tags = Reg(Vec.fill(ways)(TagEntry(tagBits))))
-   //  val s1_data = Reg(Vec.fill(ways)(Vec.fill(banks)(UInt(32.W)))))
+    when (s1_valid && !s1_tag_hit && !miss_busy) {
+      miss_busy := true.B
+      miss_set := s1_set
+      miss_tag := s1_paddr_tag
+      miss_victim := lfsr(log2Ceil(nWays)-1, 0)
 
-   //  // s0 "read" (combinational from Reg arrays), captured into s1 regs
-   //  for (w <- 0 until ways) {
-   //    s1_tags(w) := tagArray(w)(s0_set)
-   //    for (b <- 0 until banks) {
-   //      s1_data(w)(b) := dataArray(w)(b)(s0_set)(s0_group)
-   //    }
-   //  }
+      val req_addr = p.blockAlign(s1_paddr)
+      miss_req_addr := req_addr
 
-   //  // s1: tag compare using PA tag
-   //  val s1_ptag = tagOf(s1_paddr)
-   //  val hitVec  = Wire(Vec.fill(ways)(Bool())))
+      // Send memory request... assume single cycle response for now
+      io.mem.req.valid := true.B
+      io.mem.req.bits.addr := req_addr
+    }
 
-   //  for (w <- 0 until ways) {
-   //    hitVec(w) := s1_valid && s1_tags(w).valid && (s1_tags(w).tag === s1_ptag)
-   //  }
+    when (io.mem.resp.valid && miss_busy) {
+      val replace_tag = VecTagEntry(nWays)
+      replace_tag := DontCare
+      replace_tag(miss_victim).tag   := miss_tag
+      replace_tag(miss_victim).valid := true.B
 
-   //  val hit = hitVec.reduce(_ || _)
+      val write_mask = Vec.fill(nWays)(Wire(Bool()))
+      write_mask.zipWithIndex.foreach((wm, idx) => {
+        wm := idx.U === miss_victim
+      })
 
-   //  // pick first hit way (ok because duplicates shouldn’t happen)
+      tag_array.writePorts(0).write(miss_set, replace_tag, write_mask)
 
-   //  val hitOH = oneHotFirst(hitVec)
+      val replace_data = VecDataEntry(nWays)
+      replace_data := DontCare
+      replace_data(miss_victim) := Cat(io.mem.resp.bits.lineWords)
+      data_array.writePorts(0).write(miss_set, replace_data, write_mask)
 
-   //  // select data for hit way
-   //  val s1_hitWords = Wire(Vec.fill(banks)(UInt(32.W)))))
-   //  for (b <- 0 until banks) {
-   //    s1_hitWords(b) := 0.U
-   //    for (w <- 0 until ways) {
-   //      when(hitOH(w)) { s1_hitWords(b) := s1_data(w)(b) }
-   //    }
-   //  }
+      miss_busy := false.B
+    }
 
-   //  // Miss detect and refill request issue (at s1)
-   //  when (s1_valid && !hit && !missBusy) {
-   //    missBusy := true.B
-   //    miss_set := s1_set
-   //    miss_tag := s1_ptag
-   //    miss_group := s1_group
+    // S2
+    // - Send response to core
+    val s2_valid = RegInit(false.B)
+    s2_valid := RegNext(s1_valid && s1_tag_hit) && !io.core.s2_kill
 
-   //    // random victim
-   //    miss_victim := lfsr(log2Ceil(ways)-1, 0)
-   //    miss_req_addr := p.blockAlign(s1_paddr)
+    val s2_set = RegNext(s1_set)
+    val s2_vaddr = RegNext(s1_vaddr)
+    val s2_hit_way = RegNext(s1_hit_way)
+    val s2_insts = Vec.fill(p.icacheFetchInstCount)(Wire(UInt(p.instBytes.W)))
+    val s2_data_array_out = data_array.readPorts(0).data(s2_hit_way)
 
-   //    mem.io.req.valid := true.B
-   //    mem.io.req.bits.addr := p.blockAlign(s1_paddr)
-   //  }
+    // |      CL                                  |
+    // | inst 0 | inst 1 | inst 2 | ... | inst 15 |
+    val fetchBytesOffset = log2Ceil(p.fetchBytes)
+    val s2_vaddr_fetch_group = s2_vaddr(lineOffBits-1, fetchBytesOffset)
+    val s2_vaddr_fetch_group_shamt = s2_vaddr_fetch_group << log2Ceil(p.fetchBytes)
+    for (i <- 0 until p.icacheFetchInstCount) {
+      val inst_shamt = (i << log2Ceil(p.instBytes)).U
+      s2_insts(i) := s2_data_array_out >> (s2_vaddr_fetch_group_shamt + inst_shamt)
+    }
 
-   //  // refill returns 1 cycle later
-   //  val refill_valid = mem.io.resp.valid && missBusy
-
-   //  when (refill_valid) {
-   //    // fill tag
-   //    tagArray(miss_victim)(miss_set).valid := true.B
-   //    tagArray(miss_victim)(miss_set).tag   := miss_tag
-
-   //    // fill data banks from full line
-   //    for (word <- 0 until wordsPerLine) {
-   //      val b = word % banks
-   //      val r = word / banks
-   //      dataArray(miss_victim)(b)(miss_set)(r) := mem.io.resp.bits.lineWords(word)
-   //    }
-
-   //    missBusy := false.B
-   //  }
-
-   //  // s2 output:
-   //  // - on hit: register s1_hitWords
-   //  // - on refill completion: bypass the refill line words for the requested group
-   //  val s2_valid = RegInit(false.B)
-   //  val s2_words = Reg(Vec.fill(banks)(UInt(32.W)))))
-
-   //  val hit_to_s2 = s1_valid && hit && !missBusy
-   //  when (hit_to_s2) {
-   //    s2_valid := true.B
-   //    for (b <- 0 until banks) { s2_words(b) := s1_hitWords(b) }
-   //  } .elsewhen (refill_valid) {
-   //    // bypass: words for the requested group are contiguous banks
-   //    s2_valid := true.B
-   //    val base = miss_group * banks.U
-   //    for (b <- 0 until banks) {
-   //      s2_words(b) := mem.io.resp.bits.lineWords(base + b.U)
-   //    }
-   //  } .otherwise {
-   //    s2_valid := false.B
-   //  }
-
-   //  // Response formatting
-   //  // Your resp inst width is xlenBits. Put inst in low 32 bits.
-   //  for (i <- 0 until banks) {
-   //    io.resp.insts(i).valid := s2_valid
-   //    if (p.xlenBits == 32) {
-   //      io.resp.insts(i).bits := s2_words(i)
-   //    } else {
-   //      io.resp.insts(i).bits := Cat(0.U((p.xlenBits-32).W), s2_words(i))
-   //    }
-   //  }
-
-   //  // If you add stall:
-   //  // io.resp.stall := missBusy || (s1_valid && !hit)  // “hold PC until data returns”
-  }// 
+    io.core.s2_valid := s2_valid
+    io.core.s2_insts := s2_insts
+  }

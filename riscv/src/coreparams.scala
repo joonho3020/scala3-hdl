@@ -18,6 +18,7 @@ case class CoreParams(
 ) derives StableHash:
   def xlenBytes: Int = xlenBits / 8
 
+  def numInstsPerICacheLine = ic.cacheLineBytes / instBytes
   def icacheFetchInstCount: Int = icacheFetchBytes / instBytes
   def instBits: Int = instBytes * 8
 

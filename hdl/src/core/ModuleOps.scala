@@ -181,6 +181,9 @@ private[hdl] object ModuleOps:
   def ohToUInt(value: OneHot, mod: Module): UInt =
     prim1Op(UInt(), IR.PrimOp.AsUInt, value, mod)
 
+  def uintToOH(value: UInt, mod: Module): OneHot =
+    prim1Op(OneHot(), IR.PrimOp.AsUInt, value, mod)
+
   def concatBits(values: Seq[HWData], mod: Module): UInt =
     val flat = values.flatMap {
       case u: UInt      => Seq(u)
@@ -221,29 +224,6 @@ private[hdl] object ModuleOps:
   def emitPortDecl[T <: HWData](name: String, tpe: T): Seq[IR.Port] =
     val dir = if tpe.dir == Direction.In then Direction.In else Direction.Out
     Seq(IR.Port(IR.Identifier(name), dir, irTypeOf(tpe)))
-
-  def formatType(tpe: HWData): String = tpe match
-    case u: UInt => u.w.map(v => s"UInt<$v>").getOrElse("UInt")
-    case _: Bool => "Bool"
-    case _: Clock => "Clock"
-    case _: Reset => "Reset"
-    case oh: OneHot => s"OneHot<${oh.n}>"
-    case e: HWEnum[?] => s"Enum<${e.enumObj.getClass().getSimpleName()}>"
-    case v: Vec[?] =>
-      val elemStr = v.elems.headOption.map(e => formatType(e)).getOrElse("?")
-      s"Vec<${v.length}, $elemStr>"
-    case bundle: Bundle[?] =>
-      val p = bundle.asInstanceOf[Product]
-      val fields = (0 until p.productArity).flatMap { i =>
-        val fieldName = p.productElementName(i)
-        p.productElement(i) match
-          case hd: HWData =>
-            val dirPrefix = dirPrefixOf(hd)
-            Some(s"$dirPrefix$fieldName : ${formatType(hd)}")
-          case _ => Nil
-      }
-      s"{ ${fields.mkString(", ")} }"
-    case _ => tpe.toString
 
   def formatLiteral(tpe: HWData, value: Any): IR.Identifier = tpe match
     case u: UInt => IR.Identifier(u.w.map(w => s"UInt<$w>($value)").getOrElse(s"UInt($value)"))
@@ -403,6 +383,20 @@ extension (h: HWData)
   def asUInt(using m: Module): UInt =
     ModuleOps.asUInt(h, m)
 
+extension (lhs: UInt)
+  def asOH(using m: Module): OneHot =
+    ModuleOps.uintToOH(lhs, m)
+
+extension (lhs: OneHot)
+  def asUInt(using m: Module): UInt =
+    ModuleOps.ohToUInt(lhs, m)
+
+  def ===(rhs: OneHot)(using m: Module): Bool =
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, m)
+
+  def =/=(rhs: OneHot)(using m: Module): Bool =
+    ModuleOps.prim2Op(Bool(), IR.PrimOp.Neq, lhs, rhs, m)
+
 extension [T <: HWData](selector: T)
   inline infix def switch(inline body: SwitchBuilder[T] ?=> Unit)(using m: Module): Unit =
     given SwitchBuilder[T] = new SwitchBuilder(selector, summon[Module])
@@ -461,13 +455,3 @@ object SwitchBuilder:
     case (l: OneHot, r: OneHot) =>
       ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, l, r, mod)
     case _ => throw new IllegalArgumentException("Switch only supports UInt, Bool, Enum, and OneHot types")
-
-extension (lhs: OneHot)
-  def asUInt(using m: Module): UInt =
-    ModuleOps.ohToUInt(lhs, m)
-
-  def ===(rhs: OneHot)(using m: Module): Bool =
-    ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, m)
-
-  def =/=(rhs: OneHot)(using m: Module): Bool =
-    ModuleOps.prim2Op(Bool(), IR.PrimOp.Neq, lhs, rhs, m)

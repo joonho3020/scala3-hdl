@@ -29,9 +29,12 @@ def runFirtool(firFile: String): (Int, String) =
     pcBits = 64,
     xlenBits = 64,
     coreWidth = 2,
-    cacheLineBytes = 64,
     icacheFetchBytes = 2 * 4,
-    instBytes = 4
+    instBytes = 4,
+    ic = ICacheParams(
+      nSets = 8,
+      nWays = 4,
+      cacheLineBytes = 64)
   )
 
   val top = new CoreTop(p)

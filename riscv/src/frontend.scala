@@ -38,26 +38,32 @@ object FetchBundle:
       insts = Vec(Seq.fill(p.coreWidth)(Valid(UInt(32.W))))
     )
 
-case class FrontendIf(icache: ICacheIf, uops: Vec[Decoupled[UOp]]) extends Bundle[FrontendIf]
+case class FrontendIf(mem: MagicMemIf, uops: Vec[Decoupled[UOp]]) extends Bundle[FrontendIf]
 
 object FrontendIf:
   def apply(p: CoreParams): FrontendIf =
     FrontendIf(
-      icache = ICacheIf(p),
+      mem = MagicMemIf(p),
       uops = Vec.fill(p.coreWidth)(Decoupled(UOp(p)))
     )
 
 class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
   val io = IO(FrontendIf(p))
   body {
+
     val f3_ready = Wire(Bool())
 
     val s0_vpc = WireInit(0.U(p.pcBits.W))
 
     // Stage 0
     // - i$ tag lookup
-    io.icache.s0_vaddr.valid := true.B
-    io.icache.s0_vaddr.bits  := s0_vpc
+    val icache = Module(new ICache(p)).io
+    val ic = icache.core
+
+    io.mem := icache.mem
+
+    ic.s0_vaddr.valid := true.B
+    ic.s0_vaddr.bits  := s0_vpc
 
     // Stage 1 - todo
     // - branch prediction & s0_vpc redirects
@@ -67,9 +73,9 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     val s1_valid = Reg(Bool())
     s1_valid := DontCare
 
-    io.icache.s1_paddr.valid := s1_valid
-    io.icache.s1_paddr.bits  := s1_vpc // no virtual memory for now
-    io.icache.s1_kill := DontCare
+    ic.s1_paddr.valid := s1_valid
+    ic.s1_paddr.bits  := s1_vpc // no virtual memory for now
+    ic.s1_kill := false.B
 
     when (s1_valid) {
       s0_vpc := p.nextFetch(s1_vpc)
@@ -85,16 +91,16 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     fetch_bundle := DontCare
     fetch_bundle.pc := s2_vpc
     fetch_bundle.insts.zipWithIndex.foreach((inst_val, idx) => {
-      inst_val.valid := s2_valid && io.icache.s2_valid && s2_fetch_mask(idx).asBool
-      inst_val.bits  := io.icache.s2_insts(idx)
+      inst_val.valid := s2_valid && ic.s2_valid && s2_fetch_mask(idx).asBool
+      inst_val.bits  := ic.s2_insts(idx)
     })
 
-    io.icache.s2_kill := DontCare
+    ic.s2_kill := false.B
 
     val fb = Module(new FetchBuffer(p, depth = 4))
     fb.io.clear := DontCare
 
-    fb.io.enq.valid := s2_valid && io.icache.s2_valid
+    fb.io.enq.valid := s2_valid && ic.s2_valid
     fb.io.enq.bits  := fetch_bundle
     f3_ready := fb.io.enq.ready
 
@@ -104,7 +110,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
       fb_uop.ready := io_uop.ready
     })
 
-    when (s2_valid && io.icache.s2_valid && !f3_ready) {
+    when (s2_valid && ic.s2_valid && !f3_ready) {
       // Fetch buffer full, redirect
       s0_vpc := s2_vpc
     }
