@@ -235,6 +235,9 @@ sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnc
   def reduceOption(op: (T, T) => T): Option[T] =
     elems.reduceOption(op)
 
+  def reverse: Vec[T] =
+    Vec(elems.reverse)
+
   export elems.{ foreach, foldLeft, foldRight, exists, forall, count, mkString, zip, zipWithIndex }
 
   this.width = if elems.nonEmpty then elems.map(_.getWidth).reduce(_ + _) else Width()

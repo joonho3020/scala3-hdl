@@ -139,7 +139,12 @@ private[hdl] object ModuleOps:
   private[hdl] def hwAssert(name: Option[String], cond: Bool, message: String, mod: Module): Unit =
     val assertName = mod.getBuilder.allocateName(name, "assert")
     val clockExpr = exprFor(mod.getImplicitClock, mod)
-    val enableExpr = IR.DoPrim(IR.PrimOp.Not, Seq(exprFor(mod.getImplicitReset, mod)), Seq.empty)
+    val enableExpr = IR.DoPrim(
+      IR.PrimOp.Not,
+      Seq(
+        IR.DoPrim(IR.PrimOp.AsUInt, Seq(exprFor(mod.getImplicitReset, mod)))
+      )
+    )
     val predExpr = exprFor(cond, mod)
     mod.getBuilder.addStmt(IR.Assert(IR.Identifier(assertName), clockExpr, enableExpr, predExpr, message))
 
@@ -199,8 +204,18 @@ private[hdl] object ModuleOps:
     if flat.isEmpty then
       throw new IllegalArgumentException("Cannot concat empty sequence")
 
-    val width = values.map(_.getWidth).reduce(_ + _)
-    primOp(UInt(width), IR.PrimOp.Cat, flat, Seq.empty, mod)
+    val bits = flat.map {
+      case u: UInt => u
+      case other => asUInt(other, mod)
+    }
+
+    if bits.length == 1 then
+      bits.head
+    else
+      bits.tail.foldLeft(bits.head) { (acc, next) =>
+        val width = acc.getWidth + next.getWidth
+        prim2Op(UInt(width), IR.PrimOp.Cat, acc, next, mod)
+      }
 
 // def pad(lhs: UInt, width: Int, mod: Module): UInt =
 // primUInt(IR.PrimOp.Pad, Seq(lhs), Seq(width), mod)

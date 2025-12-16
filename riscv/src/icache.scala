@@ -163,7 +163,7 @@ class ICache(
     }
 
     when (io.mem.resp.valid && miss_busy) {
-      val replace_tag = VecTagEntry(nWays)
+      val replace_tag = Wire(VecTagEntry(nWays))
       replace_tag := DontCare
       replace_tag(miss_victim).tag   := miss_tag
       replace_tag(miss_victim).valid := true.B
@@ -175,7 +175,7 @@ class ICache(
 
       tag_array.writePorts(0).write(miss_set, replace_tag, write_mask)
 
-      val replace_data = VecDataEntry(nWays)
+      val replace_data = Wire(VecDataEntry(nWays))
       replace_data := DontCare
       replace_data(miss_victim) := Cat(io.mem.resp.bits.lineWords)
       data_array.writePorts(0).write(miss_set, replace_data, write_mask)
