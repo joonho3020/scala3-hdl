@@ -36,11 +36,9 @@ fn main() {
 
     // Reset sequence
     dut.poke_reset(1);
-    dut.poke_clock(0);
-    dut.step();
-    dut.poke_clock(1);
-    dut.step();
-
+    for _ in 0..20 {
+        dut.step();
+    }
     dut.poke_reset(0);
 
     println!("Starting ADD/SUB instruction tests...\n");
@@ -51,8 +49,7 @@ fn main() {
     let mut pending_mem_addr = 0u64;
 
     // Run simulation
-    for cycle in 0..100 {
-        dut.poke_clock(0);
+    for cycle in 0..300 {
         dut.step();
 
         // Check for memory request after negedge
@@ -96,9 +93,6 @@ fn main() {
             dut.poke_io_mem_resp_valid(0);
         }
 
-        dut.poke_clock(1);
-        dut.step();
-
         // Check ALU output
         let alu_valid = dut.peek_io_alu_valid();
         if alu_valid != 0 {
@@ -124,8 +118,6 @@ fn main() {
             } else {
                 println!("Cycle {}: ALU output = 0x{:08x}", cycle, alu_out);
             }
-        } else if cycle < 20 {
-            println!("Cycle {}: ALU not valid", cycle);
         }
 
         // Stop after we've seen all expected results

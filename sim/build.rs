@@ -243,6 +243,16 @@ fn generate_rust_bindings(top: &str, signals: &Vec<Signal>, output_path: &str) -
     writeln!(writer, "                dump_vcd(tfp, self.timestep);")?;
     writeln!(writer, "            }}")?;
     writeln!(writer, "        }}")?;
+    writeln!(writer, "        self.poke_clock(1);")?;
+    writeln!(writer, "        self.timestep += 1;")?;
+    writeln!(writer, "")?;
+    writeln!(writer, "        self.eval();")?;
+    writeln!(writer, "        if let Some(tfp) = self.trace {{")?;
+    writeln!(writer, "            unsafe {{")?;
+    writeln!(writer, "                dump_vcd(tfp, self.timestep);")?;
+    writeln!(writer, "            }}")?;
+    writeln!(writer, "        }}")?;
+    writeln!(writer, "        self.poke_clock(0);")?;
     writeln!(writer, "        self.timestep += 1;")?;
     writeln!(writer, "    }}\n")?;
 
