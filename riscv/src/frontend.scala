@@ -54,39 +54,49 @@ class Frontend(p: CoreParams) extends Module:
 
     val f3_ready = Wire(Bool())
 
-    val s0_vpc = WireInit(0.U(p.pcBits.W))
+    val s0_vpc   = WireInit(0.U(p.pcBits.W))
+    val s0_valid = WireInit(false.B)
 
+    // ----------------------------------------------------
     // Stage 0
     // - i$ tag lookup
+    // ----------------------------------------------------
     val icache = Module(new ICache(p)).io
-    val ic = icache.core
-
     io.mem := icache.mem
 
-    ic.s0_vaddr.valid := true.B
+    val ic = icache.core
+    ic.s0_vaddr.valid := s0_valid
     ic.s0_vaddr.bits  := s0_vpc
 
+    // ----------------------------------------------------
     // Stage 1 - todo
     // - branch prediction & s0_vpc redirects
     // - address translation
     // - i$ tag matching
+    // ----------------------------------------------------
     val s1_vpc = RegNext(s0_vpc)
-    val s1_valid = Reg(Bool())
-    s1_valid := DontCare
+    val s1_valid = RegInit(false.B)
+    s1_valid := s0_valid
+
+    val s1_clear = WireInit(false.B)
 
     ic.s1_paddr.valid := s1_valid
     ic.s1_paddr.bits  := s1_vpc // no virtual memory for now
-    ic.s1_kill := false.B
+    ic.s1_kill := s1_clear
 
     when (s1_valid) {
-      s0_vpc := p.nextFetch(s1_vpc)
+      s0_vpc := p.nextFetch(s1_vpc) // Always not-taken
+      s0_valid := true.B
     }
 
+    // ----------------------------------------------------
     // Stage 2 - icache resp
+    // ----------------------------------------------------
     val s2_vpc = RegNext(s1_vpc)
-    val s2_valid = Reg(Bool())
+    val s2_valid = RegInit(false.B)
     val s2_fetch_mask = p.fetchMask(s2_vpc)
-    s2_valid := DontCare
+    val s2_clear = WireInit(false.B)
+    s2_valid := s1_valid
 
     val fetch_bundle = Wire(FetchBundle(p))
     fetch_bundle := DontCare
@@ -96,10 +106,10 @@ class Frontend(p: CoreParams) extends Module:
       inst_val.bits  := ic.s2_insts(idx)
     })
 
-    ic.s2_kill := false.B
+    ic.s2_kill := s2_clear
 
     val fb = Module(new FetchBuffer(p, depth = 4))
-    fb.io.clear := DontCare
+    fb.io.clear := s2_clear
 
     fb.io.enq.valid := s2_valid && ic.s2_valid
     fb.io.enq.bits  := fetch_bundle
@@ -111,8 +121,29 @@ class Frontend(p: CoreParams) extends Module:
       fb_uop.ready := io_uop.ready
     })
 
-    when (s2_valid && ic.s2_valid && !f3_ready) {
+
+    when (s2_valid && !ic.s2_valid) {
+      // Cache miss, replay PC and flush pipeline
+      s0_vpc := s2_vpc
+      s0_valid := true.B
+      s1_clear := true.B
+    } .elsewhen (s2_valid && ic.s2_valid && !f3_ready) {
       // Fetch buffer full, redirect
       s0_vpc := s2_vpc
+      s0_valid := true.B
+      s1_clear := true.B
+    } .elsewhen (s1_valid && ic.s2_valid) {
+      // Cache hit
+    }
+
+    val jump_to_reset = RegInit(true.B)
+
+    when (jump_to_reset) {
+      s0_valid := true.B
+      s0_vpc   := 0x80000000.U
+      fb.io.clear := true.B
+      s1_clear := true.B
+      s2_clear := true.B
+      jump_to_reset := false.B
     }
   }

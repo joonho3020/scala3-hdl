@@ -102,7 +102,7 @@ class ALU(p: ALUParams) extends Module:
   io.adder_out := io.in1 + in2_inv + isSub(io.fn).asUInt
 
   io.cmp_out := DontCare
-  io.out     := DontCare
+  io.out := io.adder_out
 
   // // SLT, SLTU
   // val slt =
