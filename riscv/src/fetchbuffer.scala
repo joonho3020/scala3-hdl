@@ -65,13 +65,13 @@ class FetchBuffer(p: CoreParams, depth: Int) extends Module:
         mem(r)(c).bits.inst := io.enq.bits.insts(i).bits
         mem(r)(c).bits.pc   := io.enq.bits.pc + (p.instBytes * i).U
       }
-      enq_ptr := enq_ptr +
-                 next_offset(p.coreWidth - 1) +
-                 Mux(io.enq.bits.insts(p.coreWidth-1).valid, 1.U, 0.U)
+      enq_ptr := (enq_ptr +
+                  next_offset(p.coreWidth - 1) +
+                  Mux(io.enq.bits.insts(p.coreWidth-1).valid, 1.U, 0.U)) % entries.U
     }
 
     val deq_fire_cnt = io.deq.map(x => x.fire.asUInt).reduce(_ + _)
-    deq_ptr := deq_ptr + deq_fire_cnt
+    deq_ptr := (deq_ptr + deq_fire_cnt) % entries.U
 
     for (i <- 0 until p.coreWidth) {
       val cur_ptr = deq_ptr + i.U

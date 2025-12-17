@@ -67,13 +67,6 @@ class ICache(
     def clOffset(addr: UInt): UInt =
       addr(lineOffBits-1, log2Ceil(p.instBytes))
 
-   //  def wordOffsetInLine(addr: UInt): UInt =
-   //    addr(lineOffBits-1, 2) // word offset within the line (0..wordsPerLine-1)
-
-   //  def groupIdx(addr: UInt): UInt =
-   //    // row inside each bank = wordOffset / banks
-   //    wordOffsetInLine(addr) >> bankBits.U
-
     io.mem.req.valid := false.B
     io.mem.req.bits.addr := DontCare
 
