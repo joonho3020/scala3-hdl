@@ -50,10 +50,10 @@ class ICache(
       Vec.fill(entries)(UInt((8*ic.cacheLineBytes).W))
 
     val tag_array = SRAM(VecTagEntry(nWays), nSets)
-                        (reads = 1, writes = 1, readwrites = 0)
+                        (reads = 1, writes = 1, readwrites = 0, masked = true)
 
     val data_array = SRAM(VecDataEntry(nWays), nSets)
-                         (reads = 1, writes = 1, readwrites = 0)
+                         (reads = 1, writes = 1, readwrites = 0, masked = true)
 
     val lfsr = RegInit(1.U(16.W))
     lfsr := Cat(Seq(lfsr(14,0), lfsr(15) ^ lfsr(13) ^ lfsr(12) ^ lfsr(10)))
@@ -76,8 +76,10 @@ class ICache(
     val miss_victim   = Reg(UInt(log2Ceil(nWays).W))
     val miss_req_addr = Reg(UInt(p.pcBits.W))
 
-    // S0
+    // -----------------------------------------------------------------------
+    // Stage 0
     // - Perform tag lookup
+    // -----------------------------------------------------------------------
     val s0_valid = io.core.s0_vaddr.valid && !miss_busy
     val s0_vaddr = io.core.s0_vaddr.bits
 
@@ -87,8 +89,10 @@ class ICache(
       tag_array.readPorts(0).read(s0_set)
     }
 
-    // S1
+    // -----------------------------------------------------------------------
+    // Stage 1
     // - Match tags and check hit/miss
+    // -----------------------------------------------------------------------
     val s1_vaddr = RegNext(s0_vaddr)
     val s1_valid = RegInit(false.B)
     s1_valid := s0_valid
@@ -151,8 +155,10 @@ class ICache(
       miss_busy := false.B
     }
 
-    // S2
+    // -----------------------------------------------------------------------
+    // Stage 2
     // - Send response to core
+    // -----------------------------------------------------------------------
     val s2_valid = RegInit(false.B)
     s2_valid := s1_valid && !io.core.s1_kill
 
@@ -162,7 +168,7 @@ class ICache(
     val s2_set = RegNext(s1_set)
     val s2_vaddr = RegNext(s1_vaddr)
     val s2_hit_way = RegNext(s1_hit_way)
-    val s2_insts = Vec.fill(p.icacheFetchInstCount)(Wire(UInt(p.instBytes.W)))
+    val s2_insts = Vec.fill(p.icacheFetchInstCount)(Wire(UInt(p.instBits.W)))
     val s2_data_array_out = Wire(UInt((lineBytes*8).W))
     s2_data_array_out := data_array.readPorts(0).data(s2_hit_way)
 
@@ -172,10 +178,12 @@ class ICache(
     // | inst 0 | inst 1 | inst 2 | ... | inst 15 |
     val fetchBytesOffset = log2Ceil(p.fetchBytes)
     val s2_vaddr_fetch_group = s2_vaddr(lineOffBits-1, fetchBytesOffset)
-    val s2_vaddr_fetch_group_shamt = s2_vaddr_fetch_group << log2Ceil(p.fetchBytes)
+    val s2_vaddr_fetch_group_byte_offset = s2_vaddr_fetch_group << log2Ceil(p.fetchBytes)
+    val s2_vaddr_fetch_group_bit_offset = s2_vaddr_fetch_group_byte_offset << 3
+
     for (i <- 0 until p.icacheFetchInstCount) {
-      val inst_shamt = (i << log2Ceil(p.instBytes)).U
-      s2_insts(i) := s2_data_array_out >> (s2_vaddr_fetch_group_shamt + inst_shamt)
+      val inst_shamt = (i << log2Ceil(p.instBits)).U
+      s2_insts(i) := s2_data_array_out >> (s2_vaddr_fetch_group_bit_offset + inst_shamt)
     }
 
     io.core.s2_valid := s2_hit

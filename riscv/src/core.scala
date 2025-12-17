@@ -28,6 +28,9 @@ class Core(p: CoreParams) extends Module:
   val io = IO(CoreIf(p))
 
   body {
+    // -----------------------------------------------------------------------
+    // Decode
+    // -----------------------------------------------------------------------
     val dec = Module(new Decoder(p))
     dec.io.enq.zip(io.fetch_uops).foreach((d, f) => {
       d.valid := f.valid
@@ -37,17 +40,17 @@ class Core(p: CoreParams) extends Module:
 
     dec.io.deq.foreach(x => x.ready := false.B)
 
-    val pipe0 = Module(new ALU(ALUParams(xlen = p.xlenBits)))
-    dec.io.deq(0).ready := true.B
-    pipe0.io.fn  := dec.io.deq(0).bits.aluOp.asUInt
-    pipe0.io.in1 := dec.io.deq(0).bits.rs1
-    pipe0.io.in2 := dec.io.deq(0).bits.rs2
 
-    // FIXME...
-    io.alu_valid := dec.io.deq(0).valid
-    io.alu_out   := pipe0.io.out
-    io.alu_adder_out := pipe0.io.adder_out
-    io.alu_cmp_out := pipe0.io.cmp_out
+    val alu_pipes = Seq.fill(p.aluPipes)(Module(new ALU(ALUParams(xlen = p.xlenBits))))
+// dec.io.deq(0).ready := true.B
+// pipe0.io.fn  := dec.io.deq(0).bits.aluOp.asUInt
+// pipe0.io.in1 := dec.io.deq(0).bits.rs1
+// pipe0.io.in2 := dec.io.deq(0).bits.rs2
+
+// io.alu_valid := dec.io.deq(0).valid
+// io.alu_out   := pipe0.io.out
+// io.alu_adder_out := pipe0.io.adder_out
+// io.alu_cmp_out := pipe0.io.cmp_out
   }
 
 case class CoreTopIO(

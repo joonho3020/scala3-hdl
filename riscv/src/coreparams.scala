@@ -15,6 +15,7 @@ case class CoreParams(
   icacheFetchBytes: Int,
   instBytes: Int = 4,
   ic: ICacheParams,
+  aluPipes: Int
 ) derives StableHash:
   def xlenBytes: Int = xlenBits / 8
 

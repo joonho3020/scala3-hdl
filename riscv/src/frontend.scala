@@ -60,10 +60,10 @@ class Frontend(p: CoreParams) extends Module:
     dontTouch(s0_vpc)
     dontTouch(s0_valid)
 
-    // ----------------------------------------------------
+    // -----------------------------------------------------------------------
     // Stage 0
     // - i$ tag lookup
-    // ----------------------------------------------------
+    // -----------------------------------------------------------------------
     val icache = Module(new ICache(p)).io
     io.mem := icache.mem
 
@@ -71,12 +71,12 @@ class Frontend(p: CoreParams) extends Module:
     ic.s0_vaddr.valid := s0_valid
     ic.s0_vaddr.bits  := s0_vpc
 
-    // ----------------------------------------------------
+    // -----------------------------------------------------------------------
     // Stage 1 - todo
     // - branch prediction & s0_vpc redirects
     // - address translation
     // - i$ tag matching
-    // ----------------------------------------------------
+    // -----------------------------------------------------------------------
     val s1_vpc = RegNext(s0_vpc)
     val s1_valid = RegInit(false.B)
     val f1_clear = WireInit(false.B)
@@ -95,9 +95,9 @@ class Frontend(p: CoreParams) extends Module:
       s0_valid := true.B
     }
 
-    // ----------------------------------------------------
+    // -----------------------------------------------------------------------
     // Stage 2 - icache resp
-    // ----------------------------------------------------
+    // -----------------------------------------------------------------------
     val s2_vpc = RegNext(s1_vpc)
     val s2_valid = RegInit(false.B)
     val s2_fetch_mask = Wire(UInt())

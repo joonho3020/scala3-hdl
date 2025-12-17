@@ -5,7 +5,7 @@ fn check_alu_output(dut: &Dut) {
     let alu_valid = dut.peek_io_alu_valid();
     if alu_valid != 0 {
         let alu_out = dut.peek_io_alu_out();
-        println!("ALU output valid{}", alu_out)
+// println!("ALU output: {}", alu_out)
     }
 }
 
@@ -16,7 +16,7 @@ fn main() {
     // Create test instructions (cache line aligned at 0x80000000)
     // Note: Due to missing register file, rs1/rs2 values are used directly by ALU
     let instructions = [
-        0x003282b3u64, // ADD x1, x5, x3  -> 5 + 3 = 8
+        0x003282b3u64, // ADD x5, x5, x3  -> 5 + 3 = 8
         0x40450133u64, // SUB x2, x10, x4 -> 10 - 4 = 6
         0x007781b3u64, // ADD x3, x15, x7 -> 15 + 7 = 22
         0x408a0233u64, // SUB x4, x20, x8 -> 20 - 8 = 12

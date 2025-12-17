@@ -34,7 +34,8 @@ def runFirtool(firFile: String): (Int, String) =
     ic = ICacheParams(
       nSets = 8,
       nWays = 4,
-      cacheLineBytes = 64)
+      cacheLineBytes = 64),
+    aluPipes = 2,
   )
 
   val top = new Tile(p)
