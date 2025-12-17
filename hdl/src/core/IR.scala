@@ -24,6 +24,9 @@ private[hdl] object IR:
   enum ReadUnderWrite:
     case Undefined, Old, New
 
+  enum MemPortDir:
+    case Read, Write, ReadWrite
+
   sealed trait Type extends Serializable
   final case class UIntType(width: Width) extends Type
   final case object BoolType extends Type
@@ -57,6 +60,8 @@ private[hdl] object IR:
   final case class When(cond: Expr, conseq: Seq[Stmt], var alt: Seq[Stmt]) extends Stmt
   final case class Inst(name: Identifier, module: Identifier) extends Stmt
   final case class Invalid(expr: Expr) extends Stmt
+  final case class SMem(name: Identifier, tpe: Type, depth: Int, readUnderWrite: ReadUnderWrite) extends Stmt
+  final case class MemPort(name: Identifier, mem: Identifier, index: Expr, clock: Expr, dir: MemPortDir) extends Stmt
   final case class Mem(
     name: Identifier,
     tpe: Type,

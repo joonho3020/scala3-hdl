@@ -167,6 +167,14 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
           alt.foreach(s => emitStmt(s, indent + 1, sb))
       case IR.Inst(name, module) =>
         sb.append(s"${prefix}inst ${name.value} of ${module.value}\n")
+      case IR.SMem(name, tpe, depth, ruw) =>
+        sb.append(s"${prefix}smem ${name.value} : ${emitType(tpe)}[$depth]\n")
+      case IR.MemPort(name, mem, index, clock, dir) =>
+        val dirStr = dir match
+          case IR.MemPortDir.Read => "read"
+          case IR.MemPortDir.Write => "write"
+          case IR.MemPortDir.ReadWrite => "rdwr"
+        sb.append(s"${prefix}$dirStr mport ${name.value} = ${mem.value}[${emitExpr(index)}], ${emitExpr(clock)}\n")
       case IR.Mem(name, tpe, depth, rlat, wlat, readers, writers, readwriters, ruw) =>
         sb.append(s"${prefix}mem ${name.value}:\n")
         sb.append(s"${prefix}  data-type => ${emitType(tpe)}\n")
@@ -265,6 +273,14 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
         sb.append(s"${prefix}inst ${name.value} of ${module.value}\n")
         sb.append(s"${prefix}connect ${name.value}.clock, clock\n")
         sb.append(s"${prefix}connect ${name.value}.reset, reset\n")
+      case IR.SMem(name, tpe, depth, ruw) =>
+        sb.append(s"${prefix}smem ${name.value} : ${emitChirrtlType(tpe, false)} [$depth]\n")
+      case IR.MemPort(name, mem, index, clock, dir) =>
+        val dirStr = dir match
+          case IR.MemPortDir.Read => "read"
+          case IR.MemPortDir.Write => "write"
+          case IR.MemPortDir.ReadWrite => "rdwr"
+        sb.append(s"${prefix}$dirStr mport ${name.value} = ${mem.value}[${emitChirrtlExpr(index)}], ${emitChirrtlExpr(clock)}\n")
       case IR.Mem(name, tpe, depth, rlat, wlat, readers, writers, readwriters, ruw) =>
         sb.append(s"${prefix}mem ${name.value} :\n")
         sb.append(s"${prefix}  data-type => ${emitChirrtlType(tpe, false)}\n")

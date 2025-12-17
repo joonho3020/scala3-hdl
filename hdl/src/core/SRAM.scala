@@ -1,49 +1,10 @@
 package hdl
 
-private def connectMaskField(dst: HWData, src: HWData)(using Module): Unit =
-  (dst, src) match
-    case (dv: Vec[?], sv: Vec[?]) =>
-      val len = math.min(dv.length, sv.length)
-      var i = 0
-      while i < len do
-        connectMaskField(dv.elems(i).asInstanceOf[HWData], sv.elems(i).asInstanceOf[HWData])
-        i += 1
-    case (dv: Vec[?], s) =>
-      var i = 0
-      while i < dv.length do
-        connectMaskField(dv.elems(i).asInstanceOf[HWData], s)
-        i += 1
-    case (db: Bundle[?], sb: Bundle[?]) =>
-      val dp = db.asInstanceOf[Product]
-      val sp = sb.asInstanceOf[Product]
-      val arity = math.min(dp.productArity, sp.productArity)
-      var i = 0
-      while i < arity do
-        connectMaskField(dp.productElement(i).asInstanceOf[HWData], sp.productElement(i).asInstanceOf[HWData])
-        i += 1
-    case (db: Bundle[?], su: UInt) =>
-      HWAggregate.foreach(db) { (leaf, _) =>
-        leaf match
-          case u: UInt => ModuleOps.connect(u, su, summon[Module])
-          case b: Bool => ModuleOps.connect(b, su.asUInt(using summon[Module]), summon[Module])
-          case _ => ()
-      }
-    case (db: Bundle[?], sb: Bool) =>
-      HWAggregate.foreach(db) { (leaf, _) =>
-        leaf match
-          case u: UInt => ModuleOps.connect(u, sb.asUInt(using summon[Module]), summon[Module])
-          case b: Bool => ModuleOps.connect(b, sb, summon[Module])
-          case _ => ()
-      }
-    case (du: UInt, su: UInt) =>
-      ModuleOps.connect(du, su, summon[Module])
-    case (db: Bool, sb: Bool) =>
-      ModuleOps.connect(db, sb, summon[Module])
-    case (db: Bool, su: UInt) =>
-      ModuleOps.connect(db, su.asBool(using summon[Module]), summon[Module])
-    case _ => ()
-
-final class SRAMReadPortHandle[T <: HWData](val enable: Bool, val address: UInt, val data: T)(using Module):
+final class SRAMReadPortHandle[T <: HWData](
+  val enable: Bool,
+  val address: UInt,
+  val data: T
+)(using Module):
   def read(addr: UInt): T =
     enable := true.B
     address := addr
@@ -54,10 +15,19 @@ final class SRAMReadPortHandle[T <: HWData](val enable: Bool, val address: UInt,
     address := addr
     data
 
-final class SRAMWritePortHandle[T <: HWData, M <: HWData](val enable: Bool, val address: UInt, val data: T, val mask: M)(using Module):
+final class SRAMWritePortHandle[T <: HWData](
+  val enable: Bool,
+  val address: UInt,
+  val data: T,
+  val mask: Option[Vec[Bool]]
+)(using Module):
   private def fillMask(bit: Boolean): Unit =
-    val lit: HWData = (if bit then 1.U(Width(1)) else 0.U(Width(1))).asInstanceOf[HWData]
-    connectMaskField(mask.asInstanceOf[HWData], lit)
+    mask.foreach { mVec =>
+      var i = 0
+      while i < mVec.length do
+        mVec(i) := (if bit then true.B else false.B)
+        i += 1
+    }
 
   def write(addr: UInt, payload: T): Unit =
     enable := true.B
@@ -71,23 +41,27 @@ final class SRAMWritePortHandle[T <: HWData, M <: HWData](val enable: Bool, val 
     data := payload
     fillMask(true)
 
-  def write(addr: UInt, payload: T, maskValue: M): Unit =
+  def write(addr: UInt, payload: T, maskValue: Vec[Bool]): Unit =
     enable := true.B
     address := addr
     data := payload
-    connectMaskField(mask.asInstanceOf[HWData], maskValue.asInstanceOf[HWData])
+    mask.foreach(m => ModuleOps.connect(m, maskValue, summon[Module]))
 
-final class SRAMReadWritePortHandle[T <: HWData, M <: HWData](
+final class SRAMReadWritePortHandle[T <: HWData](
   val enable: Bool,
   val address: UInt,
   val isWrite: Bool,
   val writeData: T,
   val readData: T,
-  val mask: M
+  val mask: Option[Vec[Bool]]
 )(using Module):
   private def fillMask(bit: Boolean): Unit =
-    val lit: HWData = (if bit then 1.U(Width(1)) else 0.U(Width(1))).asInstanceOf[HWData]
-    connectMaskField(mask.asInstanceOf[HWData], lit)
+    mask.foreach { mVec =>
+      var i = 0
+      while i < mVec.length do
+        mVec(i) := (if bit then true.B else false.B)
+        i += 1
+    }
 
   def write(addr: UInt, payload: T): Unit =
     enable := true.B
@@ -103,12 +77,12 @@ final class SRAMReadWritePortHandle[T <: HWData, M <: HWData](
     writeData := payload
     fillMask(true)
 
-  def write(addr: UInt, payload: T, maskValue: M): Unit =
+  def write(addr: UInt, payload: T, maskValue: Vec[Bool]): Unit =
     enable := true.B
     isWrite := true.B
     address := addr
     writeData := payload
-    connectMaskField(mask.asInstanceOf[HWData], maskValue.asInstanceOf[HWData])
+    mask.foreach(m => ModuleOps.connect(m, maskValue, summon[Module]))
 
   def read(addr: UInt): T =
     enable := true.B
@@ -124,33 +98,62 @@ final class SRAMReadWritePortHandle[T <: HWData, M <: HWData](
     fillMask(true)
     readData
 
-final class SRAMReadPorts[T <: HWData](en: Vec[Bool], addr: Vec[UInt], data: Vec[T])(using Module):
+final class SRAMReadPorts[T <: HWData](
+  en: Vec[Bool],
+  addr: Vec[UInt],
+  data: Vec[T]
+)(using Module):
   def apply(idx: Int): SRAMReadPortHandle[T] =
     SRAMReadPortHandle(en(idx), addr(idx), data(idx))
 
   def apply(idx: UInt): SRAMReadPortHandle[T] =
     SRAMReadPortHandle(en(idx), addr(idx), data(idx))
 
-final class SRAMWritePorts[T <: HWData, M <: HWData](en: Vec[Bool], addr: Vec[UInt], data: Vec[T], mask: Vec[M])(using Module):
-  def apply(idx: Int): SRAMWritePortHandle[T, M] =
-    SRAMWritePortHandle(en(idx), addr(idx), data(idx), mask(idx))
+final class SRAMWritePorts[T <: HWData](
+  en: Vec[Bool],
+  addr: Vec[UInt],
+  data: Vec[T],
+  mask: Option[Vec[Vec[Bool]]]
+)(using Module):
+  def apply(idx: Int): SRAMWritePortHandle[T] =
+    SRAMWritePortHandle(
+      en(idx),
+      addr(idx),
+      data(idx),
+      mask.map(_(idx)))
 
-  def apply(idx: UInt): SRAMWritePortHandle[T, M] =
-    SRAMWritePortHandle(en(idx), addr(idx), data(idx), mask(idx))
+  def apply(idx: UInt): SRAMWritePortHandle[T] =
+    SRAMWritePortHandle(
+      en(idx),
+      addr(idx),
+      data(idx),
+      mask.map(_(idx)))
 
-final class SRAMReadWritePorts[T <: HWData, M <: HWData](
+final class SRAMReadWritePorts[T <: HWData](
   en: Vec[Bool],
   addr: Vec[UInt],
   wmode: Vec[Bool],
   wdata: Vec[T],
   rdata: Vec[T],
-  mask: Vec[M]
+  mask: Option[Vec[Vec[Bool]]]
 )(using Module):
-  def apply(idx: Int): SRAMReadWritePortHandle[T, M] =
-    SRAMReadWritePortHandle(en(idx), addr(idx), wmode(idx), wdata(idx), rdata(idx), mask(idx))
+  def apply(idx: Int): SRAMReadWritePortHandle[T] =
+    SRAMReadWritePortHandle(
+      en(idx),
+      addr(idx),
+      wmode(idx),
+      wdata(idx),
+      rdata(idx),
+      mask.map(_(idx)))
 
-  def apply(idx: UInt): SRAMReadWritePortHandle[T, M] =
-    SRAMReadWritePortHandle(en(idx), addr(idx), wmode(idx), wdata(idx), rdata(idx), mask(idx))
+  def apply(idx: UInt): SRAMReadWritePortHandle[T] =
+    SRAMReadWritePortHandle(
+      en(idx),
+      addr(idx),
+      wmode(idx),
+      wdata(idx),
+      rdata(idx),
+      mask.map(_(idx)))
 
 final class SRAM[T <: HWData](
   data: T,
@@ -160,92 +163,47 @@ final class SRAM[T <: HWData](
   val readwritePortCount: Int,
   val readLatency: Int = 1,
   val writeLatency: Int = 1,
-  val readUnderWrite: IR.ReadUnderWrite = IR.ReadUnderWrite.Undefined
+  val readUnderWrite: IR.ReadUnderWrite = IR.ReadUnderWrite.Undefined,
+  val masked: Boolean = false
 )(using m: Module):
   val addrWidth = log2Ceil(depth)
 
   private val dataProto = HWAggregate.cloneData(data)
   private val memName = m.getBuilder.allocateName(Some("mem"), "mem")
+  private val memImplName = s"${memName}_mem"
 
-  private val readerIds = (0 until readPortCount).map(i => IR.Identifier(s"r$i"))
-  private val writerIds = (0 until writePortCount).map(i => IR.Identifier(s"w$i"))
-  private val readwriterIds = (0 until readwritePortCount).map(i => IR.Identifier(s"rw$i"))
+  private val maskWidth =
+    if masked then
+      dataProto match
+        case v: Vec[?] => v.length
+        case _ => throw new IllegalArgumentException("Masked SRAM requires Vec data")
+    else 0
 
-  m.getBuilder.addStmt(IR.Mem(
-    IR.Identifier(memName),
+  m.getBuilder.addStmt(IR.SMem(
+    IR.Identifier(memImplName),
     ModuleOps.irTypeOf(dataProto),
     depth,
-    readLatency,
-    writeLatency,
-    readerIds,
-    writerIds,
-    readwriterIds,
     readUnderWrite
   ))
 
-  private val readEnVec = ModuleOps.wire(Vec.fill(readPortCount)(Bool()), Some(s"${memName}_r_en"), m)
-  private val readAddrVec = ModuleOps.wire(Vec.fill(readPortCount)(UInt(Width(addrWidth))), Some(s"${memName}_r_addr"), m)
-  private val readDataVec = ModuleOps.wire(Vec.fill(readPortCount)(HWAggregate.cloneData(dataProto)), Some(s"${memName}_r_data"), m)
+  private def portWireVec[T <: HWData](cnt: Int, x: T, name: String): Vec[T] =
+    ModuleOps.wire(Vec.fill(cnt)(x), Some(name), m)
 
-  private val writeEnVec = ModuleOps.wire(Vec.fill(writePortCount)(Bool()), Some(s"${memName}_w_en"), m)
-  private val writeAddrVec = ModuleOps.wire(Vec.fill(writePortCount)(UInt(Width(addrWidth))), Some(s"${memName}_w_addr"), m)
-  private val writeDataVec = ModuleOps.wire(Vec.fill(writePortCount)(HWAggregate.cloneData(dataProto)), Some(s"${memName}_w_data"), m)
+  private val readEnVec = portWireVec(readPortCount, Bool(), s"${memName}_r_en")
+  private val readAddrVec = portWireVec(readPortCount, UInt(Width(addrWidth)), s"${memName}_r_addr")
+  private val readDataVec = portWireVec(readPortCount, HWAggregate.cloneData(dataProto), s"${memName}_r_data")
 
-  private val readWriteEnVec = ModuleOps.wire(Vec.fill(readwritePortCount)(Bool()), Some(s"${memName}_rw_en"), m)
-  private val readWriteAddrVec = ModuleOps.wire(Vec.fill(readwritePortCount)(UInt(Width(addrWidth))), Some(s"${memName}_rw_addr"), m)
-  private val readWriteModeVec = ModuleOps.wire(Vec.fill(readwritePortCount)(Bool()), Some(s"${memName}_rw_wmode"), m)
-  private val readWriteWDataVec = ModuleOps.wire(Vec.fill(readwritePortCount)(HWAggregate.cloneData(dataProto)), Some(s"${memName}_rw_wdata"), m)
-  private val readWriteRDataVec = ModuleOps.wire(Vec.fill(readwritePortCount)(HWAggregate.cloneData(dataProto)), Some(s"${memName}_rw_rdata"), m)
+  private val writeEnVec = portWireVec(writePortCount, Bool(), s"${memName}_w_en")
+  private val writeAddrVec = portWireVec(writePortCount, UInt(addrWidth.W), s"${memName}_w_addr")
+  private val writeDataVec = portWireVec(writePortCount, HWAggregate.cloneData(dataProto), s"${memName}_w_data")
+  private val writeMaskVec = if masked then Some(portWireVec(writePortCount, Vec.fill(maskWidth)(Bool()), s"${memName}_w_mask")) else None
 
-  private def rebuildProductLike(p: Product, values: Array[Any]): Any =
-    val cls = p.getClass
-    val ctors = cls.getConstructors
-    val args = values.map(_.asInstanceOf[AnyRef])
-    val direct = ctors.collectFirst {
-      case c if c.getParameterCount == args.length =>
-        () => c.newInstance(args*)
-    }
-    val outer = ctors.collectFirst {
-      case c if c.getParameterCount == args.length + 1 =>
-        cls.getDeclaredFields.find(_.getName == "$outer").map { outerField =>
-          outerField.setAccessible(true)
-          val outer = outerField.get(p)
-          val outerArgs: Array[AnyRef] = Array(outer.asInstanceOf[AnyRef]) ++ args
-          () => c.newInstance(outerArgs*)
-        }
-    }.flatten
-    direct.orElse(outer)
-      .map(_())
-      .getOrElse {
-        val companionOpt = try Some(Class.forName(s"${cls.getName}$$")) catch
-          case _: Throwable => None
-        val module = companionOpt.map(_.getField("MODULE$").get(null))
-          .getOrElse(throw new IllegalArgumentException(s"No apply method for ${cls.getName}"))
-        val apply = module.getClass.getMethods.find(m => m.getName == "apply" && m.getParameterCount == args.length)
-          .getOrElse(throw new IllegalArgumentException(s"No apply method for ${cls.getName}"))
-        apply.invoke(module, args*)
-      }
-
-  private def maskProto(d: HWData): HWData = d match
-    case v: Vec[?] =>
-      val elems = v.elems.map(e => maskProto(e.asInstanceOf[HWData]))
-      Vec(elems.asInstanceOf[Seq[HWData]])
-    case b: Bundle[?] =>
-      val prod = b.asInstanceOf[Product]
-      val arity = prod.productArity
-      val values = Array.ofDim[Any](arity)
-      var i = 0
-      while i < arity do
-        values(i) = maskProto(prod.productElement(i).asInstanceOf[HWData])
-        i += 1
-      rebuildProductLike(prod, values).asInstanceOf[HWData]
-    case _: Bool => Bool()
-    case _ => UInt(Width(1))
-
-  private val maskTemplate = maskProto(dataProto)
-
-  private val writeMaskVec = ModuleOps.wire(Vec.fill(writePortCount)(HWAggregate.cloneData(maskTemplate)), Some(s"${memName}_w_mask"), m)
-  private val readWriteMaskVec = ModuleOps.wire(Vec.fill(readwritePortCount)(HWAggregate.cloneData(maskTemplate)), Some(s"${memName}_rw_mask"), m)
+  private val readWriteEnVec = portWireVec(readwritePortCount, Bool(), s"${memName}_rw_en")
+  private val readWriteAddrVec = portWireVec(readwritePortCount, UInt(Width(addrWidth)), s"${memName}_rw_addr")
+  private val readWriteModeVec = portWireVec(readwritePortCount, Bool(), s"${memName}_rw_wmode")
+  private val readWriteWDataVec = portWireVec(readwritePortCount, HWAggregate.cloneData(dataProto), s"${memName}_rw_wdata")
+  private val readWriteRDataVec = portWireVec(readwritePortCount, HWAggregate.cloneData(dataProto), s"${memName}_rw_rdata")
+  private val readWriteMaskVec = if masked then Some(portWireVec(readwritePortCount, Vec.fill(maskWidth)(Bool()), s"${memName}_rw_mask")) else None
 
   private def connectZero(value: HWData): Unit =
     HWAggregate.foreach(value) { (leaf, _) =>
@@ -261,93 +219,138 @@ final class SRAM[T <: HWData](
     }
 
   (0 until readPortCount).foreach { idx =>
-    ModuleOps.connect(readEnVec.elems(idx), false.B, m)
-    ModuleOps.connect(readAddrVec.elems(idx), 0.U(Width(addrWidth)), m)
+    ModuleOps.connect(readEnVec(idx), false.B, m)
+    ModuleOps.connect(readAddrVec(idx), 0.U(Width(addrWidth)), m)
   }
 
   (0 until writePortCount).foreach { idx =>
-    ModuleOps.connect(writeEnVec.elems(idx), false.B, m)
-    ModuleOps.connect(writeAddrVec.elems(idx), 0.U(Width(addrWidth)), m)
-    connectZero(writeDataVec.elems(idx))
-    connectZero(writeMaskVec.elems(idx))
+    ModuleOps.connect(writeEnVec(idx), false.B, m)
+    ModuleOps.connect(writeAddrVec(idx), 0.U(Width(addrWidth)), m)
+    connectZero(writeDataVec(idx))
+    writeMaskVec.foreach { masks =>
+      val maskVec = masks(idx)
+      var i = 0
+      while i < maskVec.length do
+        maskVec(i) := false.B
+        i += 1
+    }
   }
 
   (0 until readwritePortCount).foreach { idx =>
-    ModuleOps.connect(readWriteEnVec.elems(idx), false.B, m)
-    ModuleOps.connect(readWriteAddrVec.elems(idx), 0.U(Width(addrWidth)), m)
-    ModuleOps.connect(readWriteModeVec.elems(idx), false.B, m)
-    connectZero(readWriteWDataVec.elems(idx))
-    connectZero(readWriteMaskVec.elems(idx))
+    ModuleOps.connect(readWriteEnVec(idx), false.B, m)
+    ModuleOps.connect(readWriteAddrVec(idx), 0.U(Width(addrWidth)), m)
+    ModuleOps.connect(readWriteModeVec(idx), false.B, m)
+    connectZero(readWriteWDataVec(idx))
+    connectZero(readWriteRDataVec(idx))
+    readWriteMaskVec.foreach { masks =>
+      val maskVec = masks(idx)
+      var i = 0
+      while i < maskVec.length do
+        maskVec(i) := false.B
+        i += 1
+    }
   }
 
   private val clock = m.getImplicitClock
 
-  private def portExpr(port: IR.Identifier): IR.Expr =
-    IR.SubField(IR.Ref(IR.Identifier(memName)), port)
-
-  private def fieldExpr(port: IR.Identifier, field: String): IR.Expr =
-    IR.SubField(portExpr(port), IR.Identifier(field))
-
-  private def rebindBool(expr: IR.Expr): Bool =
-    HWAggregate.rebind(Bool(), expr)
-
-  private def rebindAddr(expr: IR.Expr): UInt =
-    HWAggregate.rebind(UInt(Width(addrWidth)), expr)
-
-  private def rebindMask(expr: IR.Expr): HWData =
-    HWAggregate.rebind(maskProto(dataProto), expr)
-
   private def rebindData(expr: IR.Expr): T =
     HWAggregate.rebind(HWAggregate.cloneData(dataProto), expr).asInstanceOf[T]
 
-  private def rebindClock(expr: IR.Expr): Clock =
-    HWAggregate.rebind(Clock(), expr)
+  private def connectMaskedVec(dst: Vec[?], src: Vec[?], mask: Vec[Bool]): Unit =
+    var i = 0
+    while i < mask.length do
+      ModuleOps.when(mask(i), m) {
+        ModuleOps.connect(dst.elems(i).asInstanceOf[HWData], src.elems(i).asInstanceOf[HWData], m)
+      }
+      i += 1
 
-  readerIds.zipWithIndex.foreach { case (pid, idx) =>
-    val en = rebindBool(fieldExpr(pid, "en"))
-    val addr = rebindAddr(fieldExpr(pid, "addr"))
-    val dataField = rebindData(fieldExpr(pid, "data"))
-    val clk = rebindClock(fieldExpr(pid, "clk"))
-    ModuleOps.connect(en, readEnVec.elems(idx), m)
-    ModuleOps.connect(addr, readAddrVec.elems(idx), m)
-    ModuleOps.connect(readDataVec.elems(idx), dataField, m)
-    ModuleOps.connect(clk, clock, m)
+  (0 until readPortCount).foreach { idx =>
+    val mportName = m.getBuilder.allocateName(
+      Some(s"${memName}_out_r${idx}_data_MPORT"), s"${memName}_r_mport"
+    )
+    ModuleOps.when(readEnVec(idx), m) {
+      m.getBuilder.addStmt(IR.MemPort(
+        IR.Identifier(mportName),
+        IR.Identifier(memImplName),
+        ModuleOps.exprFor(readAddrVec(idx), m),
+        ModuleOps.exprFor(clock, m),
+        IR.MemPortDir.Read
+      ))
+    }
+    val refData = rebindData(IR.Ref(IR.Identifier(mportName)))
+    ModuleOps.connect(readDataVec(idx), refData, m)
   }
 
-  writerIds.zipWithIndex.foreach { case (pid, idx) =>
-    val en = rebindBool(fieldExpr(pid, "en"))
-    val addr = rebindAddr(fieldExpr(pid, "addr"))
-    val dataField = rebindData(fieldExpr(pid, "data"))
-    val maskField = rebindMask(fieldExpr(pid, "mask"))
-    val clk = rebindClock(fieldExpr(pid, "clk"))
-    ModuleOps.connect(en, writeEnVec.elems(idx), m)
-    ModuleOps.connect(addr, writeAddrVec.elems(idx), m)
-    ModuleOps.connect(dataField, writeDataVec.elems(idx), m)
-    connectMaskField(maskField, writeMaskVec.elems(idx))
-    ModuleOps.connect(clk, clock, m)
+  (0 until writePortCount).foreach { idx =>
+    val mportName = m.getBuilder.allocateName(
+      Some(s"${memName}_w${idx}_MPORT"), s"${memName}_w_mport"
+    )
+    ModuleOps.when(writeEnVec(idx), m) {
+      m.getBuilder.addStmt(IR.MemPort(
+        IR.Identifier(mportName),
+        IR.Identifier(memImplName),
+        ModuleOps.exprFor(writeAddrVec(idx), m),
+        ModuleOps.exprFor(clock, m),
+        IR.MemPortDir.Write
+      ))
+      val mportData = rebindData(IR.Ref(IR.Identifier(mportName)))
+      writeMaskVec match
+        case Some(maskVec) =>
+          connectMaskedVec(
+            mportData.asInstanceOf[Vec[?]],
+            writeDataVec(idx).asInstanceOf[Vec[?]], maskVec(idx))
+        case None =>
+          ModuleOps.connect(mportData, writeDataVec(idx), m)
+    }
   }
 
-  readwriterIds.zipWithIndex.foreach { case (pid, idx) =>
-    val en = rebindBool(fieldExpr(pid, "en"))
-    val addr = rebindAddr(fieldExpr(pid, "addr"))
-    val wmode = rebindBool(fieldExpr(pid, "wmode"))
-    val wdata = rebindData(fieldExpr(pid, "wdata"))
-    val rdata = rebindData(fieldExpr(pid, "rdata"))
-    val mask = rebindMask(fieldExpr(pid, "wmask"))
-    val clk = rebindClock(fieldExpr(pid, "clk"))
-    ModuleOps.connect(en, readWriteEnVec.elems(idx), m)
-    ModuleOps.connect(addr, readWriteAddrVec.elems(idx), m)
-    ModuleOps.connect(wmode, readWriteModeVec.elems(idx), m)
-    ModuleOps.connect(wdata, readWriteWDataVec.elems(idx), m)
-    ModuleOps.connect(readWriteRDataVec.elems(idx), rdata, m)
-    connectMaskField(mask, readWriteMaskVec.elems(idx))
-    ModuleOps.connect(clk, clock, m)
+  (0 until readwritePortCount).foreach { idx =>
+    val mportName = m.getBuilder.allocateName(
+      Some(s"${memName}_rw${idx}_MPORT"), s"${memName}_rw_mport"
+    )
+    ModuleOps.when(readWriteEnVec(idx), m) {
+      m.getBuilder.addStmt(IR.MemPort(
+        IR.Identifier(mportName),
+        IR.Identifier(memImplName),
+        ModuleOps.exprFor(readWriteAddrVec(idx), m),
+        ModuleOps.exprFor(clock, m),
+        IR.MemPortDir.ReadWrite
+      ))
+      val mportData = rebindData(IR.Ref(IR.Identifier(mportName)))
+      ModuleOps.when(readWriteModeVec(idx), m) {
+        readWriteMaskVec match
+          case Some(maskVec) =>
+            connectMaskedVec(
+              mportData.asInstanceOf[Vec[?]],
+              readWriteWDataVec(idx).asInstanceOf[Vec[?]], maskVec(idx))
+          case None =>
+            ModuleOps.connect(mportData, readWriteWDataVec(idx), m)
+      }
+    }
+    val refData = rebindData(IR.Ref(IR.Identifier(mportName)))
+    ModuleOps.connect(readWriteRDataVec(idx), refData, m)
   }
 
-  val readPorts = SRAMReadPorts(readEnVec, readAddrVec, readDataVec)
-  val writePorts = SRAMWritePorts(writeEnVec, writeAddrVec, writeDataVec, writeMaskVec)
-  val readwritePorts = SRAMReadWritePorts(readWriteEnVec, readWriteAddrVec, readWriteModeVec, readWriteWDataVec, readWriteRDataVec, readWriteMaskVec)
+  val readPorts  =     SRAMReadPorts(readEnVec,
+                                     readAddrVec,
+                                     readDataVec)
+
+  val writePorts =     SRAMWritePorts(writeEnVec,
+                                      writeAddrVec,
+                                      writeDataVec,
+                                      writeMaskVec)
+
+  val readwritePorts = SRAMReadWritePorts(readWriteEnVec,
+                                          readWriteAddrVec,
+                                          readWriteModeVec,
+                                          readWriteWDataVec,
+                                          readWriteRDataVec,
+                                          readWriteMaskVec)
 
 object SRAM:
-  def apply[T <: HWData](data: T, depth: Int)(reads: Int, writes: Int, readwrites: Int)(using Module): SRAM[T] =
-    new SRAM(data, depth, reads, writes, readwrites)
+  def apply[T <: HWData](
+    data: T, depth: Int
+  )(
+    reads: Int, writes: Int, readwrites: Int, masked: Boolean = false
+  )(using Module): SRAM[T] =
+    new SRAM(data, depth, reads, writes, readwrites, masked = masked)

@@ -877,7 +877,7 @@ object OneReadOneWriteIO:
 class OneReadOneWritePortSRAM(width: Int) extends Module:
   given Module = this
   val io = IO(OneReadOneWriteIO(width))
-  val mem = SRAM(Vec.fill(4)(UInt(Width(width))), 8)(1, 1, 0)
+  val mem = SRAM(Vec.fill(4)(UInt(Width(width))), 8)(1, 1, 0, masked = true)
   when(io.wen) {
     mem.writePorts(0).write(io.waddr, io.wdata, io.wmask)
   }
@@ -886,7 +886,7 @@ class OneReadOneWritePortSRAM(width: Int) extends Module:
 class SinglePortSRAM(width: Int) extends Module:
   given Module = this
   val io = IO(OneReadOneWriteIO(width))
-  val mem = SRAM(Vec.fill(4)(UInt(Width(width))), 8)(1, 1, 0)
+  val mem = SRAM(Vec.fill(4)(UInt(Width(width))), 8)(1, 1, 0, masked = true)
   when(io.wen) {
     mem.writePorts(0).write(io.waddr, io.wdata, io.wmask)
   }
@@ -916,7 +916,7 @@ class AggregateSRAM(width: Int) extends Module:
     Input(Vec.fill(4)(AggregateBundle())),
     Input(Vec.fill(4)(Bool()))
   ))
-  val mem = SRAM(Vec.fill(4)(AggregateBundle()), 8)(1, 1, 0)
+  val mem = SRAM(Vec.fill(4)(AggregateBundle()), 8)(1, 1, 0, masked = true)
   when(io.wen) {
     mem.writePorts(0).write(io.waddr, io.wdata, io.wmask)
   }
@@ -945,7 +945,7 @@ class DualReadSingleWritePortSRAM(width: Int) extends Module:
     Input(Vec.fill(4)(UInt(Width(width)))),
     Input(Vec.fill(4)(Bool()))
   ))
-  val mem = SRAM(Vec.fill(4)(UInt(Width(width))), 8)(2, 1, 0)
+  val mem = SRAM(Vec.fill(4)(UInt(Width(width))), 8)(2, 1, 0, masked = true)
   when(io.wen) {
     mem.writePorts(0).write(io.waddr, io.wdata, io.wmask)
   }
@@ -977,7 +977,7 @@ class OneReadOneReadWritePortSRAM(width: Int) extends Module:
     Input(Vec.fill(4)(UInt(Width(width)))),
     Input(Vec.fill(4)(Bool()))
   ))
-  val mem = SRAM(Vec.fill(4)(UInt(Width(width))), 8)(2, 1, 0)
+  val mem = SRAM(Vec.fill(4)(UInt(Width(width))), 8)(2, 1, 0, masked = true)
   when(io.wen) {
     mem.writePorts(0).write(io.waddr, io.wdata, io.wmask)
   }
