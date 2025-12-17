@@ -263,10 +263,10 @@ fn generate_rust_bindings(top: &str, signals: &Vec<Signal>, output_path: &str) -
     writeln!(writer, "        self.poke_clock(1);")?;
     writeln!(writer, "        self.poke_reset(1);")?;
     writeln!(writer, "        self.eval();")?;
-    writeln!(writer, "            self.step();")?;
-    writeln!(writer, "            self.step();")?;
-    writeln!(writer, "            self.step();")?;
-    writeln!(writer, "            self.step();")?;
+    writeln!(writer, "        self.step();")?;
+    writeln!(writer, "        self.step();")?;
+    writeln!(writer, "        self.step();")?;
+    writeln!(writer, "        self.step();")?;
     writeln!(writer, "        self.poke_reset(0);")?;
     writeln!(writer, "        self.step();")?;
     writeln!(writer, "    }}\n")?;

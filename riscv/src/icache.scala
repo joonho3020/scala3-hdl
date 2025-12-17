@@ -97,14 +97,19 @@ class ICache(
     // S1
     // - Match tags and check hit/miss
     val s1_vaddr = RegNext(s0_vaddr)
-    val s1_valid = RegNext(s0_valid) && !io.core.s1_kill && io.core.s1_paddr.valid
+    val s1_valid = RegInit(false.B)
+    s1_valid := s0_valid
+
     val s1_set   = setIdx(s1_vaddr)
     val s1_paddr = io.core.s1_paddr.bits
     val s1_paddr_tag = tagOf(s1_paddr)
     val s1_tags = tag_array.readPorts(0).data
 
     val s1_tag_hit_vec = s1_tags.map(entry => {
-      entry.valid && (entry.tag === s1_paddr_tag) && s1_valid
+      s1_valid &&
+      entry.valid &&
+      (entry.tag === s1_paddr_tag) &&
+      io.core.s1_paddr.valid
     })
 
     val s1_tag_hit = s1_tag_hit_vec.reduce(_ || _)
@@ -156,7 +161,10 @@ class ICache(
     // S2
     // - Send response to core
     val s2_valid = RegInit(false.B)
-    s2_valid := RegNext(s1_valid && s1_tag_hit) && !io.core.s2_kill
+    s2_valid := s1_valid && !io.core.s1_kill
+
+    val s2_hit = Wire(Bool())
+    s2_hit := s2_valid && RegNext(s1_tag_hit) && !io.core.s2_kill
 
     val s2_set = RegNext(s1_set)
     val s2_vaddr = RegNext(s1_vaddr)
@@ -174,6 +182,6 @@ class ICache(
       s2_insts(i) := s2_data_array_out >> (s2_vaddr_fetch_group_shamt + inst_shamt)
     }
 
-    io.core.s2_valid := s2_valid
+    io.core.s2_valid := s2_hit
     io.core.s2_insts := s2_insts
   }
