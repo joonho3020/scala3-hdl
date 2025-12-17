@@ -42,10 +42,10 @@ class FetchBuffer(p: CoreParams, depth: Int) extends Module:
     //               ^   ^
     //               enq deq        almost_full := (deq - enq) <= W
     val almost_full = Mux(enq_ptr >= deq_ptr,
-                          (enq_ptr + p.coreWidth.U) % entries.U >= deq_ptr,
+                          (entries.U - (enq_ptr - deq_ptr)  <= p.coreWidth.U),
                           (deq_ptr - enq_ptr) <= p.coreWidth.U)
-
-    io.enq.ready := !almost_full
+    val empty = enq_ptr === deq_ptr
+    io.enq.ready := !almost_full || empty
 
     when (io.enq.fire) {
       val next_offset = Vec.fill(p.coreWidth)(Wire(UInt(addrBits.W)))

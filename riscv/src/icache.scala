@@ -52,8 +52,8 @@ class ICache(
     val tag_array = SRAM(VecTagEntry(nWays), nSets)
                         (reads = 1, writes = 1, readwrites = 0)
 
-    val data_array = SRAM(VecDataEntry(nWays), nSets)(
-      reads = 1, writes = 1, readwrites = 0)
+    val data_array = SRAM(VecDataEntry(nWays), nSets)
+                         (reads = 1, writes = 1, readwrites = 0)
 
     val lfsr = RegInit(1.U(16.W))
     lfsr := Cat(Seq(lfsr(14,0), lfsr(15) ^ lfsr(13) ^ lfsr(12) ^ lfsr(10)))
@@ -170,7 +170,10 @@ class ICache(
     val s2_vaddr = RegNext(s1_vaddr)
     val s2_hit_way = RegNext(s1_hit_way)
     val s2_insts = Vec.fill(p.icacheFetchInstCount)(Wire(UInt(p.instBytes.W)))
-    val s2_data_array_out = data_array.readPorts(0).data(s2_hit_way)
+    val s2_data_array_out = Wire(UInt((lineBytes*8).W))
+    s2_data_array_out := data_array.readPorts(0).data(s2_hit_way)
+
+    dontTouch(s2_data_array_out)
 
     // |      CL                                  |
     // | inst 0 | inst 1 | inst 2 | ... | inst 15 |

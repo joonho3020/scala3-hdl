@@ -6,3 +6,9 @@ S0 S1 S2
 4  0  x
 8  4  0 <-miss
 0  x  x
+
+
+---
+
+
+- Write mask for data array is missing?
