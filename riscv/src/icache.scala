@@ -2,35 +2,6 @@ package riscv
 
 import hdl._
 
-
-case class MagicMemReq(
-  addr: UInt
-) extends Bundle[MagicMemReq]
-
-case class MagicMemResp(
-  lineWords: Vec[UInt]
-) extends Bundle[MagicMemResp]
-
-case class MagicMemIf(
-  req: Valid[MagicMemReq],
-  resp: Valid[MagicMemResp]
-) extends Bundle[MagicMemIf]
-
-object MagicMemReq:
-  def apply(p: CoreParams): MagicMemReq =
-    MagicMemReq(addr = UInt(p.pcBits.W))
-
-object MagicMemResp:
-  def apply(p: CoreParams): MagicMemResp =
-    MagicMemResp(lineWords = Vec.fill(p.ic.cacheLineBytes/4)(UInt(32.W)))
-
-object MagicMemIf:
-  def apply(p: CoreParams): MagicMemIf =
-    MagicMemIf(
-      req  =         Valid(MagicMemReq (p)),
-      resp = Flipped(Valid(MagicMemResp(p)))
-    )
-
 case class TagEntry(valid: Bool, tag: UInt) extends Bundle[TagEntry]
 object TagEntry:
   def apply(tagBits: Int): TagEntry =
@@ -76,7 +47,7 @@ class ICache(
       Vec.fill(entries)(TagEntry(tagBits))
 
     def VecDataEntry(entries: Int): Vec[UInt] =
-      Vec.fill(entries)(UInt(ic.cacheLineBytes.W))
+      Vec.fill(entries)(UInt((8*ic.cacheLineBytes).W))
 
     val tag_array = SRAM(VecTagEntry(nWays), nSets)
                         (reads = 1, writes = 1, readwrites = 0)
@@ -105,9 +76,6 @@ class ICache(
 
     io.mem.req.valid := false.B
     io.mem.req.bits.addr := DontCare
-
-    io.core.s2_valid := false.B
-    io.core.s2_insts := DontCare
 
     val miss_busy     = RegInit(false.B)
     val miss_set      = Reg(UInt(setIdxBits.W))

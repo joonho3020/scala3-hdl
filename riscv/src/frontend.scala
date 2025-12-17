@@ -57,6 +57,9 @@ class Frontend(p: CoreParams) extends Module:
     val s0_vpc   = WireInit(0.U(p.pcBits.W))
     val s0_valid = WireInit(false.B)
 
+    dontTouch(s0_vpc)
+    dontTouch(s0_valid)
+
     // ----------------------------------------------------
     // Stage 0
     // - i$ tag lookup
@@ -76,13 +79,16 @@ class Frontend(p: CoreParams) extends Module:
     // ----------------------------------------------------
     val s1_vpc = RegNext(s0_vpc)
     val s1_valid = RegInit(false.B)
+    val f1_clear = WireInit(false.B)
     s1_valid := s0_valid
 
-    val s1_clear = WireInit(false.B)
+    dontTouch(s1_vpc)
+    dontTouch(s1_valid)
+    dontTouch(f1_clear)
 
     ic.s1_paddr.valid := s1_valid
     ic.s1_paddr.bits  := s1_vpc // no virtual memory for now
-    ic.s1_kill := s1_clear
+    ic.s1_kill := f1_clear
 
     when (s1_valid) {
       s0_vpc := p.nextFetch(s1_vpc) // Always not-taken
@@ -94,9 +100,16 @@ class Frontend(p: CoreParams) extends Module:
     // ----------------------------------------------------
     val s2_vpc = RegNext(s1_vpc)
     val s2_valid = RegInit(false.B)
-    val s2_fetch_mask = p.fetchMask(s2_vpc)
-    val s2_clear = WireInit(false.B)
-    s2_valid := s1_valid
+    val s2_fetch_mask = Wire(UInt())
+    val f2_clear = WireInit(false.B)
+
+    s2_valid := s1_valid && !f1_clear
+    s2_fetch_mask := p.fetchMask(s2_vpc)
+
+    dontTouch(s2_vpc)
+    dontTouch(s2_valid)
+    dontTouch(s2_fetch_mask)
+    dontTouch(f2_clear)
 
     val fetch_bundle = Wire(FetchBundle(p))
     fetch_bundle := DontCare
@@ -106,10 +119,10 @@ class Frontend(p: CoreParams) extends Module:
       inst_val.bits  := ic.s2_insts(idx)
     })
 
-    ic.s2_kill := s2_clear
+    ic.s2_kill := f2_clear
 
     val fb = Module(new FetchBuffer(p, depth = 4))
-    fb.io.clear := s2_clear
+    fb.io.clear := f2_clear
 
     fb.io.enq.valid := s2_valid && ic.s2_valid
     fb.io.enq.bits  := fetch_bundle
@@ -126,12 +139,12 @@ class Frontend(p: CoreParams) extends Module:
       // Cache miss, replay PC and flush pipeline
       s0_vpc := s2_vpc
       s0_valid := true.B
-      s1_clear := true.B
+      f1_clear := true.B
     } .elsewhen (s2_valid && ic.s2_valid && !f3_ready) {
       // Fetch buffer full, redirect
       s0_vpc := s2_vpc
       s0_valid := true.B
-      s1_clear := true.B
+      f1_clear := true.B
     } .elsewhen (s1_valid && ic.s2_valid) {
       // Cache hit
     }
@@ -142,8 +155,8 @@ class Frontend(p: CoreParams) extends Module:
       s0_valid := true.B
       s0_vpc   := 0x80000000.U
       fb.io.clear := true.B
-      s1_clear := true.B
-      s2_clear := true.B
+      f1_clear := true.B
+      f2_clear := true.B
       jump_to_reset := false.B
     }
   }

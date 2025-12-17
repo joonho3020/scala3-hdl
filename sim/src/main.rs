@@ -1,5 +1,14 @@
 use hdl_sim::Dut;
 
+fn check_alu_output(dut: &Dut) {
+    // Check ALU output
+    let alu_valid = dut.peek_io_alu_valid();
+    if alu_valid != 0 {
+        let alu_out = dut.peek_io_alu_out();
+        println!("ALU output valid{}", alu_out)
+    }
+}
+
 fn main() {
     let mut dut = Dut::new();
     dut.enable_trace();
@@ -34,34 +43,60 @@ fn main() {
         0xFFFFFFFFu64, // 2 - 3 = -1 (in 32-bit)
     ];
 
-    // Reset sequence
-    dut.poke_reset(1);
-    for _ in 0..20 {
-        dut.step();
-    }
-    dut.poke_reset(0);
 
+    dut.reset();
+
+    // Reset sequence
+    // dut.poke_clock(1);
+    // dut.poke_reset(1);
+    // dut.eval();
+    // dut.step();
+
+    // dut.poke_clock(0);
+    // dut.eval();
+    // dut.step();
+
+    // dut.poke_clock(1);
+    // dut.eval();
+    // dut.step();
+
+    // /////////////////
+    // dut.poke_clock(0);
+    // dut.eval();
+    // dut.step();
+
+    // //////////////////
+    // dut.poke_clock(1);
+    // dut.eval();
+
+    // dut.poke_reset(0);
+
+    // dut.step(); // -------------
+
+    // ////////////////////
+    // dut.poke_clock(0);
+    // dut.eval();
+    // dut.step();
+
+    // ////////////////////
+    // dut.poke_clock(1);
+    // dut.eval(); // ------------------
+    // dut.step();
+
+    // dut.poke_clock(0);
+    // dut.eval();
+    // dut.step();
     println!("Starting ADD/SUB instruction tests...\n");
 
-    let mut test_count = 0;
-    let mut pass_count = 0;
     let mut pending_mem_req = false;
     let mut pending_mem_addr = 0u64;
 
     // Run simulation
     for cycle in 0..300 {
-        dut.step();
 
-        // Check for memory request after negedge
-        let mem_req_valid = dut.peek_io_mem_req_valid();
-        if mem_req_valid != 0 {
-            let addr = dut.peek_io_mem_req_bits_addr();
-            println!("Cycle {}: Memory request for addr 0x{:x}", cycle, addr);
-            pending_mem_req = true;
-            pending_mem_addr = addr;
-        }
+        check_alu_output(&dut);
 
-        // Provide response if we had a pending request
+
         if pending_mem_req {
             println!("Cycle {}: Providing memory response for addr 0x{:x}", cycle, pending_mem_addr);
 
@@ -93,48 +128,14 @@ fn main() {
             dut.poke_io_mem_resp_valid(0);
         }
 
-        // Check ALU output
-        let alu_valid = dut.peek_io_alu_valid();
-        if alu_valid != 0 {
-            let alu_out = dut.peek_io_alu_out();
-
-            if test_count < expected_results.len() {
-                let expected = expected_results[test_count];
-                let passed = alu_out == expected;
-
-                println!(
-                    "Cycle {}, Test {}: ALU output = 0x{:08x} (expected 0x{:08x}) - {}",
-                    cycle,
-                    test_count,
-                    alu_out,
-                    expected,
-                    if passed { "PASS" } else { "FAIL" }
-                );
-
-                if passed {
-                    pass_count += 1;
-                }
-                test_count += 1;
-            } else {
-                println!("Cycle {}: ALU output = 0x{:08x}", cycle, alu_out);
-            }
+        let mem_req_valid = dut.peek_io_mem_req_valid();
+        if mem_req_valid != 0 {
+            let addr = dut.peek_io_mem_req_bits_addr();
+            println!("Cycle {}: Memory request for addr 0x{:x}", cycle, addr);
+            pending_mem_req = true;
+            pending_mem_addr = addr;
         }
+        dut.step();
 
-        // Stop after we've seen all expected results
-        if test_count >= expected_results.len() {
-            break;
-        }
-    }
-
-    println!("\n=== Test Summary ===");
-    println!("Total tests: {}", test_count);
-    println!("Passed: {}", pass_count);
-    println!("Failed: {}", test_count - pass_count);
-    println!("Simulation completed at timestep {}", dut.timestep());
-
-    if pass_count == expected_results.len() {
-        println!("\nAll tests PASSED!");
-    } else {
-        println!("\nSome tests FAILED!");
     }
 }

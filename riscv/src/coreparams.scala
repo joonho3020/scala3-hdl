@@ -29,7 +29,7 @@ case class CoreParams(
   def fetchAlign(addr: UInt)(using m: Module) = ~(~addr | (fetchBytes-1).U)
   def blockAlign(addr: UInt)(using m: Module) = ~(~addr | (ic.cacheLineBytes-1).U)
   def nextFetch(addr: UInt)(using m: Module) = fetchAlign(addr) + fetchBytes.U
-  def fetchMask(addr: UInt)(using m: Module) = {
+  def fetchMask(addr: UInt)(using m: Module): UInt = {
     val idx = addr(
       log2Ceil(fetchWidth)+log2Ceil(coreInstBytes)-1,
       log2Ceil(coreInstBytes))
