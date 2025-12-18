@@ -140,7 +140,7 @@ class ICache(
       replace_tag(miss_victim).tag   := miss_tag
       replace_tag(miss_victim).valid := true.B
 
-      val write_mask = Vec.fill(nWays)(Wire(Bool()))
+      val write_mask = Wire(Vec.fill(nWays)(Bool()))
       write_mask.zipWithIndex.foreach((wm, idx) => {
         wm := idx.U === miss_victim
       })
@@ -168,7 +168,7 @@ class ICache(
     val s2_set = RegNext(s1_set)
     val s2_vaddr = RegNext(s1_vaddr)
     val s2_hit_way = RegNext(s1_hit_way)
-    val s2_insts = Vec.fill(p.icacheFetchInstCount)(Wire(UInt(p.instBits.W)))
+    val s2_insts = Wire(Vec.fill(p.icacheFetchInstCount)(UInt(p.instBits.W)))
     val s2_data_array_out = Wire(UInt((lineBytes*8).W))
     s2_data_array_out := data_array.readPorts(0).data(s2_hit_way)
 

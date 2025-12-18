@@ -61,7 +61,7 @@ class Core(p: CoreParams) extends Module:
     dec_ready.zip(dec.io.deq.map(_.ready)).foreach((u, d) => d := u)
 
     for (i <- 0 until coreWidth) {
-      dec_ready(i)  := !dec_hazards(i)
+      dec_ready(i)  := !dec_hazards.take(i+1).reduce(_ || _)
     }
 
 

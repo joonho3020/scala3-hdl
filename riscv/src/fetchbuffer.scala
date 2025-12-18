@@ -70,7 +70,7 @@ class FetchBuffer(p: CoreParams, depth: Int) extends Module:
                   Mux(io.enq.bits.insts(p.coreWidth-1).valid, 1.U, 0.U)) % entries.U
     }
 
-    val deq_fire_cnt = io.deq.map(x => x.fire.asUInt).reduce(_ + _)
+    val deq_fire_cnt = io.deq.map(x => x.fire.asUInt).reduce(_ +& _)
     deq_ptr := (deq_ptr + deq_fire_cnt) % entries.U
 
     for (i <- 0 until p.coreWidth) {
