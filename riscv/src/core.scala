@@ -100,7 +100,7 @@ class Core(p: CoreParams) extends Module:
 
     for (i <- 0 until coreWidth) {
       val pc_ext =
-        if XLEN > p.pcBits then Cat(0.U((XLEN - p.pcBits).W), ex_uops(i).bits.pc)
+        if XLEN > p.pcBits then Cat(Seq(0.U((XLEN - p.pcBits).W), ex_uops(i).bits.pc))
         else ex_uops(i).bits.pc
 
       val rs2_shamt = ex_rs2_rf(i)(log2Ceil(XLEN) - 1, 0)

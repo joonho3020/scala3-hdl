@@ -1475,7 +1475,7 @@ def mux_and_concat_check(): Unit =
       cat = Output(UInt(Width(8)))
     ))
     io.out := Mux(io.sel, io.a, io.b)
-    io.cat := Cat(io.a, io.b)
+    io.cat := Cat(Seq(io.a, io.b))
 
     io.out := io.asUInt
 

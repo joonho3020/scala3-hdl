@@ -245,13 +245,11 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     case IR.SubField(expr, field) => s"${emitChirrtlExpr(expr)}.${field.value}"
     case IR.DoPrim(op, args, consts) =>
       val parts = args.map(emitChirrtlExpr) ++ consts.map(_.toString)
-      op match {
+      op match
         case PrimOp.AsBool =>
           s"${parts.mkString(", ")}"
         case _ =>
-          val parts = args.map(emitChirrtlExpr) ++ consts.map(_.toString)
           s"${op.opName}(${parts.mkString(", ")})"
-    }
 
   private def emitAnnotation(anno: IR.Annotation, circuit: String): String =
     val target = s"~$circuit|${anno.target.module.value}>${anno.target.path.value}"

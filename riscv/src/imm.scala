@@ -22,22 +22,22 @@ class ImmGen(xlen: Int) extends Module:
   val io = IO(ImmGenIO(xlen))
   body:
     val immI  = Wire(UInt(xlen.W))
-    immI :=Cat(Fill(xlen - 12, io.inst(31)), io.inst(31, 20))
+    immI := Cat(Seq(Fill(xlen - 12, io.inst(31)), io.inst(31, 20)))
 
     val immS  = Wire(UInt(xlen.W))
-    immS := Cat(Fill(xlen - 12, io.inst(31)), io.inst(31, 25), io.inst(11, 7))
+    immS := Cat(Seq(Fill(xlen - 12, io.inst(31)), io.inst(31, 25), io.inst(11, 7)))
 
     val immSB = Wire(UInt(xlen.W))
-    immSB := Cat(Fill(xlen - 13, io.inst(31)), io.inst(7), io.inst(30, 25), io.inst(11, 8), 0.U(1.W))
+    immSB := Cat(Seq(Fill(xlen - 13, io.inst(31)), io.inst(7), io.inst(30, 25), io.inst(11, 8), 0.U(1.W)))
 
     val immU  = Wire(UInt(xlen.W))
-    immU := Cat(Fill(xlen - 32, io.inst(31)), io.inst(31, 12), 0.U(12.W))
+    immU := Cat(Seq(Fill(xlen - 32, io.inst(31)), io.inst(31, 12), 0.U(12.W)))
 
     val immUJ = Wire(UInt(xlen.W))
-    immUJ := Cat(Fill(xlen - 21, io.inst(31)), io.inst(19, 12), io.inst(20), io.inst(30, 21), 0.U(1.W))
+    immUJ := Cat(Seq(Fill(xlen - 21, io.inst(31)), io.inst(19, 12), io.inst(20), io.inst(30, 21), 0.U(1.W)))
 
     val immZ  = Wire(UInt(xlen.W))
-    immZ := Cat(0.U((xlen - 5).W), io.inst(19, 15))
+    immZ := Cat(Seq(0.U((xlen - 5).W), io.inst(19, 15)))
 
     dontTouch(immI)
     dontTouch(immS)
