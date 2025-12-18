@@ -462,6 +462,9 @@ extension (h: HWData)
   def asUInt(using m: Module): UInt =
     ModuleOps.asUInt(h, m)
 
+extension (dc: DontCare.type)
+  inline def as[T <: HWData]: T = dc.asInstanceOf[T]
+
 extension (lhs: UInt)
   def asOH(using m: Module): OneHot =
     ModuleOps.uintToOH(lhs, m)

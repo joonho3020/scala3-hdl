@@ -26,7 +26,7 @@ object UOp:
       rs1    = UInt(5.W),
       rs2    = UInt(5.W),
       rd     = UInt(5.W),
-      ctrl   = CtrlSignals.default
+      ctrl   = CtrlSignals()
     )
 
 object CoreConstants:
@@ -56,12 +56,12 @@ object CoreConstants:
       IMMOH
 
 case class CtrlSignals(
-  valid: Bool,
-  rd_wen: Bool,
+  valid:    Bool,
+  rd_wen:   Bool,
   sel_imm:  HWEnum[CoreConstants.Immediates],
   sel_alu1: HWEnum[CoreConstants.ALUOp1],
   sel_alu2: HWEnum[CoreConstants.ALUOp2],
-  alu_op: HWEnum[ALUParams.Opcode],
+  alu_op:   HWEnum[ALUParams.Opcode],
 ) extends Bundle[CtrlSignals]
 
 object CtrlSignals:
@@ -73,30 +73,23 @@ object CtrlSignals:
   import ALUOp1._
   import ALUOp2._
 
-  def apply(
-    valid:    Bool,
-    rd_wen:   Bool                     | DontCare.type,
-    sel_imm:  HWEnum[Immediates]       | DontCare.type,
-    sel_alu1: HWEnum[ALUOp1]           | DontCare.type,
-    sel_alu2: HWEnum[ALUOp2]           | DontCare.type,
-    alu_op:   HWEnum[ALUParams.Opcode] | DontCare.type
-  ): CtrlSignals =
-    CtrlSignals(
-      valid,
-      rd_wen,
-      sel_imm,
-      sel_alu1,
-      sel_alu2,
-      alu_op)
+  def apply(): CtrlSignals =
+    new CtrlSignals(
+      valid    = Bool(),
+      rd_wen   = Bool(),
+      sel_imm  = HWEnum(Immediates),
+      sel_alu1 = HWEnum(ALUOp1),
+      sel_alu2 = HWEnum(ALUOp2),
+      alu_op   = HWEnum(Opcode),
+    )
 
-  def default: CtrlSignals =
-    CtrlSignals(
-      false.B,
-      DontCare,
-      DontCare,
-      DontCare,
-      DontCare,
-      DontCare)
+  def default_assign(ctrl: CtrlSignals)(using m: Module) =
+    ctrl.valid    := false.B
+    ctrl.rd_wen   := DontCare
+    ctrl.sel_imm  := DontCare
+    ctrl.sel_alu1 := DontCare
+    ctrl.sel_alu2 := DontCare
+    ctrl.alu_op   := DontCare
 
   def set(
     ctrl: CtrlSignals,
@@ -114,40 +107,37 @@ object CtrlSignals:
     ctrl.sel_alu2 := sel_alu2
     ctrl.alu_op := alu_op
 
+  // TODO: Generate proper decoding logic w/ logic minimizer
   def decode(ctrl: CtrlSignals, inst: UInt)(using m: Module): CtrlSignals =
     def Y = true.B
     def N = false.B
     def X = DontCare
 
-    // TODO: Generate proper decoding logic w/ logic minimizer
+    default_assign(ctrl)
     switch(inst) {
-      /*                  rd_wen                   sel_alu2
-       *                valid  |   sel_imm sel_alu1       |      alu_op
-                            |  |         |        |       |           | */
-      is(ADD  ) { set(ctrl, Y, Y,        X,  RS1.EN, RS2.EN,  FN_ADD.EN) }
-      is(SUB  ) { set(ctrl, Y, Y,        X,  RS1.EN, RS2.EN,  FN_SUB.EN) }
-      is( OR  ) { set(ctrl, Y, Y,        X,  RS1.EN, RS2.EN,   FN_OR.EN) }
-      is(AND  ) { set(ctrl, Y, Y,        X,  RS1.EN, RS2.EN,  FN_AND.EN) }
-      is(XOR  ) { set(ctrl, Y, Y,        X,  RS1.EN, RS2.EN,  FN_XOR.EN) }
-
-      is(ADDI ) { set(ctrl, Y, Y, IMM_I.EN,  RS1.EN, IMM.EN,  FN_ADD.EN) }
-      is(XORI ) { set(ctrl, Y, Y, IMM_I.EN,  RS1.EN, IMM.EN,  FN_XOR.EN) }
-      is( ORI ) { set(ctrl, Y, Y, IMM_I.EN,  RS1.EN, IMM.EN,   FN_OR.EN) }
-      is(ANDI ) { set(ctrl, Y, Y, IMM_I.EN,  RS1.EN, IMM.EN,  FN_AND.EN) }
-
-      is( LUI ) { set(ctrl, Y, Y, IMM_U.EN,       X,      X,          X) }
-      is(AUIPC) { set(ctrl, Y, Y, IMM_U.EN,   PC.EN, IMM.EN,  FN_ADD.EN) }
-
-      is(SLT  ) { set(ctrl, Y, Y,        X,  RS1.EN, RS2.EN,  FN_SLT.EN) }
-      is(SLTI ) { set(ctrl, Y, Y, IMM_I.EN,  RS1.EN, IMM.EN,  FN_SLT.EN) }
-      is(SLTU ) { set(ctrl, Y, Y, IMM_I.EN,  RS1.EN, RS2.EN, FN_SLTU.EN) }
-      is(SLTIU) { set(ctrl, Y, Y, IMM_I.EN,  RS1.EN, IMM.EN, FN_SLTU.EN) }
-
-      is(SLL  ) { set(ctrl, Y, Y,        X,  RS1.EN, RS2.EN,   FN_SL.EN) }
-      is(SLLI ) { set(ctrl, Y, Y, IMM_I.EN,  RS1.EN, IMM.EN, FN_SLTU.EN) }
-      is(SRL  ) { set(ctrl, Y, Y,        X,  RS1.EN, RS2.EN,   FN_SR.EN) }
-      is(SRLI ) { set(ctrl, Y, Y, IMM_I.EN,  RS1.EN, IMM.EN,   FN_SR.EN) }
-      is(SRA  ) { set(ctrl, Y, Y,        X,  RS1.EN, RS2.EN,  FN_SRA.EN) }
-      is(SRAI ) { set(ctrl, Y, Y, IMM_I.EN,  RS1.EN, IMM.EN,  FN_SRA.EN) }
+      /*                  rd_wen                       sel_alu2
+       *                valid  |   sel_imm        sel_alu1       |      alu_op
+                            |  |         |               |       |           | */
+      is(ADD  ) { set(ctrl, Y, Y,        X,         RS1.EN, RS2.EN,  FN_ADD.EN) }
+      is(SUB  ) { set(ctrl, Y, Y,        X,         RS1.EN, RS2.EN,  FN_SUB.EN) }
+      is( OR  ) { set(ctrl, Y, Y,        X,         RS1.EN, RS2.EN,   FN_OR.EN) }
+      is(AND  ) { set(ctrl, Y, Y,        X,         RS1.EN, RS2.EN,  FN_AND.EN) }
+      is(XOR  ) { set(ctrl, Y, Y,        X,         RS1.EN, RS2.EN,  FN_XOR.EN) }
+      is(ADDI ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN,  FN_ADD.EN) }
+      is(XORI ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN,  FN_XOR.EN) }
+      is( ORI ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN,   FN_OR.EN) }
+      is(ANDI ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN,  FN_AND.EN) }
+      is( LUI ) { set(ctrl, Y, Y, IMM_U.EN, ALUOp1.ZERO.EN, IMM.EN,  FN_ADD.EN) }
+      is(AUIPC) { set(ctrl, Y, Y, IMM_U.EN,          PC.EN, IMM.EN,  FN_ADD.EN) }
+      is(SLT  ) { set(ctrl, Y, Y,        X,         RS1.EN, RS2.EN,  FN_SLT.EN) }
+      is(SLTI ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN,  FN_SLT.EN) }
+      is(SLTU ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, RS2.EN, FN_SLTU.EN) }
+      is(SLTIU) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN, FN_SLTU.EN) }
+      is(SLL  ) { set(ctrl, Y, Y,        X,         RS1.EN, RS2.EN,   FN_SL.EN) }
+      is(SLLI ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN, FN_SLTU.EN) }
+      is(SRL  ) { set(ctrl, Y, Y,        X,         RS1.EN, RS2.EN,   FN_SR.EN) }
+      is(SRLI ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN,   FN_SR.EN) }
+      is(SRA  ) { set(ctrl, Y, Y,        X,         RS1.EN, RS2.EN,  FN_SRA.EN) }
+      is(SRAI ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN,  FN_SRA.EN) }
     }
     ctrl

@@ -1,6 +1,7 @@
 package riscv
 
 import hdl._
+import CoreConstants.{ALUOp1, ALUOp2}
 
 case class RetireInfoIf(
   wb_valid: Vec[Bool],
@@ -64,12 +65,22 @@ class Core(p: CoreParams) extends Module:
       dec_ready(i)  := !dec_hazards.take(i+1).reduce(_ || _)
     }
 
+    val imm_gens = Seq.fill(coreWidth)(Module(new ImmGen(XLEN)))
+    val dec_imms = Wire(Vec.fill(coreWidth)(UInt(XLEN.W)))
+
+    for (i <- 0 until coreWidth) {
+      imm_gens(i).io.inst := dec_uops(i).bits.inst
+      imm_gens(i).io.sel := dec_uops(i).bits.ctrl.sel_imm
+      dec_imms(i) := imm_gens(i).io.out
+    }
+
     // -----------------------------------------------------------------------
     // Stage 1: Execute
     // -----------------------------------------------------------------------
-    val ex_uops     = Reg(Vec.fill(coreWidth)(Valid(UOp(p))))
+    val ex_uops    = Reg(Vec.fill(coreWidth)(Valid(UOp(p))))
     val ex_rs1_rf  = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
     val ex_rs2_rf  = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
+    val ex_imm     = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
     val ex_alu_out = Wire(Vec.fill(coreWidth)(UInt(XLEN.W)))
 
     for (i <- 0 until coreWidth) {
@@ -79,6 +90,7 @@ class Core(p: CoreParams) extends Module:
 
         ex_rs1_rf(i) := Mux(dec_uops(i).bits.rd === 0.U, 0.U, rf(dec_uops(i).bits.rs1))
         ex_rs2_rf(i) := Mux(dec_uops(i).bits.rd === 0.U, 0.U, rf(dec_uops(i).bits.rs2))
+        ex_imm(i)    := dec_imms(i)
       } .otherwise {
         ex_uops(i).valid := false.B
       }
@@ -87,9 +99,35 @@ class Core(p: CoreParams) extends Module:
     val alu = Seq.fill(coreWidth)(Module(new ALU(ALUParams(XLEN))))
 
     for (i <- 0 until coreWidth) {
+      val pc_ext =
+        if XLEN > p.pcBits then Cat(0.U((XLEN - p.pcBits).W), ex_uops(i).bits.pc)
+        else ex_uops(i).bits.pc
+
+      val rs2_shamt = ex_rs2_rf(i)(log2Ceil(XLEN) - 1, 0)
+      val imm_shamt = ex_imm(i)(log2Ceil(XLEN) - 1, 0)
+      val rs2_oh = (1.U(XLEN.W) << rs2_shamt)(XLEN - 1, 0)
+      val imm_oh = (1.U(XLEN.W) << imm_shamt)(XLEN - 1, 0)
+
       alu(i).io.fn  := ex_uops(i).bits.ctrl.alu_op
-      alu(i).io.in1 := ex_rs1_rf(i)
-      alu(i).io.in2 := ex_rs2_rf(i)
+
+      switch (ex_uops(i).bits.ctrl.sel_alu1) {
+        import ALUOp1._
+        is(ZERO  .EN) { alu(i).io.in1 := 0.U(XLEN.W)  }
+        is(RS1   .EN) { alu(i).io.in1 := ex_rs1_rf(i) }
+        is(PC    .EN) { alu(i).io.in1 := pc_ext       }
+        is(RS1SHL.EN) { alu(i).io.in1 := (ex_rs1_rf(i) << 12)(XLEN - 1, 0) }
+        default       { alu(i).io.in1 := DontCare     }
+      }
+
+      switch (ex_uops(i).bits.ctrl.sel_alu2) {
+        import ALUOp2._
+        is(ZERO  .EN) { alu(i).io.in2 := 0.U(XLEN.W)  }
+        is(RS2   .EN) { alu(i).io.in2 := ex_rs2_rf(i) }
+        is(IMM   .EN) { alu(i).io.in2 := ex_imm(i)    }
+        is(RS2OH .EN) { alu(i).io.in2 := rs2_oh       }
+        is(IMMOH .EN) { alu(i).io.in2 := imm_oh       }
+        default       { alu(i).io.in2 := DontCare     }
+      }
 
       ex_alu_out(i) := alu(i).io.out
     }
@@ -117,7 +155,7 @@ class Core(p: CoreParams) extends Module:
     }
 
     for (i <- 0 until coreWidth) {
-      when (wb_uops(i).valid && wb_uops(i).bits.rd_wen) {
+      when (wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen) {
         rf(wb_uops(i).bits.rd) := wb_wdata(i)
 
         io.retire_info.wb_valid(i) := true.B
@@ -164,4 +202,3 @@ class Core(p: CoreParams) extends Module:
       }
     }
   }
-
