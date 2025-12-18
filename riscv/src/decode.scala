@@ -57,6 +57,7 @@ class Decoder(p: CoreParams) extends Module:
         is ((3.U,    0.U)) { op := FN_SLTU.EN }
         is ((4.U,    0.U)) { op :=  FN_XOR.EN }
         is ((5.U,    0.U)) { op :=   FN_SR.EN }
+        is ((5.U, 0x20.U)) { op :=  FN_SRA.EN }
         is ((6.U,    0.U)) { op :=   FN_OR.EN }
         is ((7.U,    0.U)) { op :=  FN_AND.EN }
         default { op := DontCare }
