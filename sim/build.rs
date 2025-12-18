@@ -367,7 +367,10 @@ fn main() -> std::io::Result<()> {
 
     if !status.success() {
         panic!("verilator failed");
+    } else {
+        println!("cargo:warning=Verilator compile passed");
     }
+
 
     let obj_dir = format!("{}/obj_dir", cwd.to_str().unwrap());
     let vtop_h_path = format!("{}/V{}.h", obj_dir, top);
@@ -423,6 +426,8 @@ fn main() -> std::io::Result<()> {
 
     if !compile_status.success() {
         panic!("Failed to compile C bindings");
+    } else {
+        println!("cargo:warning=Verilator compile passed");
     }
 
     let link_status = Command::new("g++")
@@ -431,7 +436,6 @@ fn main() -> std::io::Result<()> {
         .arg("-o")
         .arg("../../libVdut.so")
         .arg(&format!("{}/verilated.o", obj_dir))
-        .arg(&format!("{}/V{}__ALL.o", obj_dir, top))
         .arg(&format!("{}/verilated_threads.o", obj_dir))
         .arg(&format!("{}/verilated_vcd_c.o", obj_dir))
         .arg(&format!("{}/C{}.o", obj_dir, top))
@@ -440,6 +444,8 @@ fn main() -> std::io::Result<()> {
 
     if !link_status.success() {
         panic!("Failed to link shared library");
+    } else {
+        println!("cargo:warning=libVdut.so linking passed");
     }
 
     let out_dir = env::var("OUT_DIR").unwrap();
