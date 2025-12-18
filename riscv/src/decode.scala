@@ -2,7 +2,6 @@ package riscv
 
 import hdl._
 
-
 object Opcodes:
   val OPCODE_LOAD      = 0x03.U(7.W)
   val OPCODE_OP_IMM    = 0x13.U(7.W)

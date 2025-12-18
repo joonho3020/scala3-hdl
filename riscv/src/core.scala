@@ -56,8 +56,8 @@ class Core(p: CoreParams) extends Module:
     val dec_uops   = Wire(Vec.fill(coreWidth)(Valid(UOp(p))))
     val dec_ready = Wire(Vec.fill(coreWidth)(Bool()))
     val dec_hazards = Wire(Vec.fill(coreWidth)(Bool()))
-    dec_uops  .zip(dec.io.deq.map(_.bits )).foreach((u, d) => u.bits  := d)
-    dec_uops  .zip(dec.io.deq.map(_.valid)).foreach((u, d) => u.valid := d)
+    dec_uops .zip(dec.io.deq.map(_.bits )).foreach((u, d) => u.bits  := d)
+    dec_uops .zip(dec.io.deq.map(_.valid)).foreach((u, d) => u.valid := d)
     dec_ready.zip(dec.io.deq.map(_.ready)).foreach((u, d) => d := u)
 
     for (i <- 0 until coreWidth) {
