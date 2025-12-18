@@ -12,7 +12,7 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
   private val labels = TrieMap.empty[Module, String]
   private val nameCounters = TrieMap.empty[String, Int]
   private val memoized = TrieMap.empty[String, Seq[ElaboratedDesign]]
-  private val inProgress = TrieMap.empty[String, Future[Seq[ElaboratedDesign]]]
+  private val inProgress = TrieMap.empty[String, Future[(Seq[ElaboratedDesign], Boolean)]]
 
   private def nextModuleLabel(base: String): String =
     nameCounters.synchronized:
@@ -26,30 +26,37 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
       else labels.getOrElseUpdate(mod, nextModuleLabel(mod.moduleName))
 
   def elaborate(top: Module): Seq[ElaboratedDesign] =
-    Await.result(elaborateModule(top), Duration.Inf).distinctBy(_.name)
+    Await.result(elaborateModule(top, isTop = true), Duration.Inf)._1.distinctBy(_.name)
 
-  private def elaborateModule(mod: Module): Future[Seq[ElaboratedDesign]] =
+  private def elaborateModule(
+    mod: Module,
+    isTop: Boolean = false
+  ): Future[(Seq[ElaboratedDesign], Boolean)] =
     val key = ModuleKey(mod)
     val label = assignLabel(mod, key)
     memoized.get(key.value) match
       case Some(designs) =>
         log(s"Memoized Hit ${mod.getClass.getName} ${key} ${label}")
-        Future.successful(designs)
+        Future.successful((designs, false))
       case None =>
-        startElaboration(mod, key, label)
+        startElaboration(mod, key, label, isTop)
 
-  private def startElaboration(mod: Module, key: ModuleKey, label: String): Future[Seq[ElaboratedDesign]] =
+  private def startElaboration(
+    mod: Module, key: ModuleKey, label: String, isTop: Boolean
+  ): Future[(Seq[ElaboratedDesign], Boolean)] =
     inProgress.getOrElseUpdate(key.value,
       // Submit `mod.runBody` to the execution pool
       Future(mod.runBody()).flatMap { _ =>
-        val childFutures = mod.children.map(elaborateModule)
+        val childFutures = mod.children.map(elaborateModule(_))
 
         // Submit all child `elaborateModule` to the execution pool
-        Future.sequence(childFutures).map(_.flatten).map { childDesigns =>
-          val childKeys = mod.children.map(m => ModuleKey(m).value)
+        Future.sequence(childFutures).map { childResults =>
+          val childDesigns = childResults.flatMap(_._1)
+          val anyChildFresh = childResults.exists(_._2)
+          val canUseCache = key.cacheable && !isTop && !anyChildFresh
 
           val cachedDesign: Option[ElaboratedDesign] =
-            if key.cacheable then
+            if canUseCache then
               buildCache.get(key.value) match
                 case Some(hit) =>
                   log(s"Cache Hit ${mod.getClass.getName} ${key} ${label}")
@@ -57,6 +64,12 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
                 case None =>
                   log(s"Cache Miss ${mod.getClass.getName} ${key} ${label}")
                   None
+            else if isTop then
+              log(s"TopModule (not cached) ${mod.getClass.getName} ${key} ${label}")
+              None
+            else if anyChildFresh then
+              log(s"Child Invalidated ${mod.getClass.getName} ${key} ${label}")
+              None
             else
               log(s"NonCacheable ${mod.getClass.getName} ${key} ${label}")
               None
@@ -66,10 +79,11 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
             mod.getBuilder.snapshot(label, instLabelMap)
           }
 
+          val isFresh = cachedDesign.isEmpty
           val result = (childDesigns :+ design).distinctBy(_.name)
           memoized.putIfAbsent(key.value, result)
-          if key.cacheable && cachedDesign.isEmpty then buildCache.put(key.value, CachedArtifact(design))
-          result
+          if key.cacheable && !isTop && isFresh then buildCache.put(key.value, CachedArtifact(design))
+          (result, isFresh)
         }
       }
     )
