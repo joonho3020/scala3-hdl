@@ -11,5 +11,10 @@ S0 S1 S2
 ---
 
 
-- Write mask for data array is missing?
-- Frontend goes crazy when there is backpressure from fetch buffer
+<!-- - Write mask for data array is missing? -->
+<!-- - Frontend goes crazy when there is backpressure from fetch buffer -->
+
+
+Target spec `rv64im_zicsr_zifencei`
+
+- add `A` later

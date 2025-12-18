@@ -17,7 +17,6 @@ object CoreIf:
     CoreIf(
       fetch_uops    = Flipped(Vec.fill(p.coreWidth)(Decoupled(UOp(p)))),
 
-
       alu_valid     = Output(Bool()),
       alu_out       = Output(UInt(p.xlenBits.W)),
       alu_adder_out = Output(UInt(p.xlenBits.W)),
@@ -27,9 +26,10 @@ object CoreIf:
 class Core(p: CoreParams) extends Module:
   val io = IO(CoreIf(p))
 
+  val XLEN = p.xlenBits
   body {
     // -----------------------------------------------------------------------
-    // Decode
+    // Stage 0: Decode & read register operands
     // -----------------------------------------------------------------------
     val dec = Module(new Decoder(p))
     dec.io.enq.zip(io.fetch_uops).foreach((d, f) => {
@@ -40,17 +40,43 @@ class Core(p: CoreParams) extends Module:
 
     dec.io.deq.foreach(x => x.ready := false.B)
 
+    val rf = RegInit(Vec.fill(32)(0.U(XLEN.W)))
 
-    val alu_pipes = Seq.fill(p.aluPipes)(Module(new ALU(ALUParams(xlen = p.xlenBits))))
-// dec.io.deq(0).ready := true.B
-// pipe0.io.fn  := dec.io.deq(0).bits.aluOp.asUInt
-// pipe0.io.in1 := dec.io.deq(0).bits.rs1
-// pipe0.io.in2 := dec.io.deq(0).bits.rs2
+    val s0_uop   = Wire(Vec.fill(p.coreWidth)(UOp(p)))
+    val s0_valid = Wire(Vec.fill(p.coreWidth)(Bool()))
+    val s0_ready = Wire(Vec.fill(p.coreWidth)(Bool()))
+    s0_uop  .zip(dec.io.deq.map(_.bits )).foreach((u, d) => u := d)
+    s0_valid.zip(dec.io.deq.map(_.valid)).foreach((u, d) => u := d)
+    s0_ready.zip(dec.io.deq.map(_.ready)).foreach((u, d) => d := u)
 
-// io.alu_valid := dec.io.deq(0).valid
-// io.alu_out   := pipe0.io.out
-// io.alu_adder_out := pipe0.io.adder_out
-// io.alu_cmp_out := pipe0.io.cmp_out
+    // -----------------------------------------------------------------------
+    // Stage 1: Decode & read register operands
+    // -----------------------------------------------------------------------
+
+    val s1_valid   = RegInit(Vec.fill(p.coreWidth)(false.B))
+    val s1_uop     = Reg(Vec.fill(p.coreWidth)(UOp(p)))
+    val s1_rs1_rf  = Reg(Vec.fill(p.coreWidth)(UInt(XLEN.W)))
+    val s1_rs2_rf  = Reg(Vec.fill(p.coreWidth)(UInt(XLEN.W)))
+
+    for (i <- 0 until p.coreWidth) {
+      when (s0_valid(i) && s0_ready(i)) {
+        s1_valid(i) := true.B
+        s1_uop(i)   := s0_uop(i)
+        s1_rs1_rf   := Mux(s0_uop(i).rd === 0.U, 0.U, rf(s0_uop(i).rs1))
+        s1_rs2_rf   := Mux(s0_uop(i).rd === 0.U, 0.U, rf(s0_uop(i).rs2))
+      }
+    }
+
+
+    val alu = Seq.fill(p.coreWidth)(Module(new ALU(ALUParams(XLEN))))
+
+
+    for (i <- 0 until p.coreWidth) {
+      dec.io.deq(i).ready := ???
+    }
+
+    // x0 is always 0
+    rf(0) := 0.U
   }
 
 case class CoreTopIO(

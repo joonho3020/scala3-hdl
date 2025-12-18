@@ -2,6 +2,34 @@ package riscv
 
 import hdl._
 
+
+object Opcodes:
+  val OPCODE_LOAD      = 0x03.U(7.W)
+  val OPCODE_OP_IMM    = 0x13.U(7.W)
+  val OPCODE_AUIPC     = 0x17.U(7.W)
+  val OPCODE_OP_IMM_32 = 0x1b.U(7.W)
+  val OPCODE_STORE     = 0x23.U(7.W)
+  val OPCODE_OP        = 0x33.U(7.W)
+  val OPCODE_LUI       = 0x37.U(7.W)
+  val OPCODE_OP_32     = 0x3b.U(7.W)
+  val OPCODE_JALR      = 0x67.U(7.W)
+  val OPCODE_JAL       = 0x6f.U(7.W)
+  val OPCODE_MISC_MEM  = 0x0f.U(7.W)
+  val OPCODE_SYSTEM    = 0x73.U(7.W)
+
+  def writesIntRd(opcode: UInt, funct3: UInt)(using m: Module): Bool =
+    (opcode === OPCODE_OP_32)     ||
+    (opcode === OPCODE_OP_IMM)    ||
+    (opcode === OPCODE_OP_IMM_32) ||
+    (opcode === OPCODE_LOAD)      ||
+    (opcode === OPCODE_LUI)       ||
+    (opcode === OPCODE_AUIPC)     ||
+    (opcode === OPCODE_JAL)       ||
+    (opcode === OPCODE_JALR)      ||
+    // Zicsr: CSRR* / CSRRS* / CSRRC* (funct3 != 0). ECALL/EBREAK/MRET/etc have funct3==0.
+    ((opcode === OPCODE_SYSTEM) && (funct3 =/= 0.U(3.W)))
+
+
 case class DecoderIO(
   enq: Vec[Decoupled[UOp]],
   deq: Vec[Decoupled[UOp]],
@@ -59,6 +87,8 @@ class Decoder(p: CoreParams) extends Module:
       deq_uop.rs1    := enq_uop.inst(19, 15)
       deq_uop.rs2    := enq_uop.inst(24, 20)
       deq_uop.rd     := enq_uop.inst(11, 7)
+      deq_uop.rd_valid := Opcodes.writesIntRd(deq_uop.opcode, deq_uop.funct3)
+
       deq_uop.aluOp  := aluOp(deq_uop.funct3, deq_uop.funct7)
     })
   }
