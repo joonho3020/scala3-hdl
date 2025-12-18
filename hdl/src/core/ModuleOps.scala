@@ -472,12 +472,12 @@ extension (lhs: OneHot)
   def =/=(rhs: OneHot)(using m: Module): Bool =
     ModuleOps.prim2Op(Bool(), IR.PrimOp.Neq, lhs, rhs, m)
 
-extension [T <: HWData](selector: T)
-  inline infix def switch(inline body: SwitchBuilder[T] ?=> Unit)(using m: Module): Unit =
+extension [T](selector: T)
+  inline infix def switch(inline body: SwitchBuilder[T] ?=> Unit)(using m: Module, c: SwitchCond[T]): Unit =
     given SwitchBuilder[T] = new SwitchBuilder(selector, summon[Module])
     body
 
-def is[T <: HWData](value: T)(block: => Unit)(using builder: SwitchBuilder[T]): Unit =
+def is[T](value: T)(block: => Unit)(using builder: SwitchBuilder[T]): Unit =
   builder.addCase(value)(block)
 
 def default(block: => Unit)(using builder: SwitchBuilder[?]): Unit =
@@ -497,11 +497,42 @@ final class WhenDSL(private val mod: Module, private val current: RawWhen):
       block
     }
 
-final class SwitchBuilder[T <: HWData](selector: T, mod: Module):
+trait SwitchCond[T]:
+  def apply(lhs: T, rhs: T)(using Module): Bool
+
+object SwitchCond:
+  given SwitchCond[UInt] with
+    def apply(lhs: UInt, rhs: UInt)(using Module): Bool =
+      ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, summon[Module])
+
+  given SwitchCond[Bool] with
+    def apply(lhs: Bool, rhs: Bool)(using Module): Bool =
+      ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, summon[Module])
+
+  given SwitchCond[OneHot] with
+    def apply(lhs: OneHot, rhs: OneHot)(using Module): Bool =
+      ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, summon[Module])
+
+  given [E <: scala.reflect.Enum]: SwitchCond[HWEnum[E]] with
+    def apply(lhs: HWEnum[E], rhs: HWEnum[E])(using Module): Bool =
+      if lhs.enumObj != rhs.enumObj then
+        throw new IllegalArgumentException("Enum type mismatch")
+      ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, summon[Module])
+
+  given SwitchCond[EmptyTuple] with
+    def apply(lhs: EmptyTuple, rhs: EmptyTuple)(using Module): Bool =
+      true.B
+
+  given [H, T <: Tuple](using h: SwitchCond[H], t: SwitchCond[T]): SwitchCond[H *: T] with
+    def apply(lhs: H *: T, rhs: H *: T)(using Module): Bool =
+      h(lhs.head, rhs.head) && t(lhs.tail, rhs.tail)
+
+final class SwitchBuilder[T](selector: T, mod: Module)(using SwitchCond[T]):
   private var current: Option[WhenDSL] = None
 
   def addCase(value: T)(block: => Unit): Unit =
-    val cond = SwitchBuilder.condition(selector, value, mod)
+    given Module = mod
+    val cond = summon[SwitchCond[T]].apply(selector, value)
     val next = current match
       case None => ModuleOps.when(cond, mod) {
         block
@@ -519,14 +550,3 @@ final class SwitchBuilder[T <: HWData](selector: T, mod: Module):
       case None => ModuleOps.when(true.B, mod) {
         block
       }
-
-object SwitchBuilder:
-  def condition(selector: HWData, value: HWData, mod: Module): Bool = (selector, value) match
-    case (l: UInt, r: UInt) => ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, l, r, mod)
-    case (l: Bool, r: Bool) => ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, l, r, mod)
-    case (l: HWEnum[?], r: HWEnum[?]) =>
-      if l.enumObj != r.enumObj then throw new IllegalArgumentException("Enum type mismatch")
-      ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, l, r, mod)
-    case (l: OneHot, r: OneHot) =>
-      ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, l, r, mod)
-    case _ => throw new IllegalArgumentException("Switch only supports UInt, Bool, Enum, and OneHot types")

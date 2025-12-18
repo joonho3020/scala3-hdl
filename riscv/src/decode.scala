@@ -49,27 +49,17 @@ class Decoder(p: CoreParams) extends Module:
 
     def aluOp(funct3: UInt, funct7: UInt): HWEnum[ALUParams.Opcode] =
       val op = Wire(new HWEnum(ALUParams.Opcode))
-      op := DontCare
-      when (funct3 === 0.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_ADD.EN
-      } .elsewhen(funct3 === 0.U(3.W) && funct7 === 0x20.U(7.W)) {
-        op := FN_SUB.EN
-      }.elsewhen(funct3 === 1.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_SL.EN
-      }.elsewhen(funct3 === 2.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_SLT.EN
-      }.elsewhen(funct3 === 3.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_SLTU.EN
-      }.elsewhen(funct3 === 4.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_XOR.EN
-      }.elsewhen(funct3 === 5.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_SR.EN
-      }.elsewhen(funct3 === 5.U(3.W) && funct7 === 0x20.U(7.W)) {
-        op := FN_SRA.EN
-      }.elsewhen(funct3 === 6.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_OR.EN
-      }.elsewhen(funct3 === 7.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_AND.EN
+      switch ((funct3, funct7)) {
+        is ((0.U,    0.U)) { op :=  FN_ADD.EN }
+        is ((0.U, 0x20.U)) { op :=  FN_SUB.EN }
+        is ((1.U,    0.U)) { op :=   FN_SL.EN }
+        is ((2.U,    0.U)) { op :=  FN_SLT.EN }
+        is ((3.U,    0.U)) { op := FN_SLTU.EN }
+        is ((4.U,    0.U)) { op :=  FN_XOR.EN }
+        is ((5.U,    0.U)) { op :=   FN_SR.EN }
+        is ((6.U,    0.U)) { op :=   FN_OR.EN }
+        is ((7.U,    0.U)) { op :=  FN_AND.EN }
+        default { op := DontCare }
       }
       op
 

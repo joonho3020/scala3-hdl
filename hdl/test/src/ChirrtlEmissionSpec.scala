@@ -998,6 +998,44 @@ class SwitchEnum extends Module:
   }
   io.out := reg
 
+final case class SwitchTupleIO(
+  in_1: UInt,
+  in_2: UInt,
+  in_3: UInt,
+  out_1: UInt,
+  out_2: UInt) extends Bundle[SwitchTupleIO]
+
+object SwitchTupleIO:
+  def apply(): SwitchTupleIO = SwitchTupleIO(
+    Input(UInt(Width(8))),
+    Input(UInt(Width(8))),
+    Input(UInt(Width(8))),
+    Output(UInt(Width(8))),
+    Output(UInt(Width(8)))
+  )
+
+class SwitchTuple extends Module:
+  given Module = this
+  val io = IO(SwitchTupleIO())
+
+  switch ((io.in_1, io.in_2, io.in_3)) {
+    is((0.U, 0.U, 0.U)) { io.out_1 := 0.U }
+    is((0.U, 0.U, 1.U)) { io.out_1 := 1.U }
+    is((0.U, 1.U, 0.U)) { io.out_1 := 2.U }
+    is((0.U, 1.U, 1.U)) { io.out_1 := 3.U }
+    is((1.U, 0.U, 0.U)) { io.out_1 := 4.U }
+    is((1.U, 0.U, 1.U)) { io.out_1 := 5.U }
+    is((1.U, 1.U, 0.U)) { io.out_1 := 6.U }
+    is((1.U, 1.U, 1.U)) { io.out_1 := 7.U }
+    default { io.out_1 := 8.U }
+  }
+
+  switch (io.in_1 + io.in_2) {
+    is(0.U) { io.out_2 := 0.U }
+    is(1.U) { io.out_2 := 1.U }
+    default { io.out_2 := 2.U }
+  }
+
 object ChirrtlEmissionSpec extends TestSuite:
   def writeChirrtl(filename: String, content: String): Unit =
     val dir = new File("test-outputs/chirrtl")
@@ -1314,6 +1352,16 @@ object ChirrtlEmissionSpec extends TestSuite:
       val chirrtl = elaborator.emitChirrtl(designs, "SwitchEnum")
       writeChirrtl("SwitchEnum.fir", chirrtl)
       val (exitCode, output) = runFirtool(s"SwitchEnum.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+    }
+
+    test("SwitchTuple emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new SwitchTuple
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "SwitchTuple")
+      writeChirrtl("SwitchTuple.fir", chirrtl)
+      val (exitCode, output) = runFirtool(s"SwitchTuple.fir")
       if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
   }

@@ -930,6 +930,13 @@ state2 switch {
     is 1.U => {
     }
 }
+
+(state1, state2) switch {
+    is (0.U, 0.U) => {
+    }
+    is (0.U, 1.U) => {
+    }
+}
 ```
 
 Later one, the IR should support switch, when/elsewhen/otherwise statements natively.
