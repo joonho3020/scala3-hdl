@@ -1605,9 +1605,9 @@ def enum_basic_check(): Unit =
   class EnumModule extends Module:
     given Module = this
     val io = IO(EnumIO(Input(HWEnum(TestEnumOpcode)), Output(HWEnum(TestEnumOpcode))))
-    val reg = RegInit(TestEnumOpcode.Idle.toHWEnum)
-    when(io.in.asUInt === TestEnumOpcode.Run.toHWEnum.asUInt) {
-      reg := TestEnumOpcode.Wait.toHWEnum
+    val reg = RegInit(TestEnumOpcode.Idle.EN)
+    when(io.in.asUInt === TestEnumOpcode.Run.EN.asUInt) {
+      reg := TestEnumOpcode.Wait.EN
     }
     io.out := reg
 
@@ -1665,11 +1665,11 @@ def switch_check(): Unit =
   class SwitchEnum extends Module:
     given Module = this
     val io = IO(SwitchEnumIO(Input(HWEnum(TestEnumOpcode)), Output(HWEnum(TestEnumOpcode))))
-    val reg = RegInit(TestEnumOpcode.Idle.toHWEnum)
+    val reg = RegInit(TestEnumOpcode.Idle.EN)
     reg switch {
-      is(TestEnumOpcode.Idle.toHWEnum) { reg := TestEnumOpcode.Run.toHWEnum }
-      is(TestEnumOpcode.Run.toHWEnum) { reg := TestEnumOpcode.Wait.toHWEnum }
-      default { reg := TestEnumOpcode.Idle.toHWEnum }
+      is(TestEnumOpcode.Idle.EN) { reg := TestEnumOpcode.Run.EN }
+      is(TestEnumOpcode.Run.EN) { reg := TestEnumOpcode.Wait.EN }
+      default { reg := TestEnumOpcode.Idle.EN }
     }
     io.out := reg
 

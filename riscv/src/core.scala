@@ -64,7 +64,6 @@ class Core(p: CoreParams) extends Module:
       dec_ready(i)  := !dec_hazards.take(i+1).reduce(_ || _)
     }
 
-
     // -----------------------------------------------------------------------
     // Stage 1: Execute
     // -----------------------------------------------------------------------
@@ -131,6 +130,7 @@ class Core(p: CoreParams) extends Module:
 
     val inflight_uops: Seq[Valid[UOp]] = ex_uops.toSeq ++ mem_uops.toSeq ++ wb_uops.toSeq
 
+    // No bypass network for now
     dec_hazards.zipWithIndex.foreach((h, i) => {
       val dec_hazards = dec_uops.take(i).map(prev_uop => {
         val prev_rd = prev_uop.bits.rd
@@ -149,11 +149,6 @@ class Core(p: CoreParams) extends Module:
 
       h := dec_hazards || inflight_hazards
     })
-
-
-
-
-
 
     ///////////////////////////////////////////////////////////
 

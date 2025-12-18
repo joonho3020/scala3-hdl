@@ -157,7 +157,7 @@ class HWEnum[E <: scala.reflect.Enum](
   this.width = Width(log2Ceil(math.max(1, enumObj.values.length)))
 
 extension [E <: scala.reflect.Enum](payload: E)
-  inline def toHWEnum: HWEnum[E] =
+  inline def EN: HWEnum[E] =
     ${ HWEnumMacros.toHWEnumImpl[E]('payload) }
 
 object HWEnumMacros:

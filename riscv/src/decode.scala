@@ -51,25 +51,25 @@ class Decoder(p: CoreParams) extends Module:
       val op = Wire(new HWEnum(ALUParams.Opcode))
       op := DontCare
       when (funct3 === 0.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_ADD.toHWEnum
+        op := FN_ADD.EN
       } .elsewhen(funct3 === 0.U(3.W) && funct7 === 0x20.U(7.W)) {
-        op := FN_SUB.toHWEnum
+        op := FN_SUB.EN
       }.elsewhen(funct3 === 1.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_SL.toHWEnum
+        op := FN_SL.EN
       }.elsewhen(funct3 === 2.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_SLT.toHWEnum
+        op := FN_SLT.EN
       }.elsewhen(funct3 === 3.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_SLTU.toHWEnum
+        op := FN_SLTU.EN
       }.elsewhen(funct3 === 4.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_XOR.toHWEnum
+        op := FN_XOR.EN
       }.elsewhen(funct3 === 5.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_SR.toHWEnum
+        op := FN_SR.EN
       }.elsewhen(funct3 === 5.U(3.W) && funct7 === 0x20.U(7.W)) {
-        op := FN_SRA.toHWEnum
+        op := FN_SRA.EN
       }.elsewhen(funct3 === 6.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_OR.toHWEnum
+        op := FN_OR.EN
       }.elsewhen(funct3 === 7.U(3.W) && funct7 === 0.U(7.W)) {
-        op := FN_AND.toHWEnum
+        op := FN_AND.EN
       }
       op
 

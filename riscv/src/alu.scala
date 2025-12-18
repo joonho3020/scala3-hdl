@@ -50,14 +50,14 @@ object ALUParams:
 // FN_MULHU  = FN_SNE
 
   def isOneOf(cmd: UInt, candidate: Seq[Opcode])(using m: Module): Bool =
-    candidate.map(_.toHWEnum.asUInt === cmd).reduce(_ || _)
+    candidate.map(_.EN.asUInt === cmd).reduce(_ || _)
 
   def isMulFN(fn: UInt, cmp: UInt)(using m: Module): Bool = fn(1,0) === cmp(1,0)
   def isSub(cmd: UInt)(using m: Module): Bool = cmd(3).asBool
   def isCmp(cmd: UInt)(using m: Module): Bool =
-    (cmd >= Opcode.FN_SLT.toHWEnum.asUInt && cmd <= Opcode.FN_SGEU.toHWEnum.asUInt)
+    (cmd >= Opcode.FN_SLT.EN.asUInt && cmd <= Opcode.FN_SGEU.EN.asUInt)
 // def isMaxMin(cmd: UInt)(using m: Module): Bool =
-// (cmd >= Opcode.FN_MAX.toHWEnum.asUInt && cmd <= Opcode.FN_MINU.toHWEnum.asUInt)
+// (cmd >= Opcode.FN_MAX.EN.asUInt && cmd <= Opcode.FN_MINU.EN.asUInt)
   def cmpUnsigned(cmd: UInt)(using m: Module): Bool = cmd(1).asBool
   def cmpInverted(cmd: UInt)(using m: Module): Bool = cmd(0).asBool
   def cmpEq(cmd: UInt)(using m: Module): Bool = !cmd(3).asBool

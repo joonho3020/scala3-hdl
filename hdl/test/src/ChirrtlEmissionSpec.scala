@@ -990,11 +990,11 @@ final case class SwitchEnumIO(in: HWEnum[TestEnumOpcode], out: HWEnum[TestEnumOp
 class SwitchEnum extends Module:
   given Module = this
   val io = IO(SwitchEnumIO(Input(HWEnum(TestEnumOpcode)), Output(HWEnum(TestEnumOpcode))))
-  val reg = RegInit(TestEnumOpcode.Idle.toHWEnum)
+  val reg = RegInit(TestEnumOpcode.Idle.EN)
   reg switch {
-    is(TestEnumOpcode.Idle.toHWEnum) { reg := TestEnumOpcode.Run.toHWEnum }
-    is(TestEnumOpcode.Run.toHWEnum) { reg := TestEnumOpcode.Wait.toHWEnum }
-    default { reg := TestEnumOpcode.Idle.toHWEnum }
+    is(TestEnumOpcode.Idle.EN) { reg := TestEnumOpcode.Run.EN }
+    is(TestEnumOpcode.Run.EN) { reg := TestEnumOpcode.Wait.EN }
+    default { reg := TestEnumOpcode.Idle.EN }
   }
   io.out := reg
 
