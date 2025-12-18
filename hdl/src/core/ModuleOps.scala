@@ -427,6 +427,16 @@ extension [E <: scala.reflect.Enum] (lhs: HWEnum[E])
   def asUInt(using m: Module): UInt =
     ModuleOps.asUInt(lhs, m)
 
+extension (lhs: Reset)
+  def asBool(using m: Module): Bool =
+    ModuleOps.prim1Op(Bool(), IR.PrimOp.AsBool, lhs, m)
+
+def clock(using m: Module): Clock =
+  m.getImplicitClock
+
+def reset(using m: Module): Reset =
+  m.getImplicitReset
+
 def Mux[T <: HWData](cond: Bool, tval: T, fval: T)(using m: Module): T =
   ModuleOps.mux(cond, tval, fval, m)
 

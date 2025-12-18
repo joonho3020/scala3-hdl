@@ -238,7 +238,10 @@ sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnc
   def reverse: Vec[T] =
     Vec(elems.reverse)
 
-  export elems.{ foreach, foldLeft, foldRight, exists, forall, count, mkString, zip, zipWithIndex }
+  export elems.{
+    foreach, foldLeft, foldRight, exists, forall, count, mkString, zip, zipWithIndex,
+    take, takeRight
+  }
 
   this.width = if elems.nonEmpty then elems.map(_.getWidth).reduce(_ + _) else Width()
 
