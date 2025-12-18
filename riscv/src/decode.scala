@@ -87,7 +87,7 @@ class Decoder(p: CoreParams) extends Module:
       deq_uop.rs1    := enq_uop.inst(19, 15)
       deq_uop.rs2    := enq_uop.inst(24, 20)
       deq_uop.rd     := enq_uop.inst(11, 7)
-      deq_uop.rd_valid := Opcodes.writesIntRd(deq_uop.opcode, deq_uop.funct3)
+      deq_uop.rd_wen := Opcodes.writesIntRd(deq_uop.opcode, deq_uop.funct3)
 
       deq_uop.aluOp  := aluOp(deq_uop.funct3, deq_uop.funct7)
     })
