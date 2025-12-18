@@ -74,6 +74,8 @@ class Core(p: CoreParams) extends Module:
       dec_imms(i) := imm_gens(i).io.out
     }
 
+    dontTouch(dec_uops)
+
     // -----------------------------------------------------------------------
     // Stage 1: Execute
     // -----------------------------------------------------------------------
@@ -132,6 +134,11 @@ class Core(p: CoreParams) extends Module:
       ex_alu_out(i) := alu(i).io.out
     }
 
+    dontTouch(ex_uops)
+    dontTouch(ex_rs1_rf)
+    dontTouch(ex_rs2_rf)
+    dontTouch(ex_imm)
+    dontTouch(ex_alu_out)
     // -----------------------------------------------------------------------
     // Stage 2: Mem
     // -----------------------------------------------------------------------
@@ -143,6 +150,8 @@ class Core(p: CoreParams) extends Module:
       mem_alu_out(i) := ex_alu_out(i)
     }
 
+    dontTouch(mem_uops)
+    dontTouch(mem_alu_out)
     // -----------------------------------------------------------------------
     // Stage 3: Writeback
     // -----------------------------------------------------------------------
@@ -164,6 +173,8 @@ class Core(p: CoreParams) extends Module:
       }
     }
 
+    dontTouch(wb_uops)
+    dontTouch(wb_wdata)
     ///////////////////////////////////////////////////////////////////////////
 
     val inflight_uops: Seq[Valid[UOp]] = ex_uops.toSeq ++ mem_uops.toSeq ++ wb_uops.toSeq
