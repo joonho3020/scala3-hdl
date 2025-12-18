@@ -46,19 +46,27 @@ class Decoder(p: CoreParams) extends Module:
   body {
     import ALUParams.Opcode._
 
-    def aluOp(funct3: UInt, funct7: UInt): HWEnum[ALUParams.Opcode] =
+    def aluOp(opcode: UInt, funct3: UInt, funct7: UInt): HWEnum[ALUParams.Opcode] =
       val op = Wire(new HWEnum(ALUParams.Opcode))
-      switch ((funct3, funct7)) {
-        is ((0.U,    0.U)) { op :=  FN_ADD.EN }
-        is ((0.U, 0x20.U)) { op :=  FN_SUB.EN }
-        is ((1.U,    0.U)) { op :=   FN_SL.EN }
-        is ((2.U,    0.U)) { op :=  FN_SLT.EN }
-        is ((3.U,    0.U)) { op := FN_SLTU.EN }
-        is ((4.U,    0.U)) { op :=  FN_XOR.EN }
-        is ((5.U,    0.U)) { op :=   FN_SR.EN }
-        is ((5.U, 0x20.U)) { op :=  FN_SRA.EN }
-        is ((6.U,    0.U)) { op :=   FN_OR.EN }
-        is ((7.U,    0.U)) { op :=  FN_AND.EN }
+
+      switch (opcode) {
+        is (0b0110011.U) { // R-type
+          switch ((funct3, funct7)) {
+            is ((0.U,    0.U)) { op :=  FN_ADD.EN }
+            is ((0.U, 0x20.U)) { op :=  FN_SUB.EN }
+            is ((1.U,    0.U)) { op :=   FN_SL.EN }
+            is ((2.U,    0.U)) { op :=  FN_SLT.EN }
+            is ((3.U,    0.U)) { op := FN_SLTU.EN }
+            is ((4.U,    0.U)) { op :=  FN_XOR.EN }
+            is ((5.U,    0.U)) { op :=   FN_SR.EN }
+            is ((5.U, 0x20.U)) { op :=  FN_SRA.EN }
+            is ((6.U,    0.U)) { op :=   FN_OR.EN }
+            is ((7.U,    0.U)) { op :=  FN_AND.EN }
+            default { op := DontCare }
+          }
+        }
+        is (0b0010011.U) { // immediate operations
+        }
         default { op := DontCare }
       }
       op
@@ -69,17 +77,21 @@ class Decoder(p: CoreParams) extends Module:
 
       val enq_uop = enq.bits
       val deq_uop = deq.bits
+      val inst = enq_uop.inst
+
       deq_uop        := enq_uop
-      deq_uop.opcode := enq_uop.inst(6,  0)
-      deq_uop.funct3 := enq_uop.inst(14, 12)
-      deq_uop.funct7 := enq_uop.inst(31, 25)
-      deq_uop.funct7 := enq_uop.inst(31, 25)
-      deq_uop.rs1    := enq_uop.inst(19, 15)
-      deq_uop.rs2    := enq_uop.inst(24, 20)
-      deq_uop.rd     := enq_uop.inst(11, 7)
+      deq_uop.opcode := inst(6,  0)
+      deq_uop.funct3 := inst(14, 12)
+      deq_uop.funct7 := inst(31, 25)
+      deq_uop.rs1    := inst(19, 15)
+      deq_uop.rs2    := inst(24, 20)
+      deq_uop.rd     := inst(11, 7)
       deq_uop.rd_wen := Opcodes.writesIntRd(deq_uop.opcode, deq_uop.funct3)
 
-      deq_uop.aluOp  := aluOp(deq_uop.funct3, deq_uop.funct7)
+      val imm_i_upper = Mux(inst(31).asBool, ~0.U((p.xlenBits - 12).W), 0.U((p.xlenBits - 12).W))
+      deq_uop.imm_i  := Cat(Seq(imm_i_upper, inst(31, 20)))
+      deq_uop.imm_u  := Cat(Seq(inst(31, 12), 0.U(12.W)))
+      deq_uop.aluOp  := aluOp(deq_uop.opcode, deq_uop.funct3, deq_uop.funct7)
     })
   }
 

@@ -56,20 +56,15 @@ object ALUParams:
   def isSub(cmd: UInt)(using m: Module): Bool = cmd(3).asBool
   def isCmp(cmd: UInt)(using m: Module): Bool =
     (cmd >= Opcode.FN_SLT.EN.asUInt && cmd <= Opcode.FN_SGEU.EN.asUInt)
-// def isMaxMin(cmd: UInt)(using m: Module): Bool =
-// (cmd >= Opcode.FN_MAX.EN.asUInt && cmd <= Opcode.FN_MINU.EN.asUInt)
   def cmpUnsigned(cmd: UInt)(using m: Module): Bool = cmd(1).asBool
   def cmpInverted(cmd: UInt)(using m: Module): Bool = cmd(0).asBool
   def cmpEq(cmd: UInt)(using m: Module): Bool = !cmd(3).asBool
-// def shiftReverse(cmd: UInt)(using m: Module) =
-// !isOneOf(cmd, Seq(Opcode.FN_SR, Opcode.FN_SRA, Opcode.FN_ROR, Opcode.FN_BEXT))
-// def bwInvRs2(cmd: UInt)(using m: Module) = isOneOf(cmd, Seq(Opcode.FN_ANDN, Opcode.FN_ORN, Opcode.FN_XNOR))
 
 import ALUParams.Opcode._
 import ALUParams._
 
 case class ALUIO(
-  fn: UInt, // FIXME: use proper HWEnum
+  fn: UInt,
   in2: UInt,
   in1: UInt,
   out: UInt,
@@ -100,21 +95,47 @@ class ALU(p: ALUParams) extends Module with CacheableModule:
   val xLen = p.xlen
 
   body:
-    // ADD, SUB
     val in2_inv = Mux(isSub(io.fn), ~io.in2, io.in2)
     val in1_xor_in2 = io.in1 ^ in2_inv
     val in1_and_in2 = io.in1 & in2_inv
     io.adder_out := io.in1 + in2_inv + isSub(io.fn).asUInt
 
-    io.cmp_out := DontCare
-    io.out := io.adder_out
+    require(xLen == 64)
+    // TODO
+    // 64 bit?
 
-  // // SLT, SLTU
-  // val slt =
-  //   Mux(io.in1(xLen-1) === io.in2(xLen-1), io.adder_out(xLen-1),
-  //   Mux(cmpUnsigned(io.fn), io.in2(xLen-1), io.in1(xLen-1)))
-  // io.cmp_out := cmpInverted(io.fn) ^ Mux(cmpEq(io.fn), in1_xor_in2 === 0.U, slt.asBool)
-  // 
+    val logic = Wire(UInt(xLen.W))
+    switch (io.fn) {
+      is (FN_XOR.EN.asUInt) { logic := io.in1 ^ io.in2 }
+      is ( FN_OR.EN.asUInt) { logic := io.in1 | io.in2 }
+      is (FN_AND.EN.asUInt) { logic := io.in1 & io.in2 }
+      default               { logic := 0.U             }
+    }
+
+    val slt =
+      Mux(io.in1(xLen-1) === io.in2(xLen-1), io.adder_out(xLen-1),
+        Mux(cmpUnsigned(io.fn), io.in2(xLen-1), io.in1(xLen-1)))
+    io.cmp_out := cmpInverted(io.fn) ^ Mux(cmpEq(io.fn), in1_xor_in2 === 0.U, slt.asBool)
+
+    val shamt = io.in2(5, 0)
+    val shright = io.in1 >> shamt
+    val sign_bit = io.in1(xLen - 1)
+    val sign_fill = Mux(sign_bit.asBool, ~(((1.U(xLen.W) << (xLen.U - shamt)) - 1.U) >> (xLen.U - shamt)), 0.U(xLen.W))
+    val shright_arith = shright | sign_fill
+
+    val shout = Mux(io.fn === FN_SRA.EN.asUInt, shright_arith, shright)
+    val shlout = io.in1 << shamt
+
+    val shift_out = Mux(io.fn === FN_SL.EN.asUInt, shlout, shout)
+
+    val cmp_val = Mux(isCmp(io.fn) && slt.asBool, 1.U(xLen.W), 0.U(xLen.W))
+
+    val shift_logic = cmp_val | logic | shift_out
+
+    io.out := Mux(io.fn === FN_ADD.EN.asUInt || io.fn === FN_SUB.EN.asUInt,
+                  io.adder_out,
+                  shift_logic)
+
   // // SLL, SRL, SRA
   // val (shamt, shin_r) =
   //   if (xLen == 32) (io.in2(4,0), io.in1)

@@ -13,6 +13,9 @@ case class UOp(
   rd:  UInt,
   rd_wen: Bool,
   aluOp: HWEnum[ALUParams.Opcode],
+  imm_i: UInt,
+  imm_u: UInt,
+  lui: Bool,
 ) extends Bundle[UOp]
 
 object UOp:
@@ -27,5 +30,8 @@ object UOp:
       rs2    = UInt(5.W),
       rd     = UInt(5.W),
       rd_wen = Bool(),
-      aluOp  = new HWEnum(ALUParams.Opcode)
+      aluOp  = new HWEnum(ALUParams.Opcode),
+      imm_i  = UInt(p.xlenBits.W),
+      imm_u  = UInt(p.xlenBits.W),
+      lui    = Bool(),
     )
