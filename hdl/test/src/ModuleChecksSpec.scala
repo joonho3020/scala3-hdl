@@ -40,6 +40,8 @@ private def tail(a: IR.Expr, n: Int): IR.Expr = IR.DoPrim(IR.PrimOp.Tail, Seq(a)
 private def dshr(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.DShr, Seq(a, b))
 private def reverseBits(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
 private def rem(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Rem, Seq(a, b))
+private def cat(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Cat, Seq(a, b))
+private def asUIntPrim(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.AsUInt, Seq(e))
 private def mem(name: String, tpe: IR.Type, depth: Int, readers: Seq[String], writers: Seq[String], readwriters: Seq[String]): IR.Stmt =
   IR.Mem(
     id(name),
@@ -1756,6 +1758,228 @@ def switch_check(): Unit =
   println(renderedEnum)
   assertDesigns("Switch Enum Check", designsEnum, expectedEnum)
 
+def fill_check(): Unit =
+  final case class FillIO(in: Bool, out4: UInt, out8: UInt) extends Bundle[FillIO]
+  class FillModule extends Module:
+    given Module = this
+    val io = IO(FillIO(
+      in = Input(Bool()),
+      out4 = Output(UInt(Width(4))),
+      out8 = Output(UInt(Width(8)))
+    ))
+    body:
+      io.out4 := Fill(4, io.in)
+      io.out8 := Fill(8, io.in)
+
+  val elaborator = new Elaborator
+  val m = new FillModule
+  val designs = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(designs)
+  val inRef = sf(ref("io"), "in")
+  val fill4 = cat(cat(cat(asUIntPrim(inRef), asUIntPrim(inRef)), asUIntPrim(inRef)), asUIntPrim(inRef))
+  val fill8 = cat(cat(cat(cat(cat(cat(cat(
+    asUIntPrim(inRef), asUIntPrim(inRef)), asUIntPrim(inRef)), asUIntPrim(inRef)),
+    asUIntPrim(inRef)), asUIntPrim(inRef)), asUIntPrim(inRef)), asUIntPrim(inRef))
+  val expected = Seq(
+    module(
+      "FillModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("in", true, IR.BoolType),
+          ("out4", false, u(4)),
+          ("out8", false, u(8))
+        ))
+      ),
+      Seq(
+        IR.Connect(sf(ref("io"), "out4"), fill4),
+        IR.Connect(sf(ref("io"), "out8"), fill8)
+      )
+    )
+  )
+  println("=" * 50)
+  println("Fill Check:")
+  println(rendered)
+  assertDesigns("Fill Check", designs, expected)
+  println("=" * 50)
+
+def reverse_check(): Unit =
+  final case class ReverseIO(in: UInt, out: UInt) extends Bundle[ReverseIO]
+  class ReverseModule extends Module:
+    given Module = this
+    val io = IO(ReverseIO(
+      in = Input(UInt(Width(8))),
+      out = Output(UInt(Width(8)))
+    ))
+    body:
+      io.out := Reverse(io.in)
+
+  val elaborator = new Elaborator
+  val m = new ReverseModule
+  val designs = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(designs)
+  val inRef = sf(ref("io"), "in")
+  val reversedBits = cat(cat(cat(cat(cat(cat(cat(
+    bits(inRef, 7, 7), bits(inRef, 6, 6)), bits(inRef, 5, 5)), bits(inRef, 4, 4)),
+    bits(inRef, 3, 3)), bits(inRef, 2, 2)), bits(inRef, 1, 1)), bits(inRef, 0, 0))
+  val expected = Seq(
+    module(
+      "ReverseModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("in", true, u(8)),
+          ("out", false, u(8))
+        ))
+      ),
+      Seq(
+        IR.Connect(sf(ref("io"), "out"), reversedBits)
+      )
+    )
+  )
+  println("=" * 50)
+  println("Reverse Check:")
+  println(rendered)
+  assertDesigns("Reverse Check", designs, expected)
+  println("=" * 50)
+
+def bitpat_check(): Unit =
+  val pat1 = BitPat("b1010")
+  assert(pat1.width == 4)
+  assert(pat1.value == BigInt(10))
+  assert(pat1.mask == BigInt(15))
+
+  val pat2 = BitPat("b10?0")
+  assert(pat2.width == 4)
+  assert(pat2.value == BigInt(8))
+  assert(pat2.mask == BigInt(13))
+
+  val pat3 = BitPat("b????")
+  assert(pat3.width == 4)
+  assert(pat3.value == BigInt(0))
+  assert(pat3.mask == BigInt(0))
+
+  println("=" * 50)
+  println("BitPat Check:")
+  println(s"pat1: $pat1")
+  println(s"pat2: $pat2")
+  println(s"pat3: $pat3")
+
+  final case class BitPatIO(inst: UInt, match1: Bool, match2: Bool) extends Bundle[BitPatIO]
+  class BitPatModule extends Module:
+    given Module = this
+    val io = IO(BitPatIO(
+      inst = Input(UInt(Width(32))),
+      match1 = Output(Bool()),
+      match2 = Output(Bool())
+    ))
+    body:
+      val ADD  = BitPat("b0000000??????????000?????0110011")
+      val ADDI = BitPat("b?????????????????000?????0010011")
+      io.match1 := ADD === io.inst
+      io.match2 := ADDI === io.inst
+
+  val elaborator = new Elaborator
+  val m = new BitPatModule
+  val designs = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(designs)
+  val instRef = sf(ref("io"), "inst")
+  val expected = Seq(
+    module(
+      "BitPatModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("inst", true, u(32)),
+          ("match1", false, IR.BoolType),
+          ("match2", false, IR.BoolType)
+        ))
+      ),
+      Seq(
+        IR.Connect(
+          sf(ref("io"), "match1"),
+          eqv(and(instRef, lit("UInt<32>(4261441663)")), lit("UInt<32>(51)"))
+        ),
+        IR.Connect(
+          sf(ref("io"), "match2"),
+          eqv(and(instRef, lit("UInt<32>(28799)")), lit("UInt<32>(19)"))
+        )
+      )
+    )
+  )
+  println("BitPat Module Check:")
+  println(rendered)
+  assertDesigns("BitPat Module Check", designs, expected)
+
+def bitpat_switch_check(): Unit =
+  final case class BitPatSwitchIO(inst: UInt, aluOp: UInt) extends Bundle[BitPatSwitchIO]
+  class BitPatSwitchModule extends Module:
+    given Module = this
+    val io = IO(BitPatSwitchIO(
+      inst = Input(UInt(Width(32))),
+      aluOp = Output(UInt(Width(4)))
+    ))
+    body:
+      val ADD = BitPat("b0000000??????????000?????0110011")
+      val SUB = BitPat("b0100000??????????000?????0110011")
+      val AND = BitPat("b0000000??????????111?????0110011")
+
+      io.aluOp := 0.U
+      switch(io.inst) {
+        is(ADD) { io.aluOp := 1.U }
+        is(SUB) { io.aluOp := 2.U }
+        is(AND) { io.aluOp := 3.U }
+        default { io.aluOp := DontCare }
+      }
+
+  val elaborator = new Elaborator
+  val m = new BitPatSwitchModule
+  val designs = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(designs)
+  val instRef = sf(ref("io"), "inst")
+  val aluOpRef = sf(ref("io"), "aluOp")
+  val expected = Seq(
+    module(
+      "BitPatSwitchModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("inst", true, u(32)),
+          ("aluOp", false, u(4))
+        ))
+      ),
+      Seq(
+        IR.Connect(aluOpRef, lit("UInt(0)")),
+        IR.When(
+          eqv(and(instRef, lit("UInt<32>(4261441663)")), lit("UInt<32>(51)")),
+          Seq(IR.Connect(aluOpRef, lit("UInt(1)"))),
+          Seq(
+            IR.When(
+              eqv(and(instRef, lit("UInt<32>(4261441663)")), lit("UInt<32>(1073741875)")),
+              Seq(IR.Connect(aluOpRef, lit("UInt(2)"))),
+              Seq(
+                IR.When(
+                  eqv(and(instRef, lit("UInt<32>(4261441663)")), lit("UInt<32>(28723)")),
+                  Seq(IR.Connect(aluOpRef, lit("UInt(3)"))),
+                  Seq(IR.Invalid(aluOpRef))
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+  println("=" * 50)
+  println("BitPat Switch Check:")
+  println(rendered)
+  assertDesigns("BitPat Switch Check", designs, expected)
+  println("=" * 50)
+
 object ModuleChecksSpec extends TestSuite:
   val tests = Tests {
     test("simple_module_test") { simple_module_test() }
@@ -1781,5 +2005,8 @@ object ModuleChecksSpec extends TestSuite:
     test("mux_and_concat_check") { mux_and_concat_check() }
     test("enum_basic_check") { enum_basic_check() }
     test("switch_check") { switch_check() }
-// test("sram_check") { sram_check() }
+    test("fill_check") { fill_check() }
+    test("reverse_check") { reverse_check() }
+    test("bitpat_check") { bitpat_check() }
+    test("bitpat_switch_check") { bitpat_switch_check() }
   }

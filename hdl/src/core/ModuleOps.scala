@@ -472,15 +472,15 @@ extension (lhs: OneHot)
   def =/=(rhs: OneHot)(using m: Module): Bool =
     ModuleOps.prim2Op(Bool(), IR.PrimOp.Neq, lhs, rhs, m)
 
-extension [T](selector: T)
-  inline infix def switch(inline body: SwitchBuilder[T] ?=> Unit)(using m: Module, c: SwitchCond[T]): Unit =
-    given SwitchBuilder[T] = new SwitchBuilder(selector, summon[Module])
+extension [S, C](selector: S)
+  inline infix def switch(inline body: SwitchBuilder[S, C] ?=> Unit)(using m: Module, c: SwitchCond[S, C]): Unit =
+    given SwitchBuilder[S, C] = new SwitchBuilder(selector, summon[Module])
     body
 
-def is[T](value: T)(block: => Unit)(using builder: SwitchBuilder[T]): Unit =
+def is[S, C](value: C)(block: => Unit)(using builder: SwitchBuilder[S, C]): Unit =
   builder.addCase(value)(block)
 
-def default(block: => Unit)(using builder: SwitchBuilder[?]): Unit =
+def default(block: => Unit)(using builder: SwitchBuilder[?, ?]): Unit =
   builder.addDefault(block)
 
 final class WhenDSL(private val mod: Module, private val current: RawWhen):
@@ -497,42 +497,46 @@ final class WhenDSL(private val mod: Module, private val current: RawWhen):
       block
     }
 
-trait SwitchCond[T]:
-  def apply(lhs: T, rhs: T)(using Module): Bool
+trait SwitchCond[S, C]:
+  def apply(lhs: S, rhs: C)(using Module): Bool
 
 object SwitchCond:
-  given SwitchCond[UInt] with
+  given SwitchCond[UInt, UInt] with
     def apply(lhs: UInt, rhs: UInt)(using Module): Bool =
       ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, summon[Module])
 
-  given SwitchCond[Bool] with
+  given SwitchCond[Bool, Bool] with
     def apply(lhs: Bool, rhs: Bool)(using Module): Bool =
       ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, summon[Module])
 
-  given SwitchCond[OneHot] with
+  given SwitchCond[OneHot, OneHot] with
     def apply(lhs: OneHot, rhs: OneHot)(using Module): Bool =
       ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, summon[Module])
 
-  given [E <: scala.reflect.Enum]: SwitchCond[HWEnum[E]] with
+  given SwitchCond[UInt, BitPat] with
+    def apply(lhs: UInt, rhs: BitPat)(using Module): Bool =
+      rhs === lhs
+
+  given [E <: scala.reflect.Enum]: SwitchCond[HWEnum[E], HWEnum[E]] with
     def apply(lhs: HWEnum[E], rhs: HWEnum[E])(using Module): Bool =
       if lhs.enumObj != rhs.enumObj then
         throw new IllegalArgumentException("Enum type mismatch")
       ModuleOps.prim2Op(Bool(), IR.PrimOp.Eq, lhs, rhs, summon[Module])
 
-  given SwitchCond[EmptyTuple] with
+  given SwitchCond[EmptyTuple, EmptyTuple] with
     def apply(lhs: EmptyTuple, rhs: EmptyTuple)(using Module): Bool =
       true.B
 
-  given [H, T <: Tuple](using h: SwitchCond[H], t: SwitchCond[T]): SwitchCond[H *: T] with
+  given [H, T <: Tuple](using h: SwitchCond[H, H], t: SwitchCond[T, T]): SwitchCond[H *: T, H *: T] with
     def apply(lhs: H *: T, rhs: H *: T)(using Module): Bool =
       h(lhs.head, rhs.head) && t(lhs.tail, rhs.tail)
 
-final class SwitchBuilder[T](selector: T, mod: Module)(using SwitchCond[T]):
+final class SwitchBuilder[S, C](selector: S, mod: Module)(using SwitchCond[S, C]):
   private var current: Option[WhenDSL] = None
 
-  def addCase(value: T)(block: => Unit): Unit =
+  def addCase(value: C)(block: => Unit): Unit =
     given Module = mod
-    val cond = summon[SwitchCond[T]].apply(selector, value)
+    val cond = summon[SwitchCond[S, C]].apply(selector, value)
     val next = current match
       case None => ModuleOps.when(cond, mod) {
         block
