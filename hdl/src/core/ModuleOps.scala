@@ -446,6 +446,10 @@ def Mux[T <: HWData](cond: Bool, tval: T, fval: T)(using m: Module): T =
 def dontTouch[T <: HWData](data: T)(using m: Module): T =
   ModuleOps.dontTouch(data, m)
 
+@scala.annotation.targetName("catVarargs")
+def Cat(values: HWData*)(using m: Module): UInt =
+  ModuleOps.concatBits(values.toSeq, m)
+
 extension (xs: Seq[HWData])
   def Cat(using m: Module): UInt =
     ModuleOps.concatBits(xs, m)
