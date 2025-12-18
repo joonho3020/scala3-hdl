@@ -1,6 +1,24 @@
 package hdl
 
-// In the future, this should really just be an IR node...
+object Fill:
+  def apply(n: Int, x: Bool)(using m: Module): UInt =
+    if n <= 0 then
+      throw new IllegalArgumentException("Fill requires n > 0")
+    Seq.fill(n)(x.asUInt).Cat
+
+  def apply(n: Int, x: UInt)(using m: Module): UInt =
+    if n <= 0 then
+      throw new IllegalArgumentException("Fill requires n > 0")
+    Seq.fill(n)(x).Cat
+
+object Reverse:
+  def apply(x: UInt)(using m: Module): UInt =
+    val width = x.getWidth match
+      case KnownWidth(v) => v
+      case _ => throw new IllegalArgumentException("Reverse requires UInt with known width")
+    val bits = (0 until width).map(i => x(i))
+    bits.reverse.Cat
+
 object PopCount:
   def apply(x: Vec[Bool])(using m: Module): UInt =
     x.map(_.asUInt).reduce(_ + _)
