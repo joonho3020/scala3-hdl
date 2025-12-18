@@ -428,8 +428,11 @@ extension [E <: scala.reflect.Enum] (lhs: HWEnum[E])
     ModuleOps.asUInt(lhs, m)
 
 extension (lhs: Reset)
+  def asUInt(using m: Module): UInt =
+    ModuleOps.prim1Op(UInt(1.W), IR.PrimOp.AsUInt, lhs, m)
+
   def asBool(using m: Module): Bool =
-    ModuleOps.prim1Op(Bool(), IR.PrimOp.AsBool, lhs, m)
+    ModuleOps.prim1Op(Bool(), IR.PrimOp.AsUInt, lhs, m)
 
 def clock(using m: Module): Clock =
   m.getImplicitClock

@@ -89,20 +89,25 @@ object ALUIO:
       cmp_out   = Output(Bool())
     )
 
-class ALU(p: ALUParams) extends Module:
+class ALU(p: ALUParams) extends Module with CacheableModule:
+  type ElabParams = ALUParams
+  given stableHashElabParams: StableHash[ALUParams] = summon[StableHash[ALUParams]]
+  def elabParams: ALUParams = p
   given Module = this
-  val xLen = p.xlen
 
   val io = IO(ALUIO(p))
 
-  // ADD, SUB
-  val in2_inv = Mux(isSub(io.fn), ~io.in2, io.in2)
-  val in1_xor_in2 = io.in1 ^ in2_inv
-  val in1_and_in2 = io.in1 & in2_inv
-  io.adder_out := io.in1 + in2_inv + isSub(io.fn).asUInt
+  val xLen = p.xlen
 
-  io.cmp_out := DontCare
-  io.out := io.adder_out
+  body:
+    // ADD, SUB
+    val in2_inv = Mux(isSub(io.fn), ~io.in2, io.in2)
+    val in1_xor_in2 = io.in1 ^ in2_inv
+    val in1_and_in2 = io.in1 & in2_inv
+    io.adder_out := io.in1 + in2_inv + isSub(io.fn).asUInt
+
+    io.cmp_out := DontCare
+    io.out := io.adder_out
 
   // // SLT, SLTU
   // val slt =

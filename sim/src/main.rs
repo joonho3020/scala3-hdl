@@ -1,12 +1,12 @@
 use hdl_sim::Dut;
 
 fn check_alu_output(dut: &Dut) {
-    // Check ALU output
-    let alu_valid = dut.peek_io_alu_valid();
-    if alu_valid != 0 {
-        let alu_out = dut.peek_io_alu_out();
-// println!("ALU output: {}", alu_out)
-    }
+// let wb_valid = dut.peek_io_retire_info_wb_valid();
+// if wb_valid != 0 {
+// let wb_rd   = dut.peek_io_retire_info_wb_rd();
+// let wb_data = dut.peek_io_retire_info_wb_data();
+// println!("Writeback reg[{}] = {}", wb_rd, wb_data);
+// }
 }
 
 fn main() {

@@ -2,24 +2,30 @@ package riscv
 
 import hdl._
 
+case class RetireInfoIf(
+  wb_valid: Vec[Bool],
+  wb_data: Vec[UInt],
+  wb_rd: Vec[UInt],
+) extends Bundle[RetireInfoIf]
+
+object RetireInfoIf:
+  def apply(p: CoreParams): RetireInfoIf =
+    RetireInfoIf(
+      wb_valid = Output(Vec.fill(p.coreWidth)(Bool())),
+      wb_data  = Output(Vec.fill(p.coreWidth)(UInt(p.xlenBits.W))),
+      wb_rd    = Output(Vec.fill(p.coreWidth)(UInt(p.xlenBits.W))),
+    )
+
 case class CoreIf(
   fetch_uops: Vec[Decoupled[UOp]],
-
-  alu_valid: Bool,
-  alu_out: UInt,
-  alu_adder_out: UInt,
-  alu_cmp_out: Bool
+  retire_info: RetireInfoIf
 ) extends Bundle[CoreIf]
 
 object CoreIf:
   def apply(p: CoreParams): CoreIf =
     CoreIf(
       fetch_uops    = Flipped(Vec.fill(p.coreWidth)(Decoupled(UOp(p)))),
-
-      alu_valid     = Output(Bool()),
-      alu_out       = Output(UInt(p.xlenBits.W)),
-      alu_adder_out = Output(UInt(p.xlenBits.W)),
-      alu_cmp_out   = Output(Bool()),
+      retire_info   = RetireInfoIf(p)
     )
 
 class Core(p: CoreParams) extends Module:
@@ -29,6 +35,10 @@ class Core(p: CoreParams) extends Module:
   val coreWidth = p.coreWidth
 
   body {
+    io.retire_info.wb_valid.foreach(_ := false.B)
+    io.retire_info.wb_data.foreach(_ := DontCare)
+    io.retire_info.wb_rd.foreach(_ := DontCare)
+
     // -----------------------------------------------------------------------
     // Stage 0: Decode & read register operands
     // -----------------------------------------------------------------------
@@ -41,7 +51,7 @@ class Core(p: CoreParams) extends Module:
 
     dec.io.deq.foreach(x => x.ready := false.B)
 
-    val rf = RegInit(Vec.fill(32)(0.U(XLEN.W)))
+    val rf = Reg(Vec.fill(32)(UInt(XLEN.W)))
 
     val dec_uops   = Wire(Vec.fill(coreWidth)(Valid(UOp(p))))
     val dec_ready = Wire(Vec.fill(coreWidth)(Bool()))
@@ -68,8 +78,8 @@ class Core(p: CoreParams) extends Module:
         ex_uops(i).valid := true.B
         ex_uops(i).bits  := dec_uops(i).bits
 
-        ex_rs1_rf   := Mux(dec_uops(i).bits.rd === 0.U, 0.U, rf(dec_uops(i).bits.rs1))
-        ex_rs2_rf   := Mux(dec_uops(i).bits.rd === 0.U, 0.U, rf(dec_uops(i).bits.rs2))
+        ex_rs1_rf(i) := Mux(dec_uops(i).bits.rd === 0.U, 0.U, rf(dec_uops(i).bits.rs1))
+        ex_rs2_rf(i) := Mux(dec_uops(i).bits.rd === 0.U, 0.U, rf(dec_uops(i).bits.rs2))
       } .otherwise {
         ex_uops(i).valid := false.B
       }
@@ -110,6 +120,10 @@ class Core(p: CoreParams) extends Module:
     for (i <- 0 until coreWidth) {
       when (wb_uops(i).valid && wb_uops(i).bits.rd_wen) {
         rf(wb_uops(i).bits.rd) := wb_wdata(i)
+
+        io.retire_info.wb_valid(i) := true.B
+        io.retire_info.wb_data(i)  := wb_wdata(i)
+        io.retire_info.wb_rd(i)    := wb_uops(i).bits.rd
       }
     }
 
@@ -124,7 +138,7 @@ class Core(p: CoreParams) extends Module:
         (prev_rd === dec_uops(i).bits.rs1 ||
          prev_rd === dec_uops(i).bits.rs2 ||
          prev_rd === dec_uops(i).bits.rd)
-      }).reduce(_ || _)
+      }).foldLeft(false.B)(_ || _)
 
       val inflight_hazards = inflight_uops.map(prev_uop => {
         val prev_rd = prev_uop.bits.rd
@@ -135,6 +149,13 @@ class Core(p: CoreParams) extends Module:
 
       h := dec_hazards || inflight_hazards
     })
+
+
+
+
+
+
+    ///////////////////////////////////////////////////////////
 
     // x0 is always 0
     rf(0) := 0.U
