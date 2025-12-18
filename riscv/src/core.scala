@@ -87,7 +87,7 @@ class Core(p: CoreParams) extends Module:
     val alu = Seq.fill(coreWidth)(Module(new ALU(ALUParams(XLEN))))
 
     for (i <- 0 until coreWidth) {
-      alu(i).io.fn  := ex_uops(i).bits.aluOp
+      alu(i).io.fn  := ex_uops(i).bits.ctrl.alu_op
       alu(i).io.in1 := ex_rs1_rf(i)
       alu(i).io.in2 := ex_rs2_rf(i)
 
