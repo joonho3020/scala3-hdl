@@ -1,6 +1,7 @@
 use hdl_sim::asm_parser::parse_asm_file;
 use hdl_sim::Dut;
 use riscv_sim::RefCore;
+use rvdasm::disassembler::Disassembler;
 use std::env;
 
 const RESET_PC: u64 = 0x80000000;
@@ -36,17 +37,29 @@ fn get_retire_info_1(dut: &Dut) -> RetireInfo {
     }
 }
 
+fn log_decoded_instruction(label: &str, instructions: &[u32], pc: u64, disasm: &Disassembler) {
+    let word = get_instruction_at_addr(instructions, pc);
+    match disasm.disassmeble_one(word) {
+        Some(decoded) => println!("{} PC=0x{:x} inst=0x{:08x} {:?}", label, pc, word, decoded),
+        None          => println!("{} PC=0x{:x} inst=0x{:08x} decode error", label, pc, word),
+    }
+}
+
 fn compare_retire_with_ref(
     retire: &RetireInfo,
     ref_result: &riscv_sim::StepResult,
     pipe: usize,
     cycle: usize,
+    instructions: &[u32],
+    disasm: &Disassembler
 ) -> bool {
     if retire.pc != ref_result.pc {
         println!(
             "MISMATCH at cycle {} pipe{}: PC mismatch: RTL=0x{:x}, Ref=0x{:x}",
             cycle, pipe, retire.pc, ref_result.pc
         );
+        log_decoded_instruction("RTL", instructions, retire.pc, disasm);
+        log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
         return false;
     }
 
@@ -64,7 +77,8 @@ fn compare_retire_with_ref(
                 "MISMATCH at cycle {} pipe{} PC=0x{:x}: wb_rd mismatch: RTL={}, Ref={}",
                 cycle, pipe, retire.pc, retire.wb_rd, ref_result.wb_rd
             );
-            println!("Ref {:?}", ref_result);
+            log_decoded_instruction("RTL", instructions, retire.pc, disasm);
+            log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
             return false;
         }
 
@@ -73,7 +87,8 @@ fn compare_retire_with_ref(
                 "MISMATCH at cycle {} pipe{} PC=0x{:x}: wb_data mismatch: RTL=0x{:x}, Ref=0x{:x}",
                 cycle, pipe, retire.pc, retire.wb_data, ref_result.wb_data
             );
-            println!("Ref {:?}", ref_result);
+            log_decoded_instruction("RTL", instructions, retire.pc, disasm);
+            log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
             return false;
         }
 
@@ -135,13 +150,15 @@ fn main() {
     let mut retired_count = 0;
     let mut mismatch_count = 0;
 
+    let disasm = Disassembler::new(rvdasm::disassembler::Xlen::XLEN64);
+
     for cycle in 0..300 {
         let retire_0 = get_retire_info_0(&dut);
         let retire_1 = get_retire_info_1(&dut);
 
         if retire_0.valid {
             let ref_result = ref_core.step();
-            if !compare_retire_with_ref(&retire_0, &ref_result, 0, cycle) {
+            if !compare_retire_with_ref(&retire_0, &ref_result, 0, cycle, &instructions, &disasm) {
                 mismatch_count += 1;
             }
             retired_count += 1;
@@ -149,7 +166,7 @@ fn main() {
 
         if retire_1.valid {
             let ref_result = ref_core.step();
-            if !compare_retire_with_ref(&retire_1, &ref_result, 1, cycle) {
+            if !compare_retire_with_ref(&retire_1, &ref_result, 1, cycle, &instructions, &disasm) {
                 mismatch_count += 1;
             }
             retired_count += 1;

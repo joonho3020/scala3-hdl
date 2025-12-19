@@ -6,6 +6,6 @@ build = "build.rs"
 
 [dependencies]
 riscv-sim = { path = "riscv-functional-sim/sim" }
-riscv-codec = { git = "https://github.com/RebelAndroid/riscv-codec.git" }
+rvdasm = { git = "https://github.com/iansseijelly/rvdasm.git" }
 
 [build-dependencies]

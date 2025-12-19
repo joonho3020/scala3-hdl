@@ -351,8 +351,8 @@ checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 name = "hdl-sim"
 version = "0.1.0"
 dependencies = [
- "riscv-codec",
  "riscv-sim",
+ "rvdasm",
 ]
 
 [[package]]
@@ -480,15 +480,6 @@ name = "libc"
 version = "0.2.178"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37c93d8daa9d8a012fd8ab92f088405fb202ea0b6ab73ee2482ae66af4f42091"
-
-[[package]]
-name = "litrs"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5e54036fe321fd421e10d732f155734c4e4afd610dd556d9a82833ab3ee0bed"
-dependencies = [
- "proc-macro2",
-]
 
 [[package]]
 name = "log"
@@ -640,22 +631,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
-name = "riscv-codec"
-version = "0.4.0"
-source = "git+https://github.com/RebelAndroid/riscv-codec.git#f9e924b9840a5b715c2478888b2d15202493dac7"
-dependencies = [
- "riscv-codec-proc-macros",
-]
-
-[[package]]
-name = "riscv-codec-proc-macros"
-version = "0.3.0"
-source = "git+https://github.com/RebelAndroid/riscv-codec.git#f9e924b9840a5b715c2478888b2d15202493dac7"
-dependencies = [
- "litrs",
-]
-
-[[package]]
 name = "riscv-sim"
 version = "0.1.0"
 dependencies = [
@@ -702,6 +677,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fad02996bfc73da3e301efe90b1837be9ed8f4a462b6ed410aa35d00381de89f"
 dependencies = [
  "twox-hash",
+]
+
+[[package]]
+name = "rvdasm"
+version = "0.2.6"
+source = "git+https://github.com/iansseijelly/rvdasm.git#ee77aadfc796ecde9fb48e17395437d185a37af1"
+dependencies = [
+ "once_cell",
+ "serde",
 ]
 
 [[package]]
