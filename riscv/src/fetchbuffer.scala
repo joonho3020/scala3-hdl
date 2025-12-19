@@ -44,6 +44,13 @@ class FetchBuffer(p: CoreParams, depth: Int) extends Module:
     val almost_full = Mux(enq_ptr >= deq_ptr,
                           (entries.U - (enq_ptr - deq_ptr)  <= p.coreWidth.U),
                           (deq_ptr - enq_ptr) <= p.coreWidth.U)
+
+    val valid_entries = Wire(UInt(log2Ceil(entries + 1).W))
+    valid_entries := Mux(enq_ptr >= deq_ptr,
+                            enq_ptr - deq_ptr,
+                            entries.U - (deq_ptr - enq_ptr))
+    dontTouch(valid_entries)
+
     val empty = enq_ptr === deq_ptr
     io.enq.ready := !almost_full || empty
 
@@ -77,7 +84,7 @@ class FetchBuffer(p: CoreParams, depth: Int) extends Module:
       val cur_ptr = deq_ptr + i.U
       val r = row(cur_ptr)
       val c = col(cur_ptr)
-      io.deq(i).valid := mem(r)(c).valid
+      io.deq(i).valid := mem(r)(c).valid && (i.U < valid_entries)
       io.deq(i).bits  := mem(r)(c).bits
     }
 

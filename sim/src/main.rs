@@ -98,11 +98,6 @@ fn compare_retire_with_ref(
 // log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
             return Some(MismatchType::WBDataMismatch);
         }
-
-        println!(
-            "PASS cycle {} pipe{}: PC=0x{:x} reg[{}] = 0x{:x}",
-            cycle, pipe, retire.pc, retire.wb_rd, retire.wb_data
-        );
     }
     None
 }

@@ -111,6 +111,7 @@ class ALU(p: ALUParams) extends Module with CacheableModule:
       is (FN_AND.EN.asUInt) { logic := io.in1 & io.in2 }
       default               { logic := 0.U             }
     }
+    dontTouch(logic)
 
     val slt =
       Mux(io.in1(xLen-1) === io.in2(xLen-1), io.adder_out(xLen-1),
@@ -123,12 +124,20 @@ class ALU(p: ALUParams) extends Module with CacheableModule:
     val sign_fill = Mux(sign_bit.asBool, ~(((1.U(xLen.W) << (xLen.U - shamt)) - 1.U) >> (xLen.U - shamt)), 0.U(xLen.W))
     val shright_arith = shright | sign_fill
 
-    val shout = Mux(io.fn === FN_SRA.EN.asUInt, shright_arith, shright)
     val shlout = io.in1 << shamt
 
-    val shift_out = Mux(io.fn === FN_SL.EN.asUInt, shlout, shout)
+    val shift_out = Wire(UInt(xLen.W))
+    switch (io.fn) {
+      is (FN_SL .EN.asUInt) { shift_out := shlout        }
+      is (FN_SR .EN.asUInt) { shift_out := shright       }
+      is (FN_SRA.EN.asUInt) { shift_out := shright_arith }
+      default               { shift_out := 0.U           }
+    }
+    dontTouch(shift_out)
 
-    val cmp_val = Mux(isCmp(io.fn) && slt.asBool, 1.U(xLen.W), 0.U(xLen.W))
+    val cmp_val = Wire(UInt(xLen.W))
+    cmp_val := Mux(isCmp(io.fn) && slt.asBool, 1.U(xLen.W), 0.U(xLen.W))
+    dontTouch(cmp_val)
 
     val shift_logic = cmp_val | logic | shift_out
 

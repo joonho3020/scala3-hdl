@@ -314,6 +314,8 @@ fn generate_rust_bindings(top: &str, signals: &Vec<Signal>, output_path: &str) -
 
 fn main() -> std::io::Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=test-outputs/chirrtl");
+    println!("cargo:rerun-if-changed=test-outputs/verilog");
 
     let sv_file_path =
         env::var("SV_FILE").unwrap_or_else(|_| "./test-outputs/verilog/Tile.sv".to_string());
