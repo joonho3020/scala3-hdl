@@ -193,7 +193,7 @@ fn main() {
             for i in 0..CACHE_LINE_WORDS {
                 let word_addr = line_base_addr + (i as u64 * WORD_SIZE);
                 let insn = get_instruction_at_addr(&instructions, word_addr) as u64;
-                println!("Pushing inst 0x{:x}", insn);
+// println!("Pushing inst 0x{:x}", insn);
                 match i {
                     0 => dut.poke_io_mem_resp_bits_lineWords_0(insn),
                     1 => dut.poke_io_mem_resp_bits_lineWords_1(insn),

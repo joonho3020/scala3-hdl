@@ -134,7 +134,7 @@ object CtrlSignals:
       is(SLTU ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, RS2.EN, FN_SLTU.EN) }
       is(SLTIU) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN, FN_SLTU.EN) }
       is(SLL  ) { set(ctrl, Y, Y,        X,         RS1.EN, RS2.EN,   FN_SL.EN) }
-      is(SLLI ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN, FN_SLTU.EN) }
+      is(SLLI ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN,   FN_SL.EN) }
       is(SRL  ) { set(ctrl, Y, Y,        X,         RS1.EN, RS2.EN,   FN_SR.EN) }
       is(SRLI ) { set(ctrl, Y, Y, IMM_I.EN,         RS1.EN, IMM.EN,   FN_SR.EN) }
       is(SRA  ) { set(ctrl, Y, Y,        X,         RS1.EN, RS2.EN,  FN_SRA.EN) }
