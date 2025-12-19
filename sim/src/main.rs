@@ -1,7 +1,11 @@
+use hdl_sim::asm_parser::parse_asm_file;
 use hdl_sim::Dut;
 use riscv_sim::RefCore;
+use std::env;
 
 const RESET_PC: u64 = 0x80000000;
+const CACHE_LINE_WORDS: usize = 16;
+const WORD_SIZE: u64 = 4;
 
 struct RetireInfo {
     valid: bool,
@@ -84,28 +88,38 @@ fn compare_retire_with_ref(
     true
 }
 
+fn get_instruction_at_addr(instructions: &[u32], addr: u64) -> u32 {
+    if addr < RESET_PC {
+        return 0x00000013; // NOP for addresses below RESET_PC
+    }
+    let offset = (addr - RESET_PC) / WORD_SIZE;
+    if offset as usize >= instructions.len() {
+        0x00000013 // NOP for addresses beyond instruction memory
+    } else {
+        instructions[offset as usize]
+    }
+}
+
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    let asm_file = if args.len() > 1 {
+        args[1].clone()
+    } else {
+        "tests/alu_test.asm".to_string()
+    };
+
+    println!("Loading instructions from: {}", asm_file);
+    let instructions = match parse_asm_file(&asm_file) {
+        Ok(insns) => insns,
+        Err(e) => {
+            eprintln!("Failed to parse assembly file: {}", e);
+            std::process::exit(1);
+        }
+    };
+    println!("Loaded {} instructions", instructions.len());
+
     let mut dut = Dut::new();
     dut.enable_trace();
-
-    let instructions: Vec<u32> = vec![
-        0x003282b3, // ADD x5, x5, x3  -> 5 + 3 = 8
-        0x40450133, // SUB x2, x10, x4 -> 10 - 4 = 6
-        0x007781b3, // ADD x3, x15, x7 -> 15 + 7 = 22
-        0x408a0233, // SUB x4, x20, x8 -> 20 - 8 = 12
-        0x00208133, // ADD x2, x1, x2  -> 1 + 2 = 3
-        0x40310233, // SUB x4, x2, x3  -> 2 - 3 = -1 (0xFFFFFFFF)
-        0x00000013, // NOP (ADDI x0, x0, 0)
-        0x00000013, // NOP
-        0x00000013, // NOP
-        0x00000013, // NOP
-        0x00000013, // NOP
-        0x00000013, // NOP
-        0x00000013, // NOP
-        0x00000013, // NOP
-        0x00000013, // NOP
-        0x00000013, // NOP
-    ];
 
     let mut ref_core = RefCore::new(RESET_PC, 1 << 20);
     ref_core.load_instructions(RESET_PC, &instructions);
@@ -116,7 +130,7 @@ fn main() {
 
     dut.reset();
 
-    println!("Starting Group 1 instruction tests with reference core comparison...\n");
+    println!("Starting co-simulation with reference core comparison...\n");
 
     let mut pending_mem_req = false;
     let mut pending_mem_addr = 0u64;
@@ -149,12 +163,10 @@ fn main() {
                 cycle, pending_mem_addr
             );
 
-            for i in 0..16 {
-                let insn = if i < instructions.len() {
-                    instructions[i] as u64
-                } else {
-                    0x00000013u64
-                };
+            let line_base_addr = (pending_mem_addr - RESET_PC) & !(((CACHE_LINE_WORDS * WORD_SIZE as usize) - 1) as u64);
+            for i in 0..CACHE_LINE_WORDS {
+                let word_addr = line_base_addr + (i as u64 * WORD_SIZE);
+                let insn = get_instruction_at_addr(&instructions, word_addr) as u64;
                 match i {
                     0 => dut.poke_io_mem_resp_bits_lineWords_0(insn),
                     1 => dut.poke_io_mem_resp_bits_lineWords_1(insn),
