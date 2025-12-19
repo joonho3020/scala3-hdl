@@ -4,6 +4,3 @@
 [submodule "chisel-examples"]
 	path = chisel-examples
 	url = git@github.com:joonho3020/chisel-examples.git
-[submodule "sim/riscv-functional-sim"]
-	path = sim/riscv-functional-sim
-	url = git@github.com:euphoric-hardware/riscv-functional-sim.git
