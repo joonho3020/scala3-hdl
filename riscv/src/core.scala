@@ -4,29 +4,33 @@ import hdl._
 import CoreConstants.{ALUOp1, ALUOp2}
 
 case class RetireInfoIf(
-  wb_valid: Vec[Bool],
-  wb_data: Vec[UInt],
-  wb_rd: Vec[UInt],
+  valid: Bool,
+  pc: UInt,
+  wb_valid: Bool,
+  wb_data: UInt,
+  wb_rd: UInt,
 ) extends Bundle[RetireInfoIf]
 
 object RetireInfoIf:
   def apply(p: CoreParams): RetireInfoIf =
     RetireInfoIf(
-      wb_valid = Output(Vec.fill(p.coreWidth)(Bool())),
-      wb_data  = Output(Vec.fill(p.coreWidth)(UInt(p.xlenBits.W))),
-      wb_rd    = Output(Vec.fill(p.coreWidth)(UInt(p.xlenBits.W))),
+      valid    = Output(Bool()),
+      pc       = Output(UInt(p.pcBits.W)),
+      wb_valid = Output(Bool()),
+      wb_data  = Output(UInt(p.xlenBits.W)),
+      wb_rd    = Output(UInt(p.xlenBits.W)),
     )
 
 case class CoreIf(
   fetch_uops: Vec[Decoupled[UOp]],
-  retire_info: RetireInfoIf
+  retire_info: Vec[RetireInfoIf]
 ) extends Bundle[CoreIf]
 
 object CoreIf:
   def apply(p: CoreParams): CoreIf =
     CoreIf(
       fetch_uops    = Flipped(Vec.fill(p.coreWidth)(Decoupled(UOp(p)))),
-      retire_info   = RetireInfoIf(p)
+      retire_info   =         Vec.fill(p.coreWidth)(RetireInfoIf(p))
     )
 
 class Core(p: CoreParams) extends Module:
@@ -36,9 +40,13 @@ class Core(p: CoreParams) extends Module:
   val coreWidth = p.coreWidth
 
   body {
-    io.retire_info.wb_valid.foreach(_ := false.B)
-    io.retire_info.wb_data.foreach(_ := DontCare)
-    io.retire_info.wb_rd.foreach(_ := DontCare)
+    io.retire_info.foreach(ri => {
+      ri.valid := false.B
+      ri.pc := DontCare
+      ri.wb_valid := DontCare
+      ri.wb_data := DontCare
+      ri.wb_rd := DontCare
+    })
 
     // -----------------------------------------------------------------------
     // Stage 0: Decode & read register operands
@@ -167,9 +175,11 @@ class Core(p: CoreParams) extends Module:
       when (wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen) {
         rf(wb_uops(i).bits.rd) := wb_wdata(i)
 
-        io.retire_info.wb_valid(i) := true.B
-        io.retire_info.wb_data(i)  := wb_wdata(i)
-        io.retire_info.wb_rd(i)    := wb_uops(i).bits.rd
+        io.retire_info(i).valid    := true.B
+        io.retire_info(i).pc       := wb_uops(i).bits.pc
+        io.retire_info(i).wb_valid := wb_uops(i).bits.ctrl.rd_wen
+        io.retire_info(i).wb_data  := wb_wdata(i)
+        io.retire_info(i).wb_rd    := wb_uops(i).bits.rd
       }
     }
 
