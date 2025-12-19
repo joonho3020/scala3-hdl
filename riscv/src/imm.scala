@@ -17,7 +17,11 @@ object ImmGenIO:
       out = Output(UInt(xlen.W))
     )
 
-class ImmGen(xlen: Int) extends Module:
+class ImmGen(xlen: Int) extends Module with CacheableModule:
+  type ElabParams = Int
+  given stableHashElabParams: StableHash[Int] = summon[StableHash[Int]]
+  def elabParams: Int = xlen
+  given Module = this
 
   val io = IO(ImmGenIO(xlen))
   body:

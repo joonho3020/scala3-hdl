@@ -3,6 +3,18 @@ package riscv
 import hdl._
 import CoreConstants.{ALUOp1, ALUOp2}
 
+case class RedirectIf(
+  valid:  Bool,
+  target: UInt,
+) extends Bundle[RedirectIf]
+
+object RedirectIf:
+  def apply(p: CoreParams): RedirectIf =
+    RedirectIf(
+      valid  = Output(Bool()),
+      target = Output(UInt(p.pcBits.W)),
+    )
+
 case class RetireInfoIf(
   valid: Bool,
   pc: UInt,
@@ -23,6 +35,7 @@ object RetireInfoIf:
 
 case class CoreIf(
   fetch_uops: Vec[Decoupled[UOp]],
+  redirect: RedirectIf,
   retire_info: Vec[RetireInfoIf]
 ) extends Bundle[CoreIf]
 
@@ -30,10 +43,11 @@ object CoreIf:
   def apply(p: CoreParams): CoreIf =
     CoreIf(
       fetch_uops    = Flipped(Vec.fill(p.coreWidth)(Decoupled(UOp(p)))),
-      retire_info   =         Vec.fill(p.coreWidth)(RetireInfoIf(p))
+      redirect      = RedirectIf(p),
+      retire_info   = Vec.fill(p.coreWidth)(RetireInfoIf(p))
     )
 
-class Core(p: CoreParams) extends Module:
+class Core(p: CoreParams) extends Module with CoreCacheable(p):
   val io = IO(CoreIf(p))
 
   val XLEN = p.xlenBits
@@ -47,6 +61,12 @@ class Core(p: CoreParams) extends Module:
       ri.wb_data := DontCare
       ri.wb_rd := DontCare
     })
+
+    val dec_clear = WireInit(false.B)
+    val  ex_clear = WireInit(false.B)
+
+    dontTouch(dec_clear)
+    dontTouch( ex_clear)
 
     // -----------------------------------------------------------------------
     // Stage 0: Decode & read register operands
@@ -91,10 +111,9 @@ class Core(p: CoreParams) extends Module:
     val ex_rs1_rf  = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
     val ex_rs2_rf  = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
     val ex_imm     = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
-    val ex_alu_out = Wire(Vec.fill(coreWidth)(UInt(XLEN.W)))
 
     for (i <- 0 until coreWidth) {
-      when (dec_uops(i).valid && dec_ready(i)) {
+      when (dec_uops(i).valid && dec_ready(i) && !ex_clear) {
         ex_uops(i).valid := true.B
         ex_uops(i).bits  := dec_uops(i).bits
 
@@ -139,27 +158,85 @@ class Core(p: CoreParams) extends Module:
         default       { alu(i).io.in2 := DontCare     }
       }
 
-      ex_alu_out(i) := alu(i).io.out
     }
 
     dontTouch(ex_uops)
     dontTouch(ex_rs1_rf)
     dontTouch(ex_rs2_rf)
     dontTouch(ex_imm)
-    dontTouch(ex_alu_out)
+
     // -----------------------------------------------------------------------
     // Stage 2: Mem
     // -----------------------------------------------------------------------
     val mem_uops    = Reg(Vec.fill(coreWidth)(Valid(UOp(p))))
     val mem_alu_out = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
+    val mem_alu_cmp_out = Reg(Vec.fill(coreWidth)(Bool()))
+    val mem_imm     = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
 
     for (i <- 0 until coreWidth) {
-      mem_uops(i) := ex_uops(i)
-      mem_alu_out(i) := ex_alu_out(i)
+      mem_uops(i).valid := ex_uops(i).valid && !ex_clear
+      mem_uops(i).bits  := ex_uops(i).bits
+      mem_uops(i).bits.taken := alu(i).io.cmp_out
+
+      mem_alu_out(i)     := alu(i).io.out
+      mem_alu_cmp_out(i) := alu(i).io.cmp_out
+      mem_imm(i) := ex_imm(i)
     }
 
+    val mem_branch_target = Wire(Vec.fill(coreWidth)(UInt(p.pcBits.W)))
+    val mem_cfi_target    = Wire(Vec.fill(coreWidth)(UInt(p.pcBits.W)))
+    val mem_cfi_taken     = Wire(Vec.fill(coreWidth)(Bool()))
+
+    for (i <- 0 until coreWidth) {
+      val pc   = mem_uops(i).bits.pc
+      val ctrl = mem_uops(i).bits.ctrl
+
+      mem_branch_target(i) := (pc + mem_imm(i)(p.pcBits - 1, 0))
+
+      val jalr_target  = mem_alu_out(i)(p.pcBits - 1, 0)
+      val jal_target = Cat(Seq(mem_alu_out(i)(p.pcBits - 1, 1), 0.U(1.W)))
+
+      mem_cfi_target(i) := Mux(ctrl.jal,  jal_target,
+                            Mux(ctrl.jalr, jalr_target,
+                                           mem_branch_target(i)))
+
+      val branch_taken = ctrl.br && mem_alu_cmp_out(i)
+      mem_cfi_taken(i) := mem_uops(i).valid && (ctrl.jal || ctrl.jalr || branch_taken)
+    }
+
+    dontTouch(mem_branch_target)
+    dontTouch(mem_cfi_target)
+    dontTouch(mem_cfi_taken)
+
+    val mem_redirect_valid = mem_cfi_taken.reduce(_ || _)
+    val mem_cfi_idx = Wire(UInt(log2Ceil(coreWidth + 1).W))
+    mem_cfi_idx := PriorityEncoder(Cat(mem_cfi_target.reverse))
+    dontTouch(mem_cfi_idx)
+
+    io.redirect.valid  := mem_redirect_valid
+    io.redirect.target := mem_cfi_target(mem_cfi_idx)
+    dontTouch(io.redirect)
+
+    when (mem_redirect_valid) {
+      dec_clear := true.B
+       ex_clear := true.B
+    }
+
+    val mem_flush = Wire(Vec.fill(coreWidth)(Bool()))
+    for (i <- 0 until coreWidth) {
+      val earlier_cfi_taken = if (i == 0) false.B else mem_cfi_taken.take(i).reduce(_ || _)
+      mem_flush(i) := earlier_cfi_taken
+    }
+    dontTouch(mem_flush)
+
+    val mem_wdata = Wire(Vec.fill(coreWidth)(UInt(XLEN.W)))
+    for (i <- 0 until coreWidth) {
+      val is_link = mem_uops(i).bits.ctrl.jal || mem_uops(i).bits.ctrl.jalr
+      mem_wdata(i) := Mux(is_link, mem_uops(i).bits.pc + 4.U, mem_alu_out(i))
+    }
     dontTouch(mem_uops)
-    dontTouch(mem_alu_out)
+    dontTouch(mem_wdata)
+
     // -----------------------------------------------------------------------
     // Stage 3: Writeback
     // -----------------------------------------------------------------------
@@ -168,7 +245,8 @@ class Core(p: CoreParams) extends Module:
 
     for (i <- 0 until coreWidth) {
       wb_uops(i)  := mem_uops(i)
-      wb_wdata(i) := mem_alu_out(i)
+      wb_uops(i).valid := mem_uops(i).valid && !mem_flush(i)
+      wb_wdata(i) := mem_wdata(i)
     }
 
     for (i <- 0 until coreWidth) {
@@ -189,14 +267,17 @@ class Core(p: CoreParams) extends Module:
 
     val inflight_uops: Seq[Valid[UOp]] = ex_uops.toSeq ++ mem_uops.toSeq ++ wb_uops.toSeq
 
-    // No bypass network for now
     dec_hazards.zipWithIndex.foreach((h, i) => {
-      val dec_hazards = dec_uops.take(i).map(prev_uop => {
+      val dec_hazards_local = dec_uops.take(i).map(prev_uop => {
         val prev_rd = prev_uop.bits.rd
         prev_uop.valid &&
         (prev_rd === dec_uops(i).bits.rs1 ||
          prev_rd === dec_uops(i).bits.rs2 ||
          prev_rd === dec_uops(i).bits.rd)
+      }).foldLeft(false.B)(_ || _)
+
+      val dec_prev_has_cfi = dec_uops.take(i).map(prev_uop => {
+        prev_uop.valid && prev_uop.bits.ctrl.is_cfi
       }).foldLeft(false.B)(_ || _)
 
       val inflight_hazards = inflight_uops.map(prev_uop => {
@@ -206,7 +287,7 @@ class Core(p: CoreParams) extends Module:
          prev_rd === dec_uops(i).bits.rs2)
       }).reduce(_ || _)
 
-      h := dec_hazards || inflight_hazards
+      h := dec_hazards_local || inflight_hazards || dec_prev_has_cfi
     })
 
     ///////////////////////////////////////////////////////////

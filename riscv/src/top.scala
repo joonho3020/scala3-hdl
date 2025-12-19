@@ -25,6 +25,7 @@ class Tile(p: CoreParams) extends Module:
 
     val core = Module(new Core(p))
     core.io.fetch_uops := frontend.io.uops
+    frontend.io.redirect := core.io.redirect
 
     io.retire_info := core.io.retire_info
   }

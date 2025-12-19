@@ -29,25 +29,32 @@ object ICacheIf:
 case class FetchBundle(
   pc: UInt,
   insts: Vec[Valid[UInt]],
+  next_pc: Valid[UInt],
 ) extends Bundle[FetchBundle]
 
 object FetchBundle:
   def apply(p: CoreParams): FetchBundle =
     FetchBundle(
       pc = UInt(p.xlenBits.W),
-      insts = Vec(Seq.fill(p.coreWidth)(Valid(UInt(32.W))))
+      insts = Vec(Seq.fill(p.coreWidth)(Valid(UInt(32.W)))),
+      next_pc = Valid(UInt(p.pcBits.W))
     )
 
-case class FrontendIf(mem: MagicMemIf, uops: Vec[Decoupled[UOp]]) extends Bundle[FrontendIf]
+case class FrontendIf(
+  mem: MagicMemIf,
+  redirect: RedirectIf,
+  uops: Vec[Decoupled[UOp]]
+) extends Bundle[FrontendIf]
 
 object FrontendIf:
   def apply(p: CoreParams): FrontendIf =
     FrontendIf(
       mem = MagicMemIf(p),
+      redirect = Flipped(RedirectIf(p)),
       uops = Vec.fill(p.coreWidth)(Decoupled(UOp(p)))
     )
 
-class Frontend(p: CoreParams) extends Module:
+class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
   val io = IO(FrontendIf(p))
   body {
     dontTouch(io)
@@ -119,6 +126,10 @@ class Frontend(p: CoreParams) extends Module:
       inst_val.bits  := ic.s2_insts(idx)
     })
 
+    // TODO: use this to add predicted branch target on a predicted-taken branch
+    fetch_bundle.next_pc.valid := false.B
+    fetch_bundle.next_pc.bits  := DontCare
+
     ic.s2_kill := f2_clear
 
     val fb = Module(new FetchBuffer(p, depth = 4))
@@ -134,19 +145,24 @@ class Frontend(p: CoreParams) extends Module:
       fb_uop.ready := io_uop.ready
     })
 
-
     when (s2_valid && !ic.s2_valid) {
-      // Cache miss, replay PC and flush pipeline
       s0_vpc := s2_vpc
       s0_valid := true.B
       f1_clear := true.B
     } .elsewhen (s2_valid && ic.s2_valid && !f3_ready) {
-      // Fetch buffer full, redirect
       s0_vpc := s2_vpc
       s0_valid := true.B
       f1_clear := true.B
     } .elsewhen (s1_valid && ic.s2_valid) {
       // Cache hit
+    }
+
+    when (io.redirect.valid) {
+      s0_vpc := io.redirect.target
+      s0_valid := true.B
+      f1_clear := true.B
+      f2_clear := true.B
+      fb.io.clear := true.B
     }
 
     val jump_to_reset = RegInit(true.B)

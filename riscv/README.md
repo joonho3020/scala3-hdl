@@ -72,8 +72,6 @@ D E M W
 | SRA | R | 0110011 (0x33) | 101 | 0100000 | - |
 | SRAI | I | 0010011 (0x13) | 101 | 0100000 | shamt[5:0] |
 
-
-
 ### Group 2: Control flow
 
 | Instruction | Format | Opcode | funct3 | funct7 | Notes |

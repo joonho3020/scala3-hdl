@@ -16,7 +16,7 @@ object FetchBufferIO:
       clear = Input(Bool())
     )
 
-class FetchBuffer(p: CoreParams, depth: Int) extends Module:
+class FetchBuffer(p: CoreParams, depth: Int) extends Module with CoreCacheable(p):
   val io = IO(FetchBufferIO(p))
   body {
     def row(ptr: UInt): UInt =

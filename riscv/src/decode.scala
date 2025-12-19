@@ -14,7 +14,7 @@ object DecoderIO:
       deq =         Vec.fill(p.coreWidth)(Decoupled(UOp(p)))
     )
 
-class Decoder(p: CoreParams) extends Module:
+class Decoder(p: CoreParams) extends Module with CoreCacheable(p):
   val io = IO(DecoderIO(p))
   body {
     import ALUParams.Opcode._
@@ -34,6 +34,7 @@ class Decoder(p: CoreParams) extends Module:
       deq_uop.rs1    := inst(19, 15)
       deq_uop.rs2    := inst(24, 20)
       deq_uop.rd     := inst(11, 7)
+      deq_uop.taken  := false.B
       CtrlSignals.decode(deq_uop.ctrl, enq_uop.inst)
     })
   }
