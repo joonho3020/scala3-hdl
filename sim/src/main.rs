@@ -9,6 +9,13 @@ const CACHE_LINE_WORDS: usize = 16;
 const WORD_SIZE: u64 = 4;
 
 #[derive(Debug)]
+enum MismatchType {
+    PCMismatch,
+    WBDstMismatch,
+    WBDataMismatch,
+}
+
+#[derive(Debug)]
 struct RetireInfo {
     valid: bool,
     pc: u64,
@@ -52,15 +59,15 @@ fn compare_retire_with_ref(
     cycle: usize,
     instructions: &[u32],
     disasm: &Disassembler
-) -> bool {
+) -> Option<MismatchType> {
     if retire.pc != ref_result.pc {
-        println!(
-            "MISMATCH at cycle {} pipe{}: PC mismatch: RTL=0x{:x}, Ref=0x{:x}",
-            cycle, pipe, retire.pc, ref_result.pc
-        );
-        log_decoded_instruction("RTL", instructions, retire.pc, disasm);
-        log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
-        return false;
+// println!(
+// "MISMATCH at cycle {} pipe{}: PC mismatch: RTL=0x{:x}, Ref=0x{:x}",
+// cycle, pipe, retire.pc, ref_result.pc
+// );
+// log_decoded_instruction("RTL", instructions, retire.pc, disasm);
+// log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
+        return Some(MismatchType::PCMismatch);
     }
 
 // if retire.wb_valid != ref_result.wb_valid {
@@ -73,23 +80,23 @@ fn compare_retire_with_ref(
 
     if retire.wb_valid {
         if retire.wb_rd != ref_result.wb_rd {
-            println!(
-                "MISMATCH at cycle {} pipe{} PC=0x{:x}: wb_rd mismatch: RTL={}, Ref={}",
-                cycle, pipe, retire.pc, retire.wb_rd, ref_result.wb_rd
-            );
-            log_decoded_instruction("RTL", instructions, retire.pc, disasm);
-            log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
-            return false;
+// println!(
+// "MISMATCH at cycle {} pipe{} PC=0x{:x}: wb_rd mismatch: RTL={}, Ref={}",
+// cycle, pipe, retire.pc, retire.wb_rd, ref_result.wb_rd
+// );
+// log_decoded_instruction("RTL", instructions, retire.pc, disasm);
+// log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
+            return Some(MismatchType::WBDstMismatch);
         }
 
         if retire.wb_data != ref_result.wb_data {
-            println!(
-                "MISMATCH at cycle {} pipe{} PC=0x{:x}: wb_data mismatch: RTL=0x{:x}, Ref=0x{:x}",
-                cycle, pipe, retire.pc, retire.wb_data, ref_result.wb_data
-            );
-            log_decoded_instruction("RTL", instructions, retire.pc, disasm);
-            log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
-            return false;
+// println!(
+// "MISMATCH at cycle {} pipe{} PC=0x{:x}: wb_data mismatch: RTL=0x{:x}, Ref=0x{:x}",
+// cycle, pipe, retire.pc, retire.wb_data, ref_result.wb_data
+// );
+// log_decoded_instruction("RTL", instructions, retire.pc, disasm);
+// log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
+            return Some(MismatchType::WBDataMismatch);
         }
 
         println!(
@@ -97,8 +104,7 @@ fn compare_retire_with_ref(
             cycle, pipe, retire.pc, retire.wb_rd, retire.wb_data
         );
     }
-
-    true
+    None
 }
 
 fn get_instruction_at_addr(instructions: &[u32], addr: u64) -> u32 {
@@ -158,7 +164,12 @@ fn main() {
 
         if retire_0.valid {
             let ref_result = ref_core.step();
-            if !compare_retire_with_ref(&retire_0, &ref_result, 0, cycle, &instructions, &disasm) {
+            if let Some(mismatch) = compare_retire_with_ref(&retire_0, &ref_result, 0, cycle, &instructions, &disasm) {
+                println!("Mismatch Type {:?}", mismatch);
+                println!("RefCore {:x?}", ref_result);
+                println!("RTL     {:x?}", retire_0);
+                log_decoded_instruction("", &instructions, retire_0.pc, &disasm);
+                println!();
                 mismatch_count += 1;
             }
             retired_count += 1;
@@ -166,7 +177,12 @@ fn main() {
 
         if retire_1.valid {
             let ref_result = ref_core.step();
-            if !compare_retire_with_ref(&retire_1, &ref_result, 1, cycle, &instructions, &disasm) {
+            if let Some(mismatch) = compare_retire_with_ref(&retire_1, &ref_result, 1, cycle, &instructions, &disasm) {
+                println!("Mismatch Type {:?}", mismatch);
+                println!("RefCore {:x?}", ref_result);
+                println!("RTL     {:x?}", retire_1);
+                log_decoded_instruction("", &instructions, retire_0.pc, &disasm);
+                println!();
                 mismatch_count += 1;
             }
             retired_count += 1;
