@@ -4,14 +4,14 @@ import hdl._
 
 case class TileIO(
   mem: MagicMemIf,
-  retire_info: RetireInfoIf
+  retire_info: Vec[RetireInfoIf]
 ) extends Bundle[TileIO]
 
 object TileIO:
   def apply(p: CoreParams): TileIO =
     TileIO(
       mem = MagicMemIf(p),
-      retire_info = RetireInfoIf(p)
+      retire_info = Vec.fill(p.coreWidth)(RetireInfoIf(p))
     )
 
 class Tile(p: CoreParams) extends Module:
