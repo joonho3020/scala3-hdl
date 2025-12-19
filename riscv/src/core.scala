@@ -191,14 +191,9 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       val pc   = mem_uops(i).bits.pc
       val ctrl = mem_uops(i).bits.ctrl
 
+      val jump_target = mem_alu_out(i)(p.pcBits - 1, 0)
       mem_branch_target(i) := (pc + mem_imm(i)(p.pcBits - 1, 0))
-
-      val jalr_target  = mem_alu_out(i)(p.pcBits - 1, 0)
-      val jal_target = Cat(Seq(mem_alu_out(i)(p.pcBits - 1, 1), 0.U(1.W)))
-
-      mem_cfi_target(i) := Mux(ctrl.jal,  jal_target,
-                            Mux(ctrl.jalr, jalr_target,
-                                           mem_branch_target(i)))
+      mem_cfi_target(i) := Mux(ctrl.jal || ctrl.jalr,  jump_target, mem_branch_target(i))
 
       val branch_taken = ctrl.br && mem_alu_cmp_out(i)
       mem_cfi_taken(i) := mem_uops(i).valid && (ctrl.jal || ctrl.jalr || branch_taken)
@@ -210,7 +205,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     val mem_redirect_valid = mem_cfi_taken.reduce(_ || _)
     val mem_cfi_idx = Wire(UInt(log2Ceil(coreWidth + 1).W))
-    mem_cfi_idx := PriorityEncoder(Cat(mem_cfi_target.reverse))
+    mem_cfi_idx := PriorityEncoder(Cat(mem_cfi_taken.reverse))
     dontTouch(mem_cfi_idx)
 
     io.redirect.valid  := mem_redirect_valid
@@ -252,13 +247,15 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     for (i <- 0 until coreWidth) {
       when (wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen) {
         rf(wb_uops(i).bits.rd) := wb_wdata(i)
-
-        io.retire_info(i).valid    := true.B
-        io.retire_info(i).pc       := wb_uops(i).bits.pc
-        io.retire_info(i).wb_valid := wb_uops(i).bits.ctrl.rd_wen
-        io.retire_info(i).wb_data  := wb_wdata(i)
-        io.retire_info(i).wb_rd    := wb_uops(i).bits.rd
       }
+    }
+
+    for (i <- 0 until coreWidth) {
+      io.retire_info(i).valid    := wb_uops(i).valid
+      io.retire_info(i).pc       := wb_uops(i).bits.pc
+      io.retire_info(i).wb_valid := wb_uops(i).bits.ctrl.rd_wen
+      io.retire_info(i).wb_data  := wb_wdata(i)
+      io.retire_info(i).wb_rd    := wb_uops(i).bits.rd
     }
 
     dontTouch(wb_uops)
