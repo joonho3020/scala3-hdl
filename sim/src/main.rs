@@ -119,7 +119,7 @@ fn main() {
     let asm_file = if args.len() > 1 {
         args[1].clone()
     } else {
-        "tests/alu_test.asm".to_string()
+        "tests/alu_test.hex".to_string()
     };
 
     println!("Loading instructions from: {}", asm_file);
@@ -160,10 +160,10 @@ fn main() {
         if retire_0.valid {
             let ref_result = ref_core.step();
             if let Some(mismatch) = compare_retire_with_ref(&retire_0, &ref_result, 0, cycle, &instructions, &disasm) {
-                println!("Mismatch Type {:?}", mismatch);
-                println!("RefCore {:x?}", ref_result);
-                println!("RTL     {:x?}", retire_0);
-                log_decoded_instruction("", &instructions, retire_0.pc, &disasm);
+                println!("Cycle: {} {:?}", cycle, mismatch);
+                println!("- RefCore {:x?}", ref_result);
+                println!("- RTL     {:x?}", retire_0);
+                log_decoded_instruction("-", &instructions, retire_0.pc, &disasm);
                 println!();
                 mismatch_count += 1;
             }
@@ -173,10 +173,10 @@ fn main() {
         if retire_1.valid {
             let ref_result = ref_core.step();
             if let Some(mismatch) = compare_retire_with_ref(&retire_1, &ref_result, 1, cycle, &instructions, &disasm) {
-                println!("Mismatch Type {:?}", mismatch);
-                println!("RefCore {:x?}", ref_result);
-                println!("RTL     {:x?}", retire_1);
-                log_decoded_instruction("", &instructions, retire_0.pc, &disasm);
+                println!("Cycle: {} {:?}", cycle, mismatch);
+                println!("- RefCore {:x?}", ref_result);
+                println!("- RTL     {:x?}", retire_1);
+                log_decoded_instruction("-", &instructions, retire_1.pc, &disasm);
                 println!();
                 mismatch_count += 1;
             }
