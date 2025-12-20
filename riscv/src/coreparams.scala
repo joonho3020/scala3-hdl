@@ -8,6 +8,12 @@ case class ICacheParams(
   cacheLineBytes: Int = 64
 ) derives StableHash
 
+case class BPUParams(
+  bhtEntries: Int = 128,
+  btbEntries: Int = 32,
+  rasEntries: Int = 8
+) derives StableHash
+
 case class CoreParams(
   pcBits: Int,
   xlenBits: Int,
@@ -15,7 +21,8 @@ case class CoreParams(
   icacheFetchBytes: Int,
   instBytes: Int = 4,
   ic: ICacheParams,
-  aluPipes: Int
+  aluPipes: Int,
+  bpu: BPUParams = BPUParams()
 ) derives StableHash:
   def xlenBytes: Int = xlenBits / 8
 

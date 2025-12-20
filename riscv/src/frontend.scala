@@ -43,7 +43,8 @@ object FetchBundle:
 case class FrontendIf(
   mem: MagicMemIf,
   redirect: RedirectIf,
-  uops: Vec[Decoupled[UOp]]
+  uops: Vec[Decoupled[UOp]],
+  bpu_update: Valid[BPUUpdate]
 ) extends Bundle[FrontendIf]
 
 object FrontendIf:
@@ -51,13 +52,21 @@ object FrontendIf:
     FrontendIf(
       mem = MagicMemIf(p),
       redirect = Flipped(RedirectIf(p)),
-      uops = Vec.fill(p.coreWidth)(Decoupled(UOp(p)))
+      uops = Vec.fill(p.coreWidth)(Decoupled(UOp(p))),
+      bpu_update = Flipped(Valid(BPUUpdate(p)))
     )
 
 class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
   val io = IO(FrontendIf(p))
   body {
     dontTouch(io)
+
+    val bpu = Module(new BranchPredictor(p))
+
+    bpu.io.flush := io.redirect.valid
+    bpu.io.update := io.bpu_update
+    bpu.io.req.valid := false.B
+    bpu.io.req.bits.pc := 0.U(p.pcBits.W)
 
     val f3_ready = Wire(Bool())
 
@@ -97,8 +106,15 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     ic.s1_paddr.bits  := s1_vpc // no virtual memory for now
     ic.s1_kill := f1_clear
 
+    bpu.io.req.valid := s1_valid && !f1_clear
+    bpu.io.req.bits.pc := s1_vpc
+
+    val f1_next_fetch = p.nextFetch(s1_vpc)
+    val f1_pred_taken = bpu.io.resp.valid && bpu.io.resp.bits.hit && bpu.io.resp.bits.taken
+    val f1_pred_target = Mux(f1_pred_taken, bpu.io.resp.bits.target, f1_next_fetch)
+
     when (s1_valid) {
-      s0_vpc := p.nextFetch(s1_vpc) // Always not-taken
+      s0_vpc := f1_pred_target
       s0_valid := true.B
     }
 
@@ -109,6 +125,8 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     val s2_valid = RegInit(false.B)
     val s2_fetch_mask = Wire(UInt())
     val f2_clear = WireInit(false.B)
+    val s2_pred_valid = RegNext(s1_valid && !f1_clear && f1_pred_taken)
+    val s2_pred_target = RegNext(f1_pred_target)
 
     s2_valid := s1_valid && !f1_clear
     s2_fetch_mask := p.fetchMask(s2_vpc)
@@ -127,8 +145,8 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     })
 
     // TODO: use this to add predicted branch target on a predicted-taken branch
-    fetch_bundle.next_pc.valid := false.B
-    fetch_bundle.next_pc.bits  := DontCare
+    fetch_bundle.next_pc.valid := s2_valid && s2_pred_valid
+    fetch_bundle.next_pc.bits  := s2_pred_target
 
     ic.s2_kill := f2_clear
 
