@@ -117,8 +117,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
         ex_uops(i).valid := true.B
         ex_uops(i).bits  := dec_uops(i).bits
 
-        ex_rs1_rf(i) := Mux(dec_uops(i).bits.rd === 0.U, 0.U, rf(dec_uops(i).bits.rs1))
-        ex_rs2_rf(i) := Mux(dec_uops(i).bits.rd === 0.U, 0.U, rf(dec_uops(i).bits.rs2))
+        ex_rs1_rf(i) := rf(dec_uops(i).bits.rs1)
+        ex_rs2_rf(i) := rf(dec_uops(i).bits.rs2)
         ex_imm(i)    := dec_imms(i)
       } .otherwise {
         ex_uops(i).valid := false.B
