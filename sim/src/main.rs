@@ -2,11 +2,12 @@ use hdl_sim::asm_parser::parse_asm_file;
 use hdl_sim::Dut;
 use riscv_sim::RefCore;
 use rvdasm::disassembler::Disassembler;
-use std::env;
+use std::{collections::HashSet, env};
 
 const RESET_PC: u64 = 0x80000000;
 const CACHE_LINE_WORDS: usize = 16;
 const WORD_SIZE: u64 = 4;
+const HALT_OPCODE: u32 = 0x0000006f;
 
 #[derive(Debug)]
 enum MismatchType {
@@ -71,14 +72,50 @@ fn compare_retire_with_ref(
 
 fn get_instruction_at_addr(instructions: &[u32], addr: u64) -> u32 {
     if addr < RESET_PC {
-        return 0x00000013; // NOP for addresses below RESET_PC
+        return 0x00000013;
     }
     let offset = (addr - RESET_PC) / WORD_SIZE;
     if offset as usize >= instructions.len() {
-        0x00000013 // NOP for addresses beyond instruction memory
+        0x00000013
     } else {
         instructions[offset as usize]
     }
+}
+
+fn record_coverage(pc: u64, instructions_len: usize, coverage: &mut HashSet<usize>) {
+    if pc < RESET_PC {
+        return;
+    }
+    let offset = ((pc - RESET_PC) / WORD_SIZE) as usize;
+    if offset < instructions_len {
+        coverage.insert(offset);
+    }
+}
+
+fn process_retire(
+    retire: &RetireInfo,
+    pipe_label: &str,
+    ref_core: &mut RefCore,
+    instructions: &[u32],
+    disasm: &Disassembler,
+    cycle: usize,
+    mismatch_count: &mut usize,
+    retired_count: &mut usize,
+    coverage: &mut HashSet<usize>,
+) -> bool {
+    let ref_result = ref_core.step();
+    if let Some(mismatch) = compare_retire_with_ref(retire, &ref_result) {
+        println!("Cycle: {} {:?} {}", cycle, mismatch, pipe_label);
+        println!("- RefCore {:x?}", ref_result);
+        println!("- RTL     {:x?}", retire);
+        log_decoded_instruction("-", instructions, ref_result.pc, disasm);
+        ref_core.dump_state();
+        println!();
+        *mismatch_count += 1;
+    }
+    *retired_count += 1;
+    record_coverage(retire.pc, instructions.len(), coverage);
+    get_instruction_at_addr(instructions, retire.pc) == HALT_OPCODE
 }
 
 fn main() {
@@ -115,61 +152,64 @@ fn main() {
 
     let mut pending_mem_req = false;
     let mut pending_mem_addr = 0u64;
-    let mut retired_count = 0;
-    let mut mismatch_count = 0;
+    let mut retired_count: usize = 0;
+    let mut mismatch_count: usize = 0;
+    let mut coverage = HashSet::new();
+    let target_coverage = instructions.len();
+    let mut stop_reason: Option<String> = None;
 
     let disasm = Disassembler::new(rvdasm::disassembler::Xlen::XLEN64);
 
-    for cycle in 0..100000 {
+    for cycle in 0..1000000 {
         let retire_0 = get_retire_info_0(&dut);
         let retire_1 = get_retire_info_1(&dut);
 
-// if (retire_0.valid && retire_0.pc == 0x80000014) ||
-// (retire_1.valid && retire_1.pc == 0x80000014) {
-// println!("Done");
-// break;
+// if retire_0.valid {
+// println!("retire_0 pc 0x{:x}", retire_0.pc);
+// }
+// if retire_1.valid {
+// println!("retire_1 pc 0x{:x}", retire_1.pc);
 // }
 
-        if retire_0.valid {
-            println!("retire_0 pc 0x{:x}", retire_0.pc);
-        }
-        if retire_1.valid {
-            println!("retire_1 pc 0x{:x}", retire_1.pc);
-        }
+        let mut halt_detected = false;
 
         if retire_0.valid {
-            let ref_result = ref_core.step();
-            if let Some(mismatch) = compare_retire_with_ref(&retire_0, &ref_result) {
-                println!("Cycle: {} {:?} pipe 0", cycle, mismatch);
-                println!("- RefCore {:x?}", ref_result);
-                println!("- RTL     {:x?}", retire_0);
-                log_decoded_instruction("-", &instructions, ref_result.pc, &disasm);
-                ref_core.dump_state();
-                println!();
-                mismatch_count += 1;
+            if process_retire(
+                &retire_0,
+                "pipe 0",
+                &mut ref_core,
+                &instructions,
+                &disasm,
+                cycle,
+                &mut mismatch_count,
+                &mut retired_count,
+                &mut coverage,
+            ) {
+                halt_detected = true;
             }
-            retired_count += 1;
         }
 
         if retire_1.valid {
-            let ref_result = ref_core.step();
-            if let Some(mismatch) = compare_retire_with_ref(&retire_1, &ref_result) {
-                println!("Cycle: {} {:?} pipe 1", cycle, mismatch);
-                println!("- RefCore {:x?}", ref_result);
-                println!("- RTL     {:x?}", retire_1);
-                log_decoded_instruction("-", &instructions, ref_result.pc, &disasm);
-                ref_core.dump_state();
-                println!();
-                mismatch_count += 1;
+            if process_retire(
+                &retire_1,
+                "pipe 1",
+                &mut ref_core,
+                &instructions,
+                &disasm,
+                cycle,
+                &mut mismatch_count,
+                &mut retired_count,
+                &mut coverage,
+            ) {
+                halt_detected = true;
             }
-            retired_count += 1;
         }
 
         if pending_mem_req {
-            println!(
-                "Cycle {}: Providing memory response for addr 0x{:x}",
-                cycle, pending_mem_addr
-            );
+// println!(
+// "Cycle {}: Providing memory response for addr 0x{:x}",
+// cycle, pending_mem_addr
+// );
 
             let line_base_addr = pending_mem_addr & !(((CACHE_LINE_WORDS * WORD_SIZE as usize) - 1) as u64);
             for i in 0..CACHE_LINE_WORDS {
@@ -205,22 +245,36 @@ fn main() {
         let mem_req_valid = dut.peek_io_mem_req_valid();
         if mem_req_valid != 0 {
             let addr = dut.peek_io_mem_req_bits_addr();
-            println!("Cycle {}: Memory request for addr 0x{:x}", cycle, addr);
+// println!("Cycle {}: Memory request for addr 0x{:x}", cycle, addr);
             pending_mem_req = true;
             pending_mem_addr = addr;
         }
 
-        dut.step();
+        let coverage_complete = coverage.len() >= target_coverage;
+        if halt_detected {
+            stop_reason = Some(format!("halt instruction retired at cycle {}", cycle));
+        } else if coverage_complete {
+            stop_reason = Some(format!(
+                "retired all {} instructions by cycle {}",
+                target_coverage, cycle
+            ));
+        }
+        if stop_reason.is_some() {
+            break;
+        }
 
-// if retired_count >= instructions.len() {
-// break;
-// }
+        dut.step();
+    }
+
+    if stop_reason.is_none() {
+        stop_reason = Some("cycle limit reached".to_string());
     }
 
     println!("\n========================================");
     println!("Test Summary:");
     println!("  Total retired: {}", retired_count);
     println!("  Mismatches: {}", mismatch_count);
+    println!("  Stop reason: {}", stop_reason.unwrap());
     if mismatch_count == 0 {
         println!("  Status: PASSED");
     } else {
