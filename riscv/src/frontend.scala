@@ -63,7 +63,8 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
 
     val bpu = Module(new BranchPredictor(p))
 
-    bpu.io.flush := io.redirect.valid
+// bpu.io.flush := io.redirect.valid
+    bpu.io.flush := false.B
     bpu.io.update := io.bpu_update
     bpu.io.req.valid := false.B
     bpu.io.req.bits.pc := 0.U(p.pcBits.W)
@@ -109,8 +110,8 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     bpu.io.req.valid := s1_valid && !f1_clear
     bpu.io.req.bits.pc := s1_vpc
 
-    val f1_next_fetch = p.nextFetch(s1_vpc)
-    val f1_pred_taken = bpu.io.resp.valid && bpu.io.resp.bits.hit && bpu.io.resp.bits.taken
+    val f1_next_fetch  = p.nextFetch(s1_vpc)
+    val f1_pred_taken  = bpu.io.resp.valid && bpu.io.resp.bits.hit && bpu.io.resp.bits.taken
     val f1_pred_target = Mux(f1_pred_taken, bpu.io.resp.bits.target, f1_next_fetch)
 
     when (s1_valid) {
@@ -125,7 +126,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     val s2_valid = RegInit(false.B)
     val s2_fetch_mask = Wire(UInt())
     val f2_clear = WireInit(false.B)
-    val s2_pred_valid = RegNext(s1_valid && !f1_clear && f1_pred_taken)
+    val s2_pred_taken  = RegNext(f1_pred_taken)
     val s2_pred_target = RegNext(f1_pred_target)
 
     s2_valid := s1_valid && !f1_clear
@@ -145,7 +146,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     })
 
     // TODO: use this to add predicted branch target on a predicted-taken branch
-    fetch_bundle.next_pc.valid := s2_valid && s2_pred_valid
+    fetch_bundle.next_pc.valid := s2_valid && s2_pred_taken
     fetch_bundle.next_pc.bits  := s2_pred_target
 
     ic.s2_kill := f2_clear

@@ -50,6 +50,7 @@ object CoreIf:
     )
 
 class Core(p: CoreParams) extends Module with CoreCacheable(p):
+  given Module = this
   val io = IO(CoreIf(p))
 
   val XLEN = p.xlenBits
@@ -189,8 +190,11 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     }
 
     val mem_branch_target = Wire(Vec.fill(coreWidth)(UInt(p.pcBits.W)))
-    val mem_cfi_target    = Wire(Vec.fill(coreWidth)(UInt(p.pcBits.W)))
-    val mem_cfi_taken     = Wire(Vec.fill(coreWidth)(Bool()))
+    val mem_cfi_target = Wire(Vec.fill(coreWidth)(UInt(p.pcBits.W)))
+    val mem_cfi_valids = Wire(Vec.fill(coreWidth)(Bool()))
+    val mem_cfi_taken = Wire(Vec.fill(coreWidth)(Bool()))
+    val mem_cfi_idx = Wire(UInt(log2Ceil(coreWidth + 1).W))
+    val bpu_update = Wire(Valid(BPUUpdate(p)))
 
     for (i <- 0 until coreWidth) {
       val pc   = mem_uops(i).bits.pc
@@ -207,38 +211,38 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(mem_branch_target)
     dontTouch(mem_cfi_target)
     dontTouch(mem_cfi_taken)
-
-    val mem_cfi_valids = Wire(Vec.fill(coreWidth)(Bool()))
-    for (i <- 0 until coreWidth) {
-      mem_cfi_valids(i) := mem_uops(i).valid && mem_uops(i).bits.ctrl.is_cfi
-    }
-
-    val bpu_update = Wire(Valid(BPUUpdate(p)))
-    bpu_update.valid := mem_cfi_valids.reduce(_ || _)
-    val bpu_update_idx = Wire(UInt(log2Ceil(coreWidth max 2).W))
-    bpu_update_idx := 0.U
-    when (bpu_update.valid) {
-      bpu_update_idx := PriorityEncoder(Cat(mem_cfi_valids.reverse))
-    }
-    bpu_update.bits.pc := mem_uops(bpu_update_idx).bits.pc
-    bpu_update.bits.target := mem_cfi_target(bpu_update_idx)
-    bpu_update.bits.taken := mem_cfi_taken(bpu_update_idx)
-    bpu_update.bits.is_call := mem_uops(bpu_update_idx).bits.ctrl.jal || mem_uops(bpu_update_idx).bits.ctrl.jalr
-    bpu_update.bits.is_ret := mem_uops(bpu_update_idx).bits.ctrl.jalr && (mem_uops(bpu_update_idx).bits.rs1 === 1.U)
-
-    val mem_redirect_valid = mem_cfi_taken.reduce(_ || _)
-    val mem_cfi_idx = Wire(UInt(log2Ceil(coreWidth + 1).W))
-    mem_cfi_idx := PriorityEncoder(Cat(mem_cfi_taken.reverse))
+    dontTouch(mem_cfi_valids)
     dontTouch(mem_cfi_idx)
+    dontTouch(bpu_update)
+
+    mem_cfi_valids.zip(mem_uops).foreach((v, u) => {
+      v := u.valid && u.bits.ctrl.is_cfi
+    })
+
+    mem_cfi_idx := PriorityEncoder(Cat(mem_cfi_valids.reverse))
+
+    val cfi_uop = mem_uops(mem_cfi_idx)
+    val mem_target_pc = mem_cfi_target(mem_cfi_idx)
+    val mem_brjmp_taken = mem_cfi_taken(mem_cfi_idx)
+    bpu_update.valid       := mem_cfi_valids.reduce(_ || _)
+    bpu_update.bits.pc     := mem_uops(mem_cfi_idx).bits.pc
+    bpu_update.bits.target := mem_target_pc
+    bpu_update.bits.taken  := mem_brjmp_taken
+    bpu_update.bits.is_call := (cfi_uop.bits.ctrl.jal || cfi_uop.bits.ctrl.jalr) && cfi_uop.bits.rd === 1.U
+    bpu_update.bits.is_ret  := cfi_uop.bits.ctrl.jalr && cfi_uop.bits.rs1 === 1.U && cfi_uop.bits.rd === 0.U
+
+    val mem_wrong_next_pc = cfi_uop.bits.next_pc.bits =/= mem_target_pc
+    val mem_mispred_taken = mem_brjmp_taken && (mem_wrong_next_pc || !cfi_uop.bits.next_pc.valid)
+    val mem_mispred_not_taken = (cfi_uop.bits.ctrl.br && !mem_brjmp_taken) && cfi_uop.bits.next_pc.valid
+    val mem_redirect_valid = mem_mispred_taken || mem_mispred_not_taken
 
     io.redirect.valid  := mem_redirect_valid
-    io.redirect.target := mem_cfi_target(mem_cfi_idx)
-    dontTouch(io.redirect)
+    io.redirect.target := mem_target_pc
     io.bpu_update := bpu_update
 
     when (mem_redirect_valid) {
       dec_clear := true.B
-       ex_clear := true.B
+      ex_clear := true.B
     }
 
     val mem_flush = Wire(Vec.fill(coreWidth)(Bool()))
@@ -324,4 +328,6 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
         wb_uops(i).valid := false.B
       }
     }
+
+    dontTouch(io.redirect)
   }

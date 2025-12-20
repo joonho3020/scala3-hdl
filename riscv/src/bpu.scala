@@ -84,9 +84,9 @@ object BranchPredictorIO:
       flush = Input(Bool())
     )
 
+// TODO: Pipeline this...
 class BranchPredictor(p: CoreParams) extends Module:
   given Module = this
-  val io = IO(BranchPredictorIO(p))
 
   class RAS(nras: Int):
     private val count = RegInit(0.U(log2Up(nras+1).W))
@@ -159,6 +159,8 @@ class BranchPredictor(p: CoreParams) extends Module:
 
     def clear: Unit =
       bht.foreach(_ := 1.U)
+
+  val io = IO(BranchPredictorIO(p))
 
   body {
     val bhtEntries = p.bpu.bhtEntries

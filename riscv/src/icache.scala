@@ -20,6 +20,7 @@ object ICacheBundle:
       mem  = MagicMemIf(p)
     )
 
+// TODO: proper banking of data arrays...
 class ICache(
   p: CoreParams,
 ) extends Module:
