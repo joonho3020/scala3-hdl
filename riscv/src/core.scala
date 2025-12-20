@@ -236,6 +236,11 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val mem_mispred_not_taken = (cfi_uop.bits.ctrl.br && !mem_brjmp_taken) && cfi_uop.bits.next_pc.valid
     val mem_redirect_valid = mem_mispred_taken || mem_mispred_not_taken
 
+    val mem_predict_success = WireInit(false.B)
+
+    mem_predict_success := !mem_redirect_valid && bpu_update.valid
+    dontTouch(mem_predict_success)
+
     io.redirect.valid  := mem_redirect_valid
     io.redirect.target := mem_target_pc
     io.bpu_update := bpu_update
