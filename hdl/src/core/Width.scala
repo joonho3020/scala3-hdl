@@ -38,6 +38,10 @@ sealed case class KnownWidth(value: Int) extends Width:
 def log2Ceil(x: Int): Int =
   if x <= 1 then 0 else 32 - Integer.numberOfLeadingZeros(x - 1)
 
+def log2Up(x: Int): Int =
+  if x < 0 then throw new IllegalArgumentException("log2Up requires x >= 0")
+  math.max(1, (BigInt(x) - 1).bitLength)
+
 extension (n: Int)
   def W: Width =
     Width(n)
