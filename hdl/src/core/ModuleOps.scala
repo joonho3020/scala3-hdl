@@ -397,7 +397,7 @@ extension (lhs: UInt)
     ModuleOps.prim1Op(UInt(lhs.getWidth), IR.PrimOp.Not, lhs, m)
 
   def asSInt(using m: Module): SInt =
-    ModuleOps.prim1Op(SInt(lhs.getWidth + Width(1)), IR.PrimOp.Cvt, lhs, m)
+    ModuleOps.prim1Op(SInt(lhs.getWidth), IR.PrimOp.AsSInt, lhs, m)
 
 extension (lhs: SInt)
   def +&(rhs: SInt)(using m: Module): SInt =
@@ -524,7 +524,7 @@ extension (lhs: Bool)
     ModuleOps.asUInt(lhs, m)
 
   def asSInt(using m: Module): SInt =
-    ModuleOps.prim1Op(SInt(Width(2)), IR.PrimOp.Cvt, lhs, m)
+    ModuleOps.prim1Op(SInt(Width(1)), IR.PrimOp.AsSInt, lhs, m)
 
 extension [E <: scala.reflect.Enum] (lhs: HWEnum[E])
   def ===(rhs: HWEnum[E])(using m: Module): Bool =

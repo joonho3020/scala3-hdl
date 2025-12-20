@@ -16,8 +16,29 @@ object Reverse:
     val width = x.getWidth match
       case KnownWidth(v) => v
       case _ => throw new IllegalArgumentException("Reverse requires UInt with known width")
+    if width < 2 then
+      throw new IllegalArgumentException("Reverse requires UInt with width >= 2")
     val bits = (0 until width).map(i => x(i))
-    bits.reverse.Cat
+    var acc = bits.last
+    var i = width - 2
+    while i >= 0 do
+      acc = ModuleOps.prim2Op(UInt(acc.getWidth + bits(i).getWidth), IR.PrimOp.Cat, acc, bits(i), m)
+      i -= 1
+    acc
+
+  def apply(x: SInt)(using m: Module): UInt =
+    val width = x.getWidth match
+      case KnownWidth(v) => v
+      case _ => throw new IllegalArgumentException("Reverse requires SInt with known width")
+    if width < 2 then
+      throw new IllegalArgumentException("Reverse requires SInt with width >= 2")
+    val bits = (0 until width).map(i => x(i))
+    var acc = bits.last
+    var i = width - 2
+    while i >= 0 do
+      acc = ModuleOps.prim2Op(UInt(acc.getWidth + bits(i).getWidth), IR.PrimOp.Cat, acc, bits(i), m)
+      i -= 1
+    acc
 
 object PopCount:
   def apply(x: Vec[Bool])(using m: Module): UInt =

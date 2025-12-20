@@ -117,6 +117,7 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     sb.toString
 
   private def emitChirrtlModule(m: IR.Module, isTop: Boolean, sb: StringBuilder): Unit =
+// println(s"emitChirrtlModule ${m.name.value}")
     sb.append(s"  module ${m.name.value} :\n")
     m.ports.foreach(p => sb.append(s"    ${emitChirrtlPort(p, isTop)}\n"))
     sb.append("\n")
@@ -215,51 +216,56 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     val dirStr = if p.direction == Direction.In then "input" else "output"
     s"$dirStr ${p.name.value} : ${emitChirrtlType(p.tpe, isTop)}"
 
-  private def emitChirrtlType(t: IR.Type, isTop: Boolean): String = t match
-    case IR.UIntType(w) =>
-      if w.known then s"UInt<${w.get}>" else "UInt"
-    case IR.SIntType(w) =>
-      if w.known then s"SInt<${w.get}>" else "SInt"
-    case IR.BoolType    => "UInt<1>"
-    case IR.ClockType   => "Clock"
-    case IR.ResetType   => if isTop then "UInt<1>" else "Reset"
-    case IR.OneHotType(w) =>
-      if w.known then s"UInt<${w.get}>" else "UInt"
-    case IR.VecType(len, elem) => s"${emitChirrtlType(elem, isTop)}[$len]"
-    case IR.BundleType(fields) =>
-      val inner = fields.map { f =>
-        val dirPrefix = if f.flipped then "flip " else ""
-        s"$dirPrefix${f.name.value} : ${emitChirrtlType(f.tpe, isTop)}"
-      }.mkString(", ")
-      s"{ $inner }"
+  private def emitChirrtlType(t: IR.Type, isTop: Boolean): String =
+// println(s"emitChirrtlType ${t}")
+    t match
+      case IR.UIntType(w) =>
+        if w.known then s"UInt<${w.get}>" else "UInt"
+      case IR.SIntType(w) =>
+        if w.known then s"SInt<${w.get}>" else "SInt"
+      case IR.BoolType    => "UInt<1>"
+      case IR.ClockType   => "Clock"
+      case IR.ResetType   => if isTop then "UInt<1>" else "Reset"
+      case IR.OneHotType(w) =>
+        if w.known then s"UInt<${w.get}>" else "UInt"
+      case IR.VecType(len, elem) => s"${emitChirrtlType(elem, isTop)}[$len]"
+      case IR.BundleType(fields) =>
+        val inner = fields.map { f =>
+          val dirPrefix = if f.flipped then "flip " else ""
+          s"$dirPrefix${f.name.value} : ${emitChirrtlType(f.tpe, isTop)}"
+        }.mkString(", ")
+        s"{ $inner }"
 
   private val OneHotLiteralPattern = """OneHot<(\d+)>\((\d+)\)""".r
 
-  private def emitChirrtlExpr(e: IR.Expr): String = e match
-    case IR.Ref(name)       => name.value
-    case IR.Literal(value)  =>
-      value.value match
-        case "Bool(true)" => "UInt<1>(0h1)"
-        case "Bool(false)" => "UInt<1>(0h0)"
-        case OneHotLiteralPattern(n, v) => s"UInt<$n>($v)"
-        case other => other
-    case IR.DontCare        => "invalidate"
-    case IR.SubIndex(expr, value) => s"${emitChirrtlExpr(expr)}[$value]"
-    case IR.SubAccess(expr, index) => s"${emitChirrtlExpr(expr)}[${emitChirrtlExpr(index)}]"
-    case IR.SubField(expr, field) => s"${emitChirrtlExpr(expr)}.${field.value}"
-    case IR.DoPrim(op, args, consts) =>
-      val parts = args.map(emitChirrtlExpr) ++ consts.map(_.toString)
-      op match
-        case PrimOp.AsBool =>
-          s"${parts.mkString(", ")}"
-        case _ =>
-          s"${op.opName}(${parts.mkString(", ")})"
+  private def emitChirrtlExpr(e: IR.Expr): String =
+// println(s"emitChirrtlExpr ${e}")
+    e match
+      case IR.Ref(name)       => name.value
+      case IR.Literal(value)  =>
+        value.value match
+          case "Bool(true)" => "UInt<1>(0h1)"
+          case "Bool(false)" => "UInt<1>(0h0)"
+          case OneHotLiteralPattern(n, v) => s"UInt<$n>($v)"
+          case other => other
+      case IR.DontCare        => "invalidate"
+      case IR.SubIndex(expr, value) => s"${emitChirrtlExpr(expr)}[$value]"
+      case IR.SubAccess(expr, index) => s"${emitChirrtlExpr(expr)}[${emitChirrtlExpr(index)}]"
+      case IR.SubField(expr, field) => s"${emitChirrtlExpr(expr)}.${field.value}"
+      case IR.DoPrim(op, args, consts) =>
+        val parts = args.map(emitChirrtlExpr) ++ consts.map(_.toString)
+        op match
+          case PrimOp.AsBool =>
+            s"${parts.mkString(", ")}"
+          case _ =>
+            s"${op.opName}(${parts.mkString(", ")})"
 
   private def emitAnnotation(anno: IR.Annotation, circuit: String): String =
     val target = s"~$circuit|${anno.target.module.value}>${anno.target.path.value}"
     s"""{"class":"${anno.cls.value}","target":"$target"}"""
 
   private def emitChirrtlStmt(stmt: IR.Stmt, indent: Int, sb: StringBuilder): Unit =
+// println(s"emitChirrtlStmt ${stmt}")
     val prefix = "    " * indent
     stmt match
       case IR.Skip =>

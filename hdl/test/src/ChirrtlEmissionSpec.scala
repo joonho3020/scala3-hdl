@@ -1030,7 +1030,7 @@ class SIntConv extends Module:
     uIn = Input(UInt(Width(8))),
     sIn = Input(SInt(Width(8))),
     uOut = Output(UInt(Width(8))),
-    sOut = Output(SInt(Width(9)))
+    sOut = Output(SInt(Width(8)))
   ))
   io.uOut := io.sIn.asUInt
   io.sOut := io.uIn.asSInt
@@ -1469,7 +1469,7 @@ object ChirrtlEmissionSpec extends TestSuite:
       println(chirrtl)
       writeChirrtl("SIntConv.fir", chirrtl)
       assert(chirrtl.contains("asUInt("))
-      assert(chirrtl.contains("cvt("))
+      assert(chirrtl.contains("asSInt("))
       val (exitCode, output) = runFirtool("SIntConv.fir")
       if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }

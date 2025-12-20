@@ -2051,7 +2051,7 @@ def sint_conversion_check(): Unit =
       uIn = Input(UInt(Width(8))),
       sIn = Input(SInt(Width(8))),
       uOut = Output(UInt(Width(8))),
-      sOut = Output(SInt(Width(9)))
+      sOut = Output(SInt(Width(8)))
     ))
     io.uOut := io.sIn.asUInt
     io.sOut := io.uIn.asSInt
@@ -2070,7 +2070,7 @@ def sint_conversion_check(): Unit =
           ("uIn", true, u(8)),
           ("sIn", true, s(8)),
           ("uOut", false, u(8)),
-          ("sOut", false, s(9))
+          ("sOut", false, s(8))
         ))
       ),
       Seq(
@@ -2080,7 +2080,7 @@ def sint_conversion_check(): Unit =
         ),
         IR.Connect(
           sf(ref("io"), "sOut"),
-          IR.DoPrim(IR.PrimOp.Cvt, Seq(sf(ref("io"), "uIn")))
+          IR.DoPrim(IR.PrimOp.AsSInt, Seq(sf(ref("io"), "uIn")))
         )
       )
     )
