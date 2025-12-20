@@ -120,9 +120,15 @@ fn main() {
 
     let disasm = Disassembler::new(rvdasm::disassembler::Xlen::XLEN64);
 
-    for cycle in 0..300 {
+    for cycle in 0..100000 {
         let retire_0 = get_retire_info_0(&dut);
         let retire_1 = get_retire_info_1(&dut);
+
+// if (retire_0.valid && retire_0.pc == 0x80000014) ||
+// (retire_1.valid && retire_1.pc == 0x80000014) {
+// println!("Done");
+// break;
+// }
 
         if retire_0.valid {
             println!("retire_0 pc 0x{:x}", retire_0.pc);
@@ -206,9 +212,9 @@ fn main() {
 
         dut.step();
 
-        if retired_count >= instructions.len() {
-            break;
-        }
+// if retired_count >= instructions.len() {
+// break;
+// }
     }
 
     println!("\n========================================");
