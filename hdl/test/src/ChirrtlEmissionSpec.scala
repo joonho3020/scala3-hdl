@@ -1005,6 +1005,87 @@ final case class SwitchTupleIO(
   out_1: UInt,
   out_2: UInt) extends Bundle[SwitchTupleIO]
 
+case class SIntBasicIO(a: SInt, b: SInt, sum: SInt, diff: SInt, neg: SInt, cmp: Bool) extends Bundle[SIntBasicIO]
+
+class SIntBasic extends Module:
+  given Module = this
+  val io = IO(SIntBasicIO(
+    a = Input(SInt(Width(8))),
+    b = Input(SInt(Width(8))),
+    sum = Output(SInt(Width(8))),
+    diff = Output(SInt(Width(8))),
+    neg = Output(SInt(Width(9))),
+    cmp = Output(Bool())
+  ))
+  io.sum := io.a + io.b
+  io.diff := io.a - io.b
+  io.neg := -io.a
+  io.cmp := io.a < io.b
+
+case class SIntConvIO(uIn: UInt, sIn: SInt, uOut: UInt, sOut: SInt) extends Bundle[SIntConvIO]
+
+class SIntConv extends Module:
+  given Module = this
+  val io = IO(SIntConvIO(
+    uIn = Input(UInt(Width(8))),
+    sIn = Input(SInt(Width(8))),
+    uOut = Output(UInt(Width(8))),
+    sOut = Output(SInt(Width(9)))
+  ))
+  io.uOut := io.sIn.asUInt
+  io.sOut := io.uIn.asSInt
+
+case class SIntRegIO(in: SInt, out: SInt) extends Bundle[SIntRegIO]
+
+class SIntReg extends Module:
+  given Module = this
+  val io = IO(SIntRegIO(
+    in = Input(SInt(Width(8))),
+    out = Output(SInt(Width(8)))
+  ))
+  val reg = Reg(SInt(Width(8)))
+  reg := io.in
+  io.out := reg
+
+case class SIntLitIO(out: SInt) extends Bundle[SIntLitIO]
+
+class SIntLit extends Module:
+  given Module = this
+  val io = IO(SIntLitIO(out = Output(SInt(Width(8)))))
+  io.out := (-42).S(Width(8))
+
+case class SIntMulDivIO(a: SInt, b: SInt, mul: SInt, div: SInt, rem: SInt) extends Bundle[SIntMulDivIO]
+
+class SIntMulDiv extends Module:
+  given Module = this
+  val io = IO(SIntMulDivIO(
+    a = Input(SInt(Width(8))),
+    b = Input(SInt(Width(8))),
+    mul = Output(SInt(Width(16))),
+    div = Output(SInt(Width(9))),
+    rem = Output(SInt(Width(8)))
+  ))
+  io.mul := io.a * io.b
+  io.div := io.a / io.b
+  io.rem := io.a % io.b
+
+case class SIntShiftIO(a: SInt, amt: UInt, shl: SInt, shr: SInt, shlConst: SInt, shrConst: SInt) extends Bundle[SIntShiftIO]
+
+class SIntShift extends Module:
+  given Module = this
+  val io = IO(SIntShiftIO(
+    a = Input(SInt(Width(8))),
+    amt = Input(UInt(Width(3))),
+    shl = Output(SInt(Width(16))),
+    shr = Output(SInt(Width(8))),
+    shlConst = Output(SInt(Width(12))),
+    shrConst = Output(SInt(Width(6)))
+  ))
+  io.shl := io.a << io.amt
+  io.shr := io.a >> io.amt
+  io.shlConst := io.a << 4
+  io.shrConst := io.a >> 2
+
 object SwitchTupleIO:
   def apply(): SwitchTupleIO = SwitchTupleIO(
     Input(UInt(Width(8))),
@@ -1362,6 +1443,91 @@ object ChirrtlEmissionSpec extends TestSuite:
       val chirrtl = elaborator.emitChirrtl(designs, "SwitchTuple")
       writeChirrtl("SwitchTuple.fir", chirrtl)
       val (exitCode, output) = runFirtool(s"SwitchTuple.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+    }
+
+    test("SInt basic operations CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new SIntBasic
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "SIntBasic")
+      println("SIntBasic CHIRRTL:")
+      println(chirrtl)
+      writeChirrtl("SIntBasic.fir", chirrtl)
+      assert(chirrtl.contains("SInt<8>"))
+      assert(chirrtl.contains("neg("))
+      val (exitCode, output) = runFirtool("SIntBasic.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+    }
+
+    test("SInt conversion CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new SIntConv
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "SIntConv")
+      println("SIntConv CHIRRTL:")
+      println(chirrtl)
+      writeChirrtl("SIntConv.fir", chirrtl)
+      assert(chirrtl.contains("asUInt("))
+      assert(chirrtl.contains("cvt("))
+      val (exitCode, output) = runFirtool("SIntConv.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+    }
+
+    test("SInt register CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new SIntReg
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "SIntReg")
+      println("SIntReg CHIRRTL:")
+      println(chirrtl)
+      writeChirrtl("SIntReg.fir", chirrtl)
+      assert(chirrtl.contains("reg reg : SInt<8>"))
+      val (exitCode, output) = runFirtool("SIntReg.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+    }
+
+    test("SInt literal CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new SIntLit
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "SIntLit")
+      println("SIntLit CHIRRTL:")
+      println(chirrtl)
+      writeChirrtl("SIntLit.fir", chirrtl)
+      assert(chirrtl.contains("SInt<8>(-42)"))
+      val (exitCode, output) = runFirtool("SIntLit.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+    }
+
+    test("SInt mul/div CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new SIntMulDiv
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "SIntMulDiv")
+      println("SIntMulDiv CHIRRTL:")
+      println(chirrtl)
+      writeChirrtl("SIntMulDiv.fir", chirrtl)
+      assert(chirrtl.contains("mul("))
+      assert(chirrtl.contains("div("))
+      assert(chirrtl.contains("rem("))
+      val (exitCode, output) = runFirtool("SIntMulDiv.fir")
+      if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
+    }
+
+    test("SInt shift CHIRRTL emission") {
+      val elaborator = new Elaborator(log = _ => ())
+      val mod = new SIntShift
+      val designs = elaborator.elaborate(mod)
+      val chirrtl = elaborator.emitChirrtl(designs, "SIntShift")
+      println("SIntShift CHIRRTL:")
+      println(chirrtl)
+      writeChirrtl("SIntShift.fir", chirrtl)
+      assert(chirrtl.contains("dshl("))
+      assert(chirrtl.contains("dshr("))
+      assert(chirrtl.contains("shl("))
+      assert(chirrtl.contains("shr("))
+      val (exitCode, output) = runFirtool("SIntShift.fir")
       if exitCode != 0 then throw new java.lang.AssertionError(s"firtool failed with exit code $exitCode: $output")
     }
   }

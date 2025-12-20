@@ -59,6 +59,11 @@ object CoreConstants:
       RS2OH,
       IMMOH
 
+  enum DW:
+    case
+      DW32,
+      DW64
+
 case class CtrlSignals(
   valid:    Bool,
   br:       Bool,

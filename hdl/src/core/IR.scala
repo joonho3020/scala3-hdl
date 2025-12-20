@@ -14,11 +14,14 @@ private[hdl] object IR:
       DShl, DShr,
       And, Or, Xor, Not,
       Cat, Pad, Shl, Shr, Head, Tail, Bits,
-      Mux, AsUInt, AsBool
+      Mux, AsUInt, AsSInt, AsBool, Neg, Cvt
 
     def opName: String = this match
       case AsUInt => "asUInt"
+      case AsSInt => "asSInt"
       case AsBool => "asBool"
+      case Neg    => "neg"
+      case Cvt    => "cvt"
       case _ => this.productPrefix.toLowerCase()
 
   enum ReadUnderWrite:
@@ -29,6 +32,7 @@ private[hdl] object IR:
 
   sealed trait Type extends Serializable
   final case class UIntType(width: Width) extends Type
+  final case class SIntType(width: Width) extends Type
   final case object BoolType extends Type
   final case object ClockType extends Type
   final case object ResetType extends Type

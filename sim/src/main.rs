@@ -54,48 +54,15 @@ fn log_decoded_instruction(label: &str, instructions: &[u32], pc: u64, disasm: &
 
 fn compare_retire_with_ref(
     retire: &RetireInfo,
-    ref_result: &riscv_sim::StepResult,
-    pipe: usize,
-    cycle: usize,
-    instructions: &[u32],
-    disasm: &Disassembler
+    ref_result: &riscv_sim::StepResult
 ) -> Option<MismatchType> {
     if retire.pc != ref_result.pc {
-// println!(
-// "MISMATCH at cycle {} pipe{}: PC mismatch: RTL=0x{:x}, Ref=0x{:x}",
-// cycle, pipe, retire.pc, ref_result.pc
-// );
-// log_decoded_instruction("RTL", instructions, retire.pc, disasm);
-// log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
         return Some(MismatchType::PCMismatch);
-    }
-
-// if retire.wb_valid != ref_result.wb_valid {
-// println!(
-// "MISMATCH at cycle {} pipe{} PC=0x{:x}: wb_valid mismatch: RTL={}, Ref={}",
-// cycle, pipe, retire.pc, retire.wb_valid, ref_result.wb_valid
-// );
-// return false;
-// }
-
-    if retire.wb_valid && retire.wb_rd != 0 {
+    } else if retire.wb_valid && retire.wb_rd != 0 {
         if retire.wb_rd != ref_result.wb_rd {
-// println!(
-// "MISMATCH at cycle {} pipe{} PC=0x{:x}: wb_rd mismatch: RTL={}, Ref={}",
-// cycle, pipe, retire.pc, retire.wb_rd, ref_result.wb_rd
-// );
-// log_decoded_instruction("RTL", instructions, retire.pc, disasm);
-// log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
             return Some(MismatchType::WBDstMismatch);
         }
-
         if retire.wb_data != ref_result.wb_data {
-// println!(
-// "MISMATCH at cycle {} pipe{} PC=0x{:x}: wb_data mismatch: RTL=0x{:x}, Ref=0x{:x}",
-// cycle, pipe, retire.pc, retire.wb_data, ref_result.wb_data
-// );
-// log_decoded_instruction("RTL", instructions, retire.pc, disasm);
-// log_decoded_instruction("Ref", instructions, ref_result.pc, disasm);
             return Some(MismatchType::WBDataMismatch);
         }
     }
@@ -166,11 +133,12 @@ fn main() {
 
         if retire_0.valid {
             let ref_result = ref_core.step();
-            if let Some(mismatch) = compare_retire_with_ref(&retire_0, &ref_result, 0, cycle, &instructions, &disasm) {
-                println!("Cycle: {} {:?}", cycle, mismatch);
+            if let Some(mismatch) = compare_retire_with_ref(&retire_0, &ref_result) {
+                println!("Cycle: {} {:?} pipe 0", cycle, mismatch);
                 println!("- RefCore {:x?}", ref_result);
                 println!("- RTL     {:x?}", retire_0);
                 log_decoded_instruction("-", &instructions, ref_result.pc, &disasm);
+                ref_core.dump_state();
                 println!();
                 mismatch_count += 1;
             }
@@ -179,11 +147,12 @@ fn main() {
 
         if retire_1.valid {
             let ref_result = ref_core.step();
-            if let Some(mismatch) = compare_retire_with_ref(&retire_1, &ref_result, 1, cycle, &instructions, &disasm) {
-                println!("Cycle: {} {:?}", cycle, mismatch);
+            if let Some(mismatch) = compare_retire_with_ref(&retire_1, &ref_result) {
+                println!("Cycle: {} {:?} pipe 1", cycle, mismatch);
                 println!("- RefCore {:x?}", ref_result);
                 println!("- RTL     {:x?}", retire_1);
                 log_decoded_instruction("-", &instructions, ref_result.pc, &disasm);
+                ref_core.dump_state();
                 println!();
                 mismatch_count += 1;
             }

@@ -59,6 +59,9 @@ object ALUParams:
   def cmpUnsigned(cmd: UInt)(using m: Module): Bool = cmd(1).asBool
   def cmpInverted(cmd: UInt)(using m: Module): Bool = cmd(0).asBool
   def cmpEq(cmd: UInt)(using m: Module): Bool = !cmd(3).asBool
+  def shiftReverse(cmd: UInt)(using m: Module): Bool =
+    cmd === Opcode.FN_SR.EN.asUInt ||
+    cmd === Opcode.FN_SRA.EN.asUInt
 
 import ALUParams.Opcode._
 import ALUParams._
@@ -68,6 +71,7 @@ case class ALUIO(
   in2: UInt,
   in1: UInt,
   out: UInt,
+  dw: HWEnum[CoreConstants.DW],
   adder_out: UInt,
   cmp_out: Bool
 ) extends Bundle[ALUIO]
@@ -78,6 +82,7 @@ object ALUIO:
       fn  = Input(UInt(ALUParams.fnBits.W)),
       in2 = Input(UInt(p.xlen.W)),
       in1 = Input(UInt(p.xlen.W)),
+      dw  = Input(HWEnum(CoreConstants.DW)),
 
       out       = Output(UInt(p.xlen.W)),
       adder_out = Output(UInt(p.xlen.W)),
@@ -118,19 +123,21 @@ class ALU(p: ALUParams) extends Module with CacheableModule:
         Mux(cmpUnsigned(io.fn), io.in2(xLen-1), io.in1(xLen-1)))
     io.cmp_out := cmpInverted(io.fn) ^ Mux(cmpEq(io.fn), in1_xor_in2 === 0.U, slt.asBool)
 
-    val shamt = io.in2(5, 0)
-    val shright = io.in1 >> shamt
-    val sign_bit = io.in1(xLen - 1)
-    val sign_fill = Mux(sign_bit.asBool, ~(((1.U(xLen.W) << (xLen.U - shamt)) - 1.U) >> (xLen.U - shamt)), 0.U(xLen.W))
-    val shright_arith = shright | sign_fill
+    import CoreConstants.DW._
 
-    val shlout = io.in1 << shamt
+    val shin_hi_32 = Fill(32, isSub(io.fn) && io.in1(31).asBool)
+    val shin_hi    = Mux(io.dw === DW64.EN, io.in1(63, 32), shin_hi_32)
+    val shamt      = Cat(Seq(io.in2(5) & (io.dw === DW64.EN).asUInt, io.in2(4, 0)))
+    val shin_r     = Cat(Seq(shin_hi, io.in1(31, 0)))
+    val shin = Mux(shiftReverse(io.fn), Reverse(shin_r), shin_r)
+    val shout_r = (Cat(Seq(isSub(io.fn).asUInt & shin(xLen-1), shin)).asSInt >> shamt)(xLen-1, 0)
+    val shout_l = Reverse(shout_r)
 
     val shift_out = Wire(UInt(xLen.W))
     switch (io.fn) {
-      is (FN_SL .EN.asUInt) { shift_out := shlout        }
-      is (FN_SR .EN.asUInt) { shift_out := shright       }
-      is (FN_SRA.EN.asUInt) { shift_out := shright_arith }
+      is (FN_SL .EN.asUInt) { shift_out := shout_l        }
+      is (FN_SR .EN.asUInt) { shift_out := shout_r       }
+      is (FN_SRA.EN.asUInt) { shift_out := shout_r       }
       default               { shift_out := 0.U           }
     }
     dontTouch(shift_out)

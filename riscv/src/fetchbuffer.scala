@@ -63,7 +63,7 @@ class FetchBuffer(p: CoreParams, depth: Int) extends Module with CoreCacheable(p
           next_offset(i) := next_offset(i-1) +
                             Mux(io.enq.bits.insts(i-1).valid, 1.U, 0.U)
 
-        val cur_ptr = enq_ptr + next_offset(i)
+        val cur_ptr = (enq_ptr + next_offset(i)) % entries.U
         val r = row(cur_ptr)
         val c = col(cur_ptr)
 

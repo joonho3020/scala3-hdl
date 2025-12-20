@@ -130,6 +130,8 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
   private def emitType(t: IR.Type): String = t match
     case IR.UIntType(w) =>
       if w.known then s"UInt<${w.get}>" else "UInt"
+    case IR.SIntType(w) =>
+      if w.known then s"SInt<${w.get}>" else "SInt"
     case IR.BoolType    => "Bool"
     case IR.ClockType   => "Clock"
     case IR.ResetType   => "Reset"
@@ -216,6 +218,8 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
   private def emitChirrtlType(t: IR.Type, isTop: Boolean): String = t match
     case IR.UIntType(w) =>
       if w.known then s"UInt<${w.get}>" else "UInt"
+    case IR.SIntType(w) =>
+      if w.known then s"SInt<${w.get}>" else "SInt"
     case IR.BoolType    => "UInt<1>"
     case IR.ClockType   => "Clock"
     case IR.ResetType   => if isTop then "UInt<1>" else "Reset"

@@ -67,6 +67,9 @@ private[hdl] object HWAggregate:
       case u: UInt =>
         val x = u.cloneType
         x
+      case s: SInt =>
+        val x = s.cloneType
+        x
       case b: Bool =>
         Bool()
       case c: Clock =>

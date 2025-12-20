@@ -76,6 +76,26 @@ object UInt:
   def apply(): UInt =
     new UInt
 
+sealed class SInt extends HWData:
+  def setLitVal(payload: Any): Unit =
+    this.literal = Some(payload.asInstanceOf[HostTypeOf[SInt]])
+
+  def getLitVal: HostTypeOf[SInt] =
+    this.literal match
+      case Some(v) => v.asInstanceOf[HostTypeOf[SInt]]
+      case None    => throw new NoSuchElementException("SInt does not carry a literal value")
+
+  override def toString(): String = s"SInt($getWidth, $dir)"
+
+object SInt:
+  def apply(w: Width): SInt =
+    var ret = new SInt
+    ret.setWidth(w)
+    ret
+
+  def apply(): SInt =
+    new SInt
+
 sealed class Bool extends HWData:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[Bool]])
@@ -252,6 +272,7 @@ object Vec:
 
 type HostTypeOf[T] = T match
   case UInt   => BigInt
+  case SInt   => BigInt
   case Bool   => Boolean
   case Clock  => Boolean
   case Reset  => Boolean
@@ -273,6 +294,18 @@ extension (x: Int)
     u.setNodeKind(NodeKind.Lit)
     u.setLitVal(BigInt(x))
     u
+
+  def S: SInt =
+    val s = SInt()
+    s.setNodeKind(NodeKind.Lit)
+    s.setLitVal(BigInt(x))
+    s
+
+  def S(width: Width): SInt =
+    val s = SInt(width)
+    s.setNodeKind(NodeKind.Lit)
+    s.setLitVal(BigInt(x))
+    s
 
 extension (x: Boolean)
   def B: Bool =
@@ -349,6 +382,7 @@ private[hdl] object HWLiteral:
   def set(data: Any, value: Any): Unit =
     (data, value) match
       case (u: UInt, v: BigInt) => u.setLitVal(v)
+      case (s: SInt, v: BigInt) => s.setLitVal(v)
       case (b: Bool, v: Boolean) => b.setLitVal(v)
       case (c: Clock, v: Boolean) => c.setLitVal(v)
       case (r: Reset, v: Boolean) => r.setLitVal(v)

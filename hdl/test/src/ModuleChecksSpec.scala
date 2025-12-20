@@ -13,6 +13,7 @@ private def portOut(name: String, tpe: IR.Type): IR.Port = IR.Port(id(name), Dir
 private val clockPort: IR.Port = portIn("clock", IR.ClockType)
 private val resetPort: IR.Port = portIn("reset", IR.ResetType)
 private def u(width: Int): IR.Type = IR.UIntType(Width(width))
+private def s(width: Int): IR.Type = IR.SIntType(Width(width))
 private def bundle(fields: (String, Boolean, IR.Type)*): IR.Type =
   IR.BundleType(fields.map { case (n, f, t) => IR.BundleField(id(n), f, t) })
 private def module(name: String, ports: Seq[IR.Port], body: Seq[IR.Stmt]): IR.Module =
@@ -1980,6 +1981,116 @@ def bitpat_switch_check(): Unit =
   assertDesigns("BitPat Switch Check", designs, expected)
   println("=" * 50)
 
+def sint_basic_check(): Unit =
+  final case class SIntIO(a: SInt, b: SInt, sum: SInt, diff: SInt, neg: SInt, cmp: Bool) extends Bundle[SIntIO]
+  class SIntModule extends Module:
+    given Module = this
+    val io = IO(SIntIO(
+      a = Input(SInt(Width(8))),
+      b = Input(SInt(Width(8))),
+      sum = Output(SInt(Width(8))),
+      diff = Output(SInt(Width(8))),
+      neg = Output(SInt(Width(9))),
+      cmp = Output(Bool())
+    ))
+    io.sum := io.a + io.b
+    io.diff := io.a - io.b
+    io.neg := -io.a
+    io.cmp := io.a < io.b
+
+  val elaborator = new Elaborator
+  val m = new SIntModule
+  val designs = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(designs)
+  val expected = Seq(
+    module(
+      "SIntModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("a", true, s(8)),
+          ("b", true, s(8)),
+          ("sum", false, s(8)),
+          ("diff", false, s(8)),
+          ("neg", false, s(9)),
+          ("cmp", false, IR.BoolType)
+        ))
+      ),
+      Seq(
+        IR.Connect(
+          sf(ref("io"), "sum"),
+          IR.DoPrim(IR.PrimOp.AsSInt, Seq(IR.DoPrim(IR.PrimOp.Add, Seq(sf(ref("io"), "a"), sf(ref("io"), "b")))))
+        ),
+        IR.Connect(
+          sf(ref("io"), "diff"),
+          IR.DoPrim(IR.PrimOp.AsSInt, Seq(IR.DoPrim(IR.PrimOp.Sub, Seq(sf(ref("io"), "a"), sf(ref("io"), "b")))))
+        ),
+        IR.Connect(
+          sf(ref("io"), "neg"),
+          IR.DoPrim(IR.PrimOp.Neg, Seq(sf(ref("io"), "a")))
+        ),
+        IR.Connect(
+          sf(ref("io"), "cmp"),
+          IR.DoPrim(IR.PrimOp.Lt, Seq(sf(ref("io"), "a"), sf(ref("io"), "b")))
+        )
+      )
+    )
+  )
+  println("=" * 50)
+  println("SInt Basic Check:")
+  println(rendered)
+  assertDesigns("SInt Basic Check", designs, expected)
+  println("=" * 50)
+
+def sint_conversion_check(): Unit =
+  final case class ConvIO(uIn: UInt, sIn: SInt, uOut: UInt, sOut: SInt) extends Bundle[ConvIO]
+  class ConvModule extends Module:
+    given Module = this
+    val io = IO(ConvIO(
+      uIn = Input(UInt(Width(8))),
+      sIn = Input(SInt(Width(8))),
+      uOut = Output(UInt(Width(8))),
+      sOut = Output(SInt(Width(9)))
+    ))
+    io.uOut := io.sIn.asUInt
+    io.sOut := io.uIn.asSInt
+
+  val elaborator = new Elaborator
+  val m = new ConvModule
+  val designs = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(designs)
+  val expected = Seq(
+    module(
+      "ConvModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("uIn", true, u(8)),
+          ("sIn", true, s(8)),
+          ("uOut", false, u(8)),
+          ("sOut", false, s(9))
+        ))
+      ),
+      Seq(
+        IR.Connect(
+          sf(ref("io"), "uOut"),
+          IR.DoPrim(IR.PrimOp.AsUInt, Seq(sf(ref("io"), "sIn")))
+        ),
+        IR.Connect(
+          sf(ref("io"), "sOut"),
+          IR.DoPrim(IR.PrimOp.Cvt, Seq(sf(ref("io"), "uIn")))
+        )
+      )
+    )
+  )
+  println("=" * 50)
+  println("SInt Conversion Check:")
+  println(rendered)
+  assertDesigns("SInt Conversion Check", designs, expected)
+  println("=" * 50)
+
 object ModuleChecksSpec extends TestSuite:
   val tests = Tests {
     test("simple_module_test") { simple_module_test() }
@@ -2009,4 +2120,6 @@ object ModuleChecksSpec extends TestSuite:
     test("reverse_check") { reverse_check() }
     test("bitpat_check") { bitpat_check() }
     test("bitpat_switch_check") { bitpat_switch_check() }
+    test("sint_basic_check") { sint_basic_check() }
+    test("sint_conversion_check") { sint_conversion_check() }
   }
