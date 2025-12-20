@@ -36,7 +36,8 @@ object RetireInfoIf:
 case class CoreIf(
   fetch_uops: Vec[Decoupled[UOp]],
   redirect: RedirectIf,
-  retire_info: Vec[RetireInfoIf]
+  retire_info: Vec[RetireInfoIf],
+  bpu_update: Valid[BPUUpdate]
 ) extends Bundle[CoreIf]
 
 object CoreIf:
@@ -44,7 +45,8 @@ object CoreIf:
     CoreIf(
       fetch_uops    = Flipped(Vec.fill(p.coreWidth)(Decoupled(UOp(p)))),
       redirect      = RedirectIf(p),
-      retire_info   = Vec.fill(p.coreWidth)(RetireInfoIf(p))
+      retire_info   = Vec.fill(p.coreWidth)(RetireInfoIf(p)),
+      bpu_update    = Valid(BPUUpdate(p))
     )
 
 class Core(p: CoreParams) extends Module with CoreCacheable(p):
@@ -206,6 +208,24 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(mem_cfi_target)
     dontTouch(mem_cfi_taken)
 
+    val mem_cfi_valids = Wire(Vec.fill(coreWidth)(Bool()))
+    for (i <- 0 until coreWidth) {
+      mem_cfi_valids(i) := mem_uops(i).valid && mem_uops(i).bits.ctrl.is_cfi
+    }
+
+    val bpu_update = Wire(Valid(BPUUpdate(p)))
+    bpu_update.valid := mem_cfi_valids.reduce(_ || _)
+    val bpu_update_idx = Wire(UInt(log2Ceil(coreWidth max 2).W))
+    bpu_update_idx := 0.U
+    when (bpu_update.valid) {
+      bpu_update_idx := PriorityEncoder(Cat(mem_cfi_valids.reverse))
+    }
+    bpu_update.bits.pc := mem_uops(bpu_update_idx).bits.pc
+    bpu_update.bits.target := mem_cfi_target(bpu_update_idx)
+    bpu_update.bits.taken := mem_cfi_taken(bpu_update_idx)
+    bpu_update.bits.is_call := mem_uops(bpu_update_idx).bits.ctrl.jal || mem_uops(bpu_update_idx).bits.ctrl.jalr
+    bpu_update.bits.is_ret := mem_uops(bpu_update_idx).bits.ctrl.jalr && (mem_uops(bpu_update_idx).bits.rs1 === 1.U)
+
     val mem_redirect_valid = mem_cfi_taken.reduce(_ || _)
     val mem_cfi_idx = Wire(UInt(log2Ceil(coreWidth + 1).W))
     mem_cfi_idx := PriorityEncoder(Cat(mem_cfi_taken.reverse))
@@ -214,6 +234,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     io.redirect.valid  := mem_redirect_valid
     io.redirect.target := mem_cfi_target(mem_cfi_idx)
     dontTouch(io.redirect)
+    io.bpu_update := bpu_update
 
     when (mem_redirect_valid) {
       dec_clear := true.B
