@@ -140,7 +140,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       alu(i).io.fn  := ex_uops(i).bits.ctrl.alu_op
 
       // TODO
-      alu(i).io.dw  := CoreConstants.DW.DW32.EN
+      alu(i).io.dw  := CoreConstants.DW.DW64.EN
 
       switch (ex_uops(i).bits.ctrl.sel_alu1) {
         import ALUOp1._
