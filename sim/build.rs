@@ -313,14 +313,14 @@ fn generate_rust_bindings(top: &str, signals: &Vec<Signal>, output_path: &str) -
 }
 
 fn main() -> std::io::Result<()> {
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=test-outputs/chirrtl");
-    println!("cargo:rerun-if-changed=test-outputs/verilog");
-
     let sv_file_path =
         env::var("SV_FILE").unwrap_or_else(|_| "./test-outputs/verilog/Tile.sv".to_string());
     let filelist_path =
         env::var("FILELIST").unwrap_or_else(|_| "./test-outputs/verilog/filelist.f".to_string());
+
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed={}", sv_file_path);
+    println!("cargo:rerun-if-changed={}", filelist_path);
     let build_dir = env::var("BUILD_DIR").unwrap_or_else(|_| "test-outputs/verilog".to_string());
 
     let mut cwd = env::current_dir()?;

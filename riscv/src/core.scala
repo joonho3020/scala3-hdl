@@ -82,8 +82,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch( ex_stall)
     dontTouch(mem_stall)
 
-    val dcache = Module(new DCache(p, log2Ceil(coreWidth)))
-    dcache.io.mem <> io.mem
+    val dcache = Module(new DCache(p))
+    io.mem <> dcache.io.mem
 
     dcache.io.core.s0_req.valid := false.B
     dcache.io.core.s0_req.bits := DontCare
@@ -96,7 +96,6 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val dc_resp_data = dcache.io.core.s2_resp.bits.data
 
     val mem_waiting = Reg(Bool())
-
     val mem_has_mem_op = Wire(Bool())
 
     // -----------------------------------------------------------------------

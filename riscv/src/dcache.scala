@@ -71,27 +71,28 @@ object DCacheBundle:
       mem = MagicMemIf(p)
     )
 
-class DCache(p: CoreParams, tagBits: Int) extends Module:
+class DCache(p: CoreParams) extends Module:
   given Module = this
+
+  val dc = p.dc
+  val nSets = dc.nSets
+  val nWays = dc.nWays
+  assert((nSets & (nSets-1)) == 0)
+  assert((nWays & (nWays-1)) == 0)
+  assert(p.memLineBytes == dc.cacheLineBytes)
+
+  val lineBytes = dc.cacheLineBytes
+  val lineBits = lineBytes * 8
+  val lineOffBits = log2Ceil(lineBytes)
+  val setIdxBits = log2Ceil(nSets)
+  val tagBits = p.xlenBits - (setIdxBits + lineOffBits)
+  val tagOffBits = setIdxBits + lineOffBits
+
   val io = IO(DCacheBundle(p, tagBits))
 
   body {
-    val dc = p.dc
-    val nSets = dc.nSets
-    val nWays = dc.nWays
-    assert((nSets & (nSets-1)) == 0)
-    assert((nWays & (nWays-1)) == 0)
-    assert(p.memLineBytes == dc.cacheLineBytes)
-
-    val lineBytes = dc.cacheLineBytes
-    val lineBits = lineBytes * 8
-    val lineOffBits = log2Ceil(lineBytes)
-    val setIdxBits = log2Ceil(nSets)
-    val cacheTagBits = p.xlenBits - (setIdxBits + lineOffBits)
-    val tagOffBits = setIdxBits + lineOffBits
-
-    def VecTagEntry(entries: Int): Vec[TagEntry] =
-      Vec.fill(entries)(TagEntry(cacheTagBits))
+    def VecTagEntry(entries: Int): Vec[UInt] =
+      Vec.fill(entries)(UInt(tagBits.W))
 
     def VecDataEntry(bytes: Int): Vec[UInt] =
       Vec.fill(bytes)(UInt(8.W))
@@ -207,7 +208,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module:
     val miss_victim    = Reg(UInt(log2Ceil(nWays).W))
     val miss_req       = Reg(DCacheReq(p, tagBits))
 
-    val victim_tag   = Reg(UInt(cacheTagBits.W))
+    val victim_tag   = Reg(UInt(tagBits.W))
     val victim_valid = Reg(Bool())
     val victim_dirty = Reg(Bool())
     val victim_line  = Reg(UInt(lineBits.W))
@@ -252,7 +253,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module:
     val s1_tag_hit_vec = s1_tags.zipWithIndex.map((entry, way) => {
       s1_req.valid &&
       valid_array(s1_set)(way) &&
-      (entry.tag === s1_paddr_tag) &&
+      (entry === s1_paddr_tag) &&
       io.core.s1_paddr.valid
     })
 
@@ -314,7 +315,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module:
 
     val mstate_prev = RegNext(mstate)
     when (mstate_prev === Idle.EN && mstate === EvictReq.EN) {
-      victim_tag := s1_tags(miss_victim).tag
+      victim_tag := s1_tags(miss_victim)
       for (i <- 0 until nWays) {
         when (i.U === miss_victim) {
           victim_line := Cat(data_array(i).readPorts(0).data.reverse)
@@ -326,10 +327,14 @@ class DCache(p: CoreParams, tagBits: Int) extends Module:
     val fill_data = Wire(UInt(lineBits.W))
     fill_data := DontCare
 
+    io.mem.req.valid := mstate === EvictReq.EN || mstate === RefillReq.EN
+    io.mem.req.bits  := DontCare
+
+
     switch (mstate) {
       is (EvictReq.EN) {
         io.mem.req.bits.addr := Mux(mstate_prev === Idle.EN,
-          blockAlign(s1_tags(miss_victim).tag << tagOffBits),
+          blockAlign(s1_tags(miss_victim) << tagOffBits),
           blockAlign(victim_tag << tagOffBits))
 
         for (i <- 0 until nWays) {
@@ -367,7 +372,8 @@ class DCache(p: CoreParams, tagBits: Int) extends Module:
         when (io.mem.resp.valid) {
           val replace_tag = Wire(VecTagEntry(nWays))
           replace_tag := DontCare
-          replace_tag(miss_victim).tag   := miss_tag
+          replace_tag(miss_victim) := miss_tag
+          dontTouch(replace_tag)
 
           val write_mask = Wire(Vec.fill(nWays)(Bool()))
           write_mask.zipWithIndex.foreach((wm, idx) => {
@@ -403,9 +409,6 @@ class DCache(p: CoreParams, tagBits: Int) extends Module:
       }
     }
 
-    io.mem.req.valid := mstate === EvictReq.EN || mstate === RefillReq.EN
-    io.mem.req.bits  := DontCare
-
     // -----------------------------------------------------------------------
     // S2
     // - Send back response
@@ -418,7 +421,8 @@ class DCache(p: CoreParams, tagBits: Int) extends Module:
     val s2_miss_req = RegNext(miss_req)
     val s2_miss_fill_data = RegNext(fill_data)
 
-    io.core.s2_resp := DontCare
+    io.core.s2_resp.valid := false.B
+    io.core.s2_resp.bits := DontCare
 
     when (s2_hit && s2_req.valid) {
       io.core.s2_resp.valid := true.B
@@ -458,4 +462,34 @@ class DCache(p: CoreParams, tagBits: Int) extends Module:
         }
       }
     }
+
+    dontTouch(dirty_array)
+    dontTouch(valid_array)
+    dontTouch(s1_miss)
+
+
+    dontTouch(mstate)
+    dontTouch(miss_set)
+    dontTouch(miss_tag)
+    dontTouch(miss_victim)
+    dontTouch(miss_req)
+
+    dontTouch(victim_tag)
+    dontTouch(victim_valid)
+    dontTouch(victim_dirty)
+    dontTouch(victim_line)
+    dontTouch(refill_line)
+
+    dontTouch(fill_data)
+
+    dontTouch(s0_req)
+    dontTouch(s2_req)
+
+    dontTouch(s2_hit)
+    dontTouch(s2_hit_way)
+    dontTouch(s2_req)
+    dontTouch(s2_miss_req)
+    dontTouch(s2_miss_fill_data)
+
+    dontTouch(io.core.s2_resp)
   }

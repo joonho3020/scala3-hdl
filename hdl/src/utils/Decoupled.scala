@@ -12,6 +12,16 @@ object Decoupled:
       bits  = Output(x)
     )
 
+object DecoupledHelper:
+  def apply(rvs: Bool*) = new DecoupledHelper(rvs)
+
+class DecoupledHelper(val rvs: Seq[Bool]):
+  def fire(exclude: Bool, includes: Bool*)(using m: Module) =
+    require(rvs.contains(exclude), "Excluded Bool not present in DecoupledHelper! Note that DecoupledHelper uses referential equality for exclusion! If you don't want to exclude anything, use fire()!")
+    (rvs.filter(_ ne exclude) ++ includes).reduce(_ && _)
+
+  def fire()(using m: Module) = rvs.reduce(_ && _)
+
 case class QueueBundle[T <: HWData](
   enq: Decoupled[T],
   deq: Decoupled[T]

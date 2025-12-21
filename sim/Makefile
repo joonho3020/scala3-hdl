@@ -1,4 +1,4 @@
-.PHONY: all sim clean
+.PHONY: all sim clean test-all
 
 RISCV_SOURCES := $(shell find ../riscv/src -name "*.scala" 2>/dev/null)
 VERILOG_OUTPUT := test-outputs/chirrtl/Tile.fir
@@ -18,3 +18,9 @@ clean:
 	rm -rf test-outputs
 	rm -f libVdut.so
 	rm -f *.vcd
+
+test-all: verilog
+	@for hex in tests/*.hex; do \
+		echo "Running $$hex..."; \
+		cargo run --release -- $$hex || exit 1; \
+	done

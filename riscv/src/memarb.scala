@@ -20,28 +20,34 @@ class MemArbiter(p: CoreParams) extends Module with CoreCacheable(p):
   val io = IO(MemArbIO(p))
   body {
     val busy = RegInit(false.B)
-    val owner = Reg(Bool())
+    val ownerD = Reg(Bool())
+    val ownerI = !ownerD
 
-    val chooseD = io.dcache.req.valid && !busy
-    val chooseI = io.icache.req.valid && !busy && !io.dcache.req.valid
+    val chooseD = io.dcache.req.valid
+    val chooseI = io.icache.req.valid && !io.dcache.req.valid
 
-    io.mem.req.valid := (chooseD || chooseI) && !busy
-    io.mem.req.bits := Mux(chooseD, io.dcache.req.bits, io.icache.req.bits)
+    val request = DecoupledHelper(
+      io.mem.req.ready,
+      !busy)
 
-    io.dcache.req.ready := chooseD && io.mem.req.ready && !busy
-    io.icache.req.ready := chooseI && io.mem.req.ready && !busy
+    io.mem.req.valid := request.fire(io.mem.req.ready, chooseD) ||
+                        request.fire(io.mem.req.ready, chooseI)
+    io.mem.req.bits  := Mux(chooseD, io.dcache.req.bits, io.icache.req.bits)
+
+    io.dcache.req.ready := request.fire() && chooseD
+    io.icache.req.ready := request.fire() && chooseI
 
     when (io.mem.req.fire) {
       busy := true.B
-      owner := chooseD
+      ownerD := chooseD
     }
 
     when (io.mem.resp.valid) {
       busy := false.B
     }
 
-    io.dcache.resp.valid := io.mem.resp.valid && busy && owner
-    io.icache.resp.valid := io.mem.resp.valid && busy && !owner
-    io.dcache.resp.bits  := io.mem.resp.bits
-    io.icache.resp.bits  := io.mem.resp.bits
+    io.dcache.resp.valid := io.mem.resp.valid && busy && ownerD
+    io.icache.resp.valid := io.mem.resp.valid && busy && ownerI
+    io.dcache.resp.bits := io.mem.resp.bits
+    io.icache.resp.bits := io.mem.resp.bits
   }
