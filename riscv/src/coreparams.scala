@@ -8,21 +8,36 @@ case class ICacheParams(
   cacheLineBytes: Int = 64
 ) derives StableHash
 
+case class DCacheParams(
+  nSets: Int = 64,
+  nWays: Int = 4,
+  cacheLineBytes: Int = 64,
+  mshrs: Int = 2
+) derives StableHash
+
 case class BPUParams(
   bhtEntries: Int = 128,
   btbEntries: Int = 32,
   rasEntries: Int = 8
 ) derives StableHash
 
+case class LSUParams(
+  lqEntries: Int = 8,
+  sqEntries: Int = 8
+) derives StableHash
+
 case class CoreParams(
   pcBits: Int,
   xlenBits: Int,
+  paddrBits: Int,
   coreWidth: Int,
   icacheFetchBytes: Int,
   instBytes: Int = 4,
   ic: ICacheParams,
+  bpu: BPUParams = BPUParams(),
   aluPipes: Int,
-  bpu: BPUParams = BPUParams()
+  dc: DCacheParams,
+  lsu: LSUParams,
 ) derives StableHash:
   def xlenBytes: Int = xlenBits / 8
 
@@ -33,6 +48,8 @@ case class CoreParams(
   def fetchWidth: Int = coreWidth
   def fetchBytes: Int = coreWidth * instBytes
   def coreInstBytes: Int = instBytes
+  def memLineBytes: Int = ic.cacheLineBytes
+  def memLineWords: Int = memLineBytes / 4
 
   def fetchAlign(addr: UInt)(using m: Module) = ~(~addr | (fetchBytes-1).U)
   def blockAlign(addr: UInt)(using m: Module) = ~(~addr | (ic.cacheLineBytes-1).U)

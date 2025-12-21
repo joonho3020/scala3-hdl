@@ -50,7 +50,7 @@ case class FrontendIf(
 object FrontendIf:
   def apply(p: CoreParams): FrontendIf =
     FrontendIf(
-      mem = MagicMemIf(p),
+      mem = Flipped(MagicMemIf(p)),
       redirect = Flipped(RedirectIf(p)),
       uops = Vec.fill(p.coreWidth)(Decoupled(UOp(p))),
       bpu_update = Flipped(Valid(BPUUpdate(p)))

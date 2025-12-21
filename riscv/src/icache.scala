@@ -68,14 +68,12 @@ class ICache(
     def clOffset(addr: UInt): UInt =
       addr(lineOffBits-1, log2Ceil(p.instBytes))
 
-    io.mem.req.valid := false.B
-    io.mem.req.bits.addr := DontCare
-
     val miss_busy     = RegInit(false.B)
     val miss_set      = Reg(UInt(setIdxBits.W))
     val miss_tag      = Reg(UInt(tagBits.W))
     val miss_victim   = Reg(UInt(log2Ceil(nWays).W))
     val miss_req_addr = Reg(UInt(p.pcBits.W))
+    val miss_req_pending = RegInit(false.B)
 
     // -----------------------------------------------------------------------
     // Stage 0
@@ -130,9 +128,7 @@ class ICache(
       val req_addr = p.blockAlign(s1_paddr)
       miss_req_addr := req_addr
 
-      // Send memory request... assume single cycle response for now
-      io.mem.req.valid := true.B
-      io.mem.req.bits.addr := req_addr
+      miss_req_pending := true.B
     }
 
     when (io.mem.resp.valid && miss_busy) {
@@ -154,6 +150,17 @@ class ICache(
       data_array.writePorts(0).write(miss_set, replace_data, write_mask)
 
       miss_busy := false.B
+      miss_req_pending := false.B
+    }
+
+    io.mem.req.valid := miss_req_pending
+    io.mem.req.bits.addr := miss_req_addr
+    io.mem.req.bits.tpe  := MagicMemMsg.Read.EN
+    io.mem.req.bits.data := DontCare
+    io.mem.req.bits.mask := DontCare
+
+    when (io.mem.req.fire) {
+      miss_req_pending := false.B
     }
 
     // -----------------------------------------------------------------------

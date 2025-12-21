@@ -16,12 +16,28 @@ S0 S1 S2 FB
 
 ## Backend:
 
+- Fix this to OoO later
+
 D E M W
 
 - D: decode & register file lookup
 - E: execute
 - M: memory
 - W: writeback
+
+## LSU:
+
+Dcache: 3-stage blocking, change this to nonblocking later
+
+test back to back read & writes
+
+## TODOs:
+
+- OoO execution support
+- Forwarding network
+- D$ non-blocking
+- Better branch prediction
+- I$ data array banking
 
 ## Target spec
 

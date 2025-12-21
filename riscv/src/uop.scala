@@ -64,6 +64,18 @@ object CoreConstants:
       DW32,
       DW64
 
+  enum MemWidth:
+    case
+      B,
+      H,
+      W,
+      D
+
+  enum MemOp:
+    case
+      Ld,
+      St
+
 case class CtrlSignals(
   valid:    Bool,
   br:       Bool,
@@ -74,6 +86,9 @@ case class CtrlSignals(
   sel_alu1: HWEnum[CoreConstants.ALUOp1],
   sel_alu2: HWEnum[CoreConstants.ALUOp2],
   alu_op:   HWEnum[ALUParams.Opcode],
+  mem_op:   HWEnum[CoreConstants.MemOp],
+  mem_width: HWEnum[CoreConstants.MemWidth],
+  mem_signed: Bool,
 ) extends Bundle[CtrlSignals]:
 
   def is_cfi(using m: Module): Bool =
@@ -87,6 +102,8 @@ object CtrlSignals:
   import Immediates._
   import ALUOp1._
   import ALUOp2._
+  import MemWidth._
+  import MemOp._
 
   def apply(): CtrlSignals =
     new CtrlSignals(
@@ -99,6 +116,9 @@ object CtrlSignals:
       sel_alu1 = HWEnum(ALUOp1),
       sel_alu2 = HWEnum(ALUOp2),
       alu_op   = HWEnum(Opcode),
+      mem_op   = HWEnum(MemOp),
+      mem_width = HWEnum(MemWidth),
+      mem_signed = Bool(),
     )
 
   def default_assign(ctrl: CtrlSignals)(using m: Module) =
@@ -111,6 +131,9 @@ object CtrlSignals:
     ctrl.sel_alu1 := DontCare
     ctrl.sel_alu2 := DontCare
     ctrl.alu_op   := DontCare
+    ctrl.mem_op   := DontCare
+    ctrl.mem_width := DontCare
+    ctrl.mem_signed := DontCare
 
   def set(
     ctrl: CtrlSignals,
@@ -122,7 +145,10 @@ object CtrlSignals:
     sel_imm:  HWEnum[Immediates]       | DontCare.type,
     sel_alu1: HWEnum[ALUOp1]           | DontCare.type,
     sel_alu2: HWEnum[ALUOp2]           | DontCare.type,
-    alu_op:   HWEnum[ALUParams.Opcode] | DontCare.type
+    alu_op:   HWEnum[ALUParams.Opcode] | DontCare.type,
+    mem_op:   HWEnum[MemOp]            | DontCare.type,
+    mem_width: HWEnum[MemWidth]        | DontCare.type,
+    mem_signed: Bool                   | DontCare.type,
   )(using m: Module) =
     ctrl.valid := valid
     ctrl.br       := br
@@ -133,6 +159,9 @@ object CtrlSignals:
     ctrl.sel_alu1 := sel_alu1
     ctrl.sel_alu2 := sel_alu2
     ctrl.alu_op := alu_op
+    ctrl.mem_op := mem_op
+    ctrl.mem_width := mem_width
+    ctrl.mem_signed := mem_signed
 
   // TODO: Generate proper decoding logic w/ logic minimizer
   def decode(ctrl: CtrlSignals, inst: UInt)(using m: Module): CtrlSignals =
@@ -146,37 +175,48 @@ object CtrlSignals:
        *                       rd_wen
        *                        jalr|
        *                       jal| |
-       *                     br | | |                        sel_alu2
-       *                valid | | | |   sel_imm       sel_alu1      |     alu_op
-                            | | | | |         |              |      |          | */
-      is(ADD  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN, FN_ADD.EN) }
-      is(SUB  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN, FN_SUB.EN) }
-      is( OR  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN,  FN_OR.EN) }
-      is(AND  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN, FN_AND.EN) }
-      is(XOR  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN, FN_XOR.EN) }
-      is(ADDI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN) }
-      is(XORI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_XOR.EN) }
-      is( ORI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN,  FN_OR.EN) }
-      is(ANDI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_AND.EN) }
-      is( LUI ) { set(ctrl, Y,N,N,N,Y, IMM_U.EN,ALUOp1.ZERO.EN,IMM.EN, FN_ADD.EN) }
-      is(AUIPC) { set(ctrl, Y,N,N,N,Y, IMM_U.EN,         PC.EN,IMM.EN, FN_ADD.EN) }
-      is(SLT  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN, FN_SLT.EN) }
-      is(SLTI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_SLT.EN) }
-      is(SLTU ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,RS2.EN,FN_SLTU.EN) }
-      is(SLTIU) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN,FN_SLTU.EN) }
-      is(SLL  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN,  FN_SL.EN) }
-      is(SLLI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN,  FN_SL.EN) }
-      is(SRL  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN,  FN_SR.EN) }
-      is(SRLI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN,  FN_SR.EN) }
-      is(SRA  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN, FN_SRA.EN) }
-      is(SRAI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_SRA.EN) }
-      is(JAL  ) { set(ctrl, Y,N,Y,N,Y,IMM_UJ.EN,         PC.EN,IMM.EN, FN_ADD.EN) }
-      is(JALR ) { set(ctrl, Y,N,N,Y,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN) }
-      is(BEQ  ) { set(ctrl, Y,Y,N,N,N,IMM_SB.EN,        RS1.EN,RS2.EN, FN_SEQ.EN) }
-      is(BNE  ) { set(ctrl, Y,Y,N,N,N,IMM_SB.EN,        RS1.EN,RS2.EN, FN_SNE.EN) }
-      is(BLT  ) { set(ctrl, Y,Y,N,N,N,IMM_SB.EN,        RS1.EN,RS2.EN, FN_SLT.EN) }
-      is(BGE  ) { set(ctrl, Y,Y,N,N,N,IMM_SB.EN,        RS1.EN,RS2.EN, FN_SGE.EN) }
-      is(BLTU ) { set(ctrl, Y,Y,N,N,N,IMM_SB.EN,        RS1.EN,RS2.EN,FN_SLTU.EN) }
-      is(BGEU ) { set(ctrl, Y,Y,N,N,N,IMM_SB.EN,        RS1.EN,RS2.EN,FN_SGEU.EN) }
+       *                     br | | |                        sel_alu2           mem_op
+       *                valid | | | |   sel_imm       sel_alu1      |     alu_op     |
+                            | | | | |         |              |      |          |     |  */
+      is(ADD  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN, FN_ADD.EN,    X, X, X) }
+      is(SUB  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN, FN_SUB.EN,    X, X, X) }
+      is( OR  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN,  FN_OR.EN,    X, X, X) }
+      is(AND  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN, FN_AND.EN,    X, X, X) }
+      is(XOR  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN, FN_XOR.EN,    X, X, X) }
+      is(ADDI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,    X, X, X) }
+      is(XORI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_XOR.EN,    X, X, X) }
+      is( ORI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN,  FN_OR.EN,    X, X, X) }
+      is(ANDI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_AND.EN,    X, X, X) }
+      is( LUI ) { set(ctrl, Y,N,N,N,Y, IMM_U.EN,ALUOp1.ZERO.EN,IMM.EN, FN_ADD.EN,    X, X, X) }
+      is(AUIPC) { set(ctrl, Y,N,N,N,Y, IMM_U.EN,         PC.EN,IMM.EN, FN_ADD.EN,    X, X, X) }
+      is(SLT  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN, FN_SLT.EN,    X, X, X) }
+      is(SLTI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_SLT.EN,    X, X, X) }
+      is(SLTU ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,RS2.EN,FN_SLTU.EN,    X, X, X) }
+      is(SLTIU) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN,FN_SLTU.EN,    X, X, X) }
+      is(SLL  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN,  FN_SL.EN,    X, X, X) }
+      is(SLLI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN,  FN_SL.EN,    X, X, X) }
+      is(SRL  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN,  FN_SR.EN,    X, X, X) }
+      is(SRLI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN,  FN_SR.EN,    X, X, X) }
+      is(SRA  ) { set(ctrl, Y,N,N,N,Y,        X,        RS1.EN,RS2.EN, FN_SRA.EN,    X, X, X) }
+      is(SRAI ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_SRA.EN,    X, X, X) }
+      is(JAL  ) { set(ctrl, Y,N,Y,N,Y,IMM_UJ.EN,         PC.EN,IMM.EN, FN_ADD.EN,    X, X, X) }
+      is(JALR ) { set(ctrl, Y,N,N,Y,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,    X, X, X) }
+      is(BEQ  ) { set(ctrl, Y,Y,N,N,N,IMM_SB.EN,        RS1.EN,RS2.EN, FN_SEQ.EN,    X, X, X) }
+      is(BNE  ) { set(ctrl, Y,Y,N,N,N,IMM_SB.EN,        RS1.EN,RS2.EN, FN_SNE.EN,    X, X, X) }
+      is(BLT  ) { set(ctrl, Y,Y,N,N,N,IMM_SB.EN,        RS1.EN,RS2.EN, FN_SLT.EN,    X, X, X) }
+      is(BGE  ) { set(ctrl, Y,Y,N,N,N,IMM_SB.EN,        RS1.EN,RS2.EN, FN_SGE.EN,    X, X, X) }
+      is(BLTU ) { set(ctrl, Y,Y,N,N,N,IMM_SB.EN,        RS1.EN,RS2.EN,FN_SLTU.EN,    X, X, X) }
+      is(BGEU ) { set(ctrl, Y,Y,N,N,N,IMM_SB.EN,        RS1.EN,RS2.EN,FN_SGEU.EN,    X, X, X) }
+      is(LB   ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,Ld.EN, MemWidth.B.EN, Y) }
+      is(LH   ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,Ld.EN, MemWidth.H.EN, Y) }
+      is(LW   ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,Ld.EN, MemWidth.W.EN, Y) }
+      is(LD   ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,Ld.EN, MemWidth.D.EN, Y) }
+      is(LBU  ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,Ld.EN, MemWidth.B.EN, N) }
+      is(LHU  ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,Ld.EN, MemWidth.H.EN, N) }
+      is(LWU  ) { set(ctrl, Y,N,N,N,Y, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,Ld.EN, MemWidth.W.EN, N) }
+      is(SB   ) { set(ctrl, Y,N,N,N,N, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,St.EN, MemWidth.B.EN, X) }
+      is(SH   ) { set(ctrl, Y,N,N,N,N, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,St.EN, MemWidth.H.EN, X) }
+      is(SW   ) { set(ctrl, Y,N,N,N,N, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,St.EN, MemWidth.W.EN, X) }
+      is(SD   ) { set(ctrl, Y,N,N,N,N, IMM_I.EN,        RS1.EN,IMM.EN, FN_ADD.EN,St.EN, MemWidth.D.EN, X) }
     }
     ctrl

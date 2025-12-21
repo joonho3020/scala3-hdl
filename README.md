@@ -1059,3 +1059,12 @@ switch (inst.asBitPat) {
 ```
 
 - It would be cool if we can call espresso on switch statements during IR compile time. Is this desirable..?
+
+---
+
+Connection operators
+
+- := : only for base HWData
+- <> : for aggregate types
+- type signature
+    - lhs: T <: HWData rhs: T <: HWData | DontCare

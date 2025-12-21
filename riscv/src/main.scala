@@ -28,6 +28,7 @@ def runFirtool(firFile: String): (Int, String) =
   val p = CoreParams(
     pcBits = 64,
     xlenBits = 64,
+    paddrBits = 64,
     coreWidth = 2,
     icacheFetchBytes = 2 * 4,
     instBytes = 4,
@@ -35,6 +36,11 @@ def runFirtool(firFile: String): (Int, String) =
       nSets = 8,
       nWays = 4,
       cacheLineBytes = 64),
+    dc = DCacheParams(
+      nSets = 8,
+      nWays = 4,
+      cacheLineBytes = 64,
+      mshrs = 2),
     aluPipes = 2,
   )
 

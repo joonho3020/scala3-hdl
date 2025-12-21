@@ -1,7 +1,7 @@
 package riscv
 
 import hdl._
-import CoreConstants.{ALUOp1, ALUOp2}
+import CoreConstants.{ALUOp1, ALUOp2, MemOp}
 
 case class RedirectIf(
   valid:  Bool,
@@ -37,7 +37,8 @@ case class CoreIf(
   fetch_uops: Vec[Decoupled[UOp]],
   redirect: RedirectIf,
   retire_info: Vec[RetireInfoIf],
-  bpu_update: Valid[BPUUpdate]
+  bpu_update: Valid[BPUUpdate],
+  mem: MagicMemIf
 ) extends Bundle[CoreIf]
 
 object CoreIf:
@@ -46,7 +47,8 @@ object CoreIf:
       fetch_uops    = Flipped(Vec.fill(p.coreWidth)(Decoupled(UOp(p)))),
       redirect      = RedirectIf(p),
       retire_info   = Vec.fill(p.coreWidth)(RetireInfoIf(p)),
-      bpu_update    = Valid(BPUUpdate(p))
+      bpu_update    = Valid(BPUUpdate(p)),
+      mem           = Flipped(MagicMemIf(p))
     )
 
 class Core(p: CoreParams) extends Module with CoreCacheable(p):
@@ -178,6 +180,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val mem_alu_out = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
     val mem_alu_cmp_out = Reg(Vec.fill(coreWidth)(Bool()))
     val mem_imm     = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
+    val mem_rs2     = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
 
     for (i <- 0 until coreWidth) {
       mem_uops(i).valid := ex_uops(i).valid && !ex_clear
@@ -187,6 +190,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       mem_alu_out(i)     := alu(i).io.out
       mem_alu_cmp_out(i) := alu(i).io.cmp_out
       mem_imm(i) := ex_imm(i)
+      mem_rs2(i) := ex_rs2_rf(i)
     }
 
     val mem_branch_target = Wire(Vec.fill(coreWidth)(UInt(p.pcBits.W)))

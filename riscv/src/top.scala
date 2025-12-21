@@ -10,7 +10,7 @@ case class TileIO(
 object TileIO:
   def apply(p: CoreParams): TileIO =
     TileIO(
-      mem = MagicMemIf(p),
+      mem = Flipped(MagicMemIf(p)),
       retire_info = Vec.fill(p.coreWidth)(RetireInfoIf(p))
     )
 
@@ -20,10 +20,13 @@ class Tile(p: CoreParams) extends Module:
     dontTouch(io)
 
     val frontend = Module(new Frontend(p))
-
-    io.mem := frontend.io.mem
-
     val core = Module(new Core(p))
+    val memarb = Module(new MemArbiter(p))
+
+    memarb.io.icache := frontend.io.mem
+    memarb.io.dcache := core.io.mem
+    io.mem := memarb.io.mem
+
     core.io.fetch_uops := frontend.io.uops
     frontend.io.redirect := core.io.redirect
     frontend.io.bpu_update := core.io.bpu_update
