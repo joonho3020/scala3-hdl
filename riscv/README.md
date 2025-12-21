@@ -35,7 +35,7 @@ test back to back read & writes
 
 - OoO execution support
 - Forwarding network
-- D$ non-blocking
+- LSU & make D$ non-blocking
 - Better branch prediction
 - I$ data array banking
 

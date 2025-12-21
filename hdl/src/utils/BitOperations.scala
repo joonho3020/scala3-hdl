@@ -92,6 +92,26 @@ object Splice:
 
     Vec(elems.toSeq)
 
+  def apply(x: UInt, width: Int)(using m: Module): Vec[UInt] =
+    val inputWidth = x.getWidth match
+      case KnownWidth(v) => v
+      case _ => throw new IllegalArgumentException("Splice requires UInt with known width")
+
+    val count = inputWidth / width
+    if inputWidth % width != 0 then
+      throw new IllegalArgumentException(
+        s"Input bitwidth ${inputWidth} is not a multiple of splice width ${width}"
+      )
+
+    var offset = 0
+    val elems = (0 until count).map { _ =>
+      val elem = x(offset + width - 1, offset)
+      offset += width
+      elem
+    }
+
+    Vec(elems.toSeq)
+
   def apply(x: SInt, widths: Seq[Int])(using m: Module): Vec[SInt] =
     val inputWidth = x.getWidth match
       case KnownWidth(v) => v

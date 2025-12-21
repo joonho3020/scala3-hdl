@@ -50,7 +50,7 @@ case class FrontendIf(
 object FrontendIf:
   def apply(p: CoreParams): FrontendIf =
     FrontendIf(
-      mem = Flipped(MagicMemIf(p)),
+      mem = MagicMemIf(p),
       redirect = Flipped(RedirectIf(p)),
       uops = Vec.fill(p.coreWidth)(Decoupled(UOp(p))),
       bpu_update = Flipped(Valid(BPUUpdate(p)))
@@ -82,7 +82,11 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     // - i$ tag lookup
     // -----------------------------------------------------------------------
     val icache = Module(new ICache(p)).io
-    io.mem := icache.mem
+    io.mem.req.valid := icache.mem.req.valid
+    io.mem.req.bits := icache.mem.req.bits
+    icache.mem.req.ready := io.mem.req.ready
+
+    icache.mem.resp := io.mem.resp
 
     val ic = icache.core
     ic.s0_vaddr.valid := s0_valid

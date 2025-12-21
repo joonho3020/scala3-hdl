@@ -48,7 +48,7 @@ object CoreIf:
       redirect      = RedirectIf(p),
       retire_info   = Vec.fill(p.coreWidth)(RetireInfoIf(p)),
       bpu_update    = Valid(BPUUpdate(p)),
-      mem           = Flipped(MagicMemIf(p))
+      mem           = MagicMemIf(p)
     )
 
 class Core(p: CoreParams) extends Module with CoreCacheable(p):

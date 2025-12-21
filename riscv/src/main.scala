@@ -55,6 +55,11 @@ def runFirtool(firFile: String): (Int, String) =
   val chirrtl = elaborator.emitChirrtl(designs, top_name_hashed)
   val fir_filename = s"${top_name}.fir"
 
+  println("Elaboration Finished")
+
   writeChirrtl(fir_filename, chirrtl)
+  println("Wrote CHIRRTL File")
+
   val (exitCode, output) = runFirtool(fir_filename)
+  println("Verilog Generation Finished")
   println(output)

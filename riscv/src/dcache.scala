@@ -31,20 +31,20 @@ case class DCacheIf(
 object DCacheReq:
   def apply(p: CoreParams, tagBits: Int): DCacheReq =
     DCacheReq(
-      vaddr = Input(UInt(p.xlenBits.W)),
-      data = Input(UInt(p.xlenBits.W)),
-      size = Input(HWEnum(MemWidth)),
-      signed = Input(Bool()),
-      tpe = Input(HWEnum(MemOp)),
-      tag = Input(UInt(tagBits.W))
+      vaddr = UInt(p.xlenBits.W),
+      data = UInt(p.xlenBits.W),
+      size = HWEnum(MemWidth),
+      signed = Bool(),
+      tpe = HWEnum(MemOp),
+      tag = UInt(tagBits.W)
     )
 
 object DCacheResp:
   def apply(p: CoreParams, tagBits: Int): DCacheResp =
     DCacheResp(
-      data = Output(UInt(p.xlenBits.W)),
-      tag = Output(UInt(tagBits.W)),
-      tpe = Output(HWEnum(MemOp))
+      data = UInt(p.xlenBits.W),
+      tag = UInt(tagBits.W),
+      tpe = HWEnum(MemOp)
     )
 
 object DCacheIf:
@@ -71,7 +71,7 @@ object DCacheBundle:
       mem = MagicMemIf(p)
     )
 
-class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
+class DCache(p: CoreParams, tagBits: Int) extends Module:
   given Module = this
   val io = IO(DCacheBundle(p, tagBits))
 
@@ -129,19 +129,27 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
       ret
 
     def storeBitMask(mask: UInt): UInt =
-      Cat((0 until lineBytes).map(i => Fill(8, mask(i))).reverse)
+      val bmask = Wire(UInt(lineBits.W))
+      bmask := Cat((0 until lineBytes).map(i => Fill(8, mask(i))).reverse)
+      bmask
 
     def storeShift(data: UInt, off: UInt): UInt =
-      {
-        val ext = Cat(Seq(0.U((lineBits - p.xlenBits).W), data))
-        (ext << (off << 3))(lineBits-1, 0)
-      }
+      val ret = Wire(UInt(lineBits.W))
+      ret := data << (off << 3)
+      ret
 
     def storeMerge(data: UInt, vaddr: UInt, size: HWEnum[MemWidth], cl: UInt): UInt =
       val offset = byteOff(vaddr)
       val wdata = storeShift(data, offset)
       val wmask = storeMask(offset, size)
-      val wmask_bits = storeBitMask(Cat(wmask.reverse))
+
+      // NOTE: Doing wmask_bits = storeBitMask(Cat(wmask.reverse))
+      // increases the verilog generation time significantly (i.e. in firtool, not our stuff)
+      // perhaps there is some bitwidth inference pass pathology...?
+      val wmask_uint = Wire(UInt(lineBytes.W))
+      wmask_uint := Cat(wmask.reverse)
+      val wmask_bits = storeBitMask(wmask_uint)
+
       (cl & ~wmask_bits) | (wdata & wmask_bits)
 
     def loadData(line: UInt, off: UInt, size: HWEnum[MemWidth], signed: Bool): UInt =
@@ -173,8 +181,8 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
                      SRAM(VecDataEntry(lineBytes), nSets)
                          (reads = 1, writes = 1, readwrites = 0, masked = true))
 
-    val dirty_array = RegInit(Vec.fill(nSets)(Vec.fill(nWays)(false.B)))
-    val valid_array = RegInit(Vec.fill(nSets)(Vec.fill(nWays)(false.B)))
+    val dirty_array = Reg(Vec.fill(nSets)(Vec.fill(nWays)(false.B)))
+    val valid_array = Reg(Vec.fill(nSets)(Vec.fill(nWays)(false.B)))
 
     val lfsr = RegInit(1.U(16.W))
     lfsr := Cat(Seq(lfsr(14,0), lfsr(15) ^ lfsr(13) ^ lfsr(12) ^ lfsr(10)))
@@ -267,7 +275,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
         is(MemOp.St.EN) {
           val offset = byteOff(s1_req.bits.vaddr)
           val wdata = storeShift(s1_req.bits.data, offset)
-          val wdata_vec = Splice(wdata, Seq.fill(lineBytes)(8))
+          val wdata_vec = Splice(wdata, 8)
           val wmask = storeMask(offset, s1_req.bits.size)
 
           dirty_array(s1_set)(s1_hit_way) := true.B
@@ -326,7 +334,9 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
 
         for (i <- 0 until nWays) {
           when (i.U === miss_victim) {
-            io.mem.req.bits.data := Cat(data_array(i).readPorts(0).data.reverse)
+            val readport_data = Wire(UInt(lineBits.W))
+            readport_data := Cat(data_array(i).readPorts(0).data.reverse)
+            io.mem.req.bits.data := Splice(readport_data, p.memLineBytes/p.memLineWords * 8)
           }
         }
         io.mem.req.bits.tpe := MagicMemMsg.Write.EN 
@@ -394,6 +404,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
     }
 
     io.mem.req.valid := mstate === EvictReq.EN || mstate === RefillReq.EN
+    io.mem.req.bits  := DontCare
 
     // -----------------------------------------------------------------------
     // S2
@@ -437,5 +448,14 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
       }
       io.core.s2_resp.bits.tag := DontCare
       io.core.s2_resp.bits.tpe := s2_miss_req.tpe
+    }
+
+    when (reset.asBool) {
+      for (i <- 0 until nSets) {
+        for (j <- 0 until nWays) {
+          dirty_array(i)(j) := false.B
+          valid_array(i)(j) := false.B
+        }
+      }
     }
   }
