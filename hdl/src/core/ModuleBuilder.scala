@@ -25,13 +25,28 @@ private[hdl] final class ModuleBuilder(val moduleBaseName: String):
       usedNames += candidate
       candidate
 
+  private val indexedCounters = mutable.Map.empty[String, Int]
+
+  def allocateIndexedName(prefix: String): String =
+    val idx = indexedCounters.getOrElse(prefix, 0)
+    indexedCounters(prefix) = idx + 1
+    val candidate = s"${prefix}_$idx"
+    if usedNames.contains(candidate) then
+      allocateIndexedName(prefix)
+    else
+      usedNames += candidate
+      candidate
+
   private def isSaneName(n: String): Boolean =
     n.nonEmpty && n.matches("^[A-Za-z_][A-Za-z0-9_]*$")
 
   def allocateName(name: Option[String], prefix: String): String =
-    name.filter(n => isSaneName(n) && !usedNames.contains(n)).map { n =>
-      usedNames += n
-      n
+    name.filter(isSaneName).map { n =>
+      if !usedNames.contains(n) then
+        usedNames += n
+        n
+      else
+        allocateIndexedName(n)
     }.getOrElse(freshName(prefix))
 
   def addPort(port: IR.Port): Unit = ports += port
