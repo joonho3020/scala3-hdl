@@ -204,19 +204,19 @@ def list_operation_check(): Unit =
       ),
       Seq(
         wire("wires", u(4)),
-        wire("wire_1", u(4)),
-        wire("wire_2", u(4)),
+        wire("wires_0", u(4)),
+        wire("wires_1", u(4)),
         IR.Connect(ref("wires"), sf(ref("io"), "a")),
-        IR.Connect(ref("wire_1"), sf(ref("io"), "a")),
-        IR.Connect(ref("wire_2"), sf(ref("io"), "a")),
-        IR.Connect(ref("wires"), add(ref("wire_1"), lit("UInt<4>(3)"))),
+        IR.Connect(ref("wires_0"), sf(ref("io"), "a")),
+        IR.Connect(ref("wires_1"), sf(ref("io"), "a")),
+        IR.Connect(ref("wires"), add(ref("wires_0"), lit("UInt<4>(3)"))),
         IR.Connect(
           si(sf(ref("io"), "sum"), 0),
-          add(add(ref("wires"), ref("wire_1")), ref("wire_2"))
+          add(add(ref("wires"), ref("wires_0")), ref("wires_1"))
         ),
         IR.Connect(
           si(sf(ref("io"), "sum"), 1),
-          add(add(ref("wires"), ref("wire_1")), ref("wire_2"))
+          add(add(ref("wires"), ref("wires_0")), ref("wires_1"))
         )
       )
     )
@@ -855,22 +855,22 @@ def nested_seq_generation_check(): Unit =
       ),
       Seq(
         wire("mats", u(8)),
-        wire("wire_1", u(8)),
-        wire("wire_2", u(8)),
-        wire("wire_3", u(8)),
-        wire("wire_4", u(8)),
-        wire("wire_5", u(8)),
+        wire("mats_0", u(8)),
+        wire("mats_1", u(8)),
+        wire("mats_2", u(8)),
+        wire("mats_3", u(8)),
+        wire("mats_4", u(8)),
         IR.Connect(ref("mats"), add(sf(ref("io"), "in"), lit("UInt<8>(0)"))),
-        IR.Connect(ref("wire_1"), add(sf(ref("io"), "in"), lit("UInt<8>(1)"))),
-        IR.Connect(ref("wire_2"), add(sf(ref("io"), "in"), lit("UInt<8>(2)"))),
-        IR.Connect(ref("wire_3"), add(sf(ref("io"), "in"), lit("UInt<8>(3)"))),
-        IR.Connect(ref("wire_4"), add(sf(ref("io"), "in"), lit("UInt<8>(4)"))),
-        IR.Connect(ref("wire_5"), add(sf(ref("io"), "in"), lit("UInt<8>(5)"))),
+        IR.Connect(ref("mats_0"), add(sf(ref("io"), "in"), lit("UInt<8>(1)"))),
+        IR.Connect(ref("mats_1"), add(sf(ref("io"), "in"), lit("UInt<8>(2)"))),
+        IR.Connect(ref("mats_2"), add(sf(ref("io"), "in"), lit("UInt<8>(3)"))),
+        IR.Connect(ref("mats_3"), add(sf(ref("io"), "in"), lit("UInt<8>(4)"))),
+        IR.Connect(ref("mats_4"), add(sf(ref("io"), "in"), lit("UInt<8>(5)"))),
         IR.Connect(
           sf(ref("io"), "out"),
           add(
-            add(add(ref("mats"), ref("wire_1")), ref("wire_2")),
-            add(add(ref("wire_3"), ref("wire_4")), ref("wire_5"))
+            add(add(ref("mats"), ref("mats_0")), ref("mats_1")),
+            add(add(ref("mats_2"), ref("mats_3")), ref("mats_4"))
           )
         )
       )
@@ -1020,14 +1020,14 @@ def module_array_generation_check(): Unit =
       ),
       Seq(
         inst("leaves", "Leaf"),
-        inst("inst_1", "Leaf_2"),
-        inst("inst_2", "Leaf_3"),
+        inst("leaves_0", "Leaf_2"),
+        inst("leaves_1", "Leaf_3"),
         IR.Connect(sf(sf(ref("leaves"), "io"), "in"), sf(ref("io"), "in")),
-        IR.Connect(sf(sf(ref("inst_1"), "io"), "in"), sf(ref("io"), "in")),
-        IR.Connect(sf(sf(ref("inst_2"), "io"), "in"), sf(ref("io"), "in")),
+        IR.Connect(sf(sf(ref("leaves_0"), "io"), "in"), sf(ref("io"), "in")),
+        IR.Connect(sf(sf(ref("leaves_1"), "io"), "in"), sf(ref("io"), "in")),
         IR.Connect(
           sf(ref("io"), "out"),
-          add(add(sf(sf(ref("leaves"), "io"), "out"), sf(sf(ref("inst_1"), "io"), "out")), sf(sf(ref("inst_2"), "io"), "out"))
+          add(add(sf(sf(ref("leaves"), "io"), "out"), sf(sf(ref("leaves_0"), "io"), "out")), sf(sf(ref("leaves_1"), "io"), "out"))
         )
       )
     )
