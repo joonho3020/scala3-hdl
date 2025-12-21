@@ -161,18 +161,18 @@ object CtrlSignals:
     mem_signed: Bool                   | DontCare.type,
   )(using m: Module) =
     ctrl.valid := valid
-    ctrl.br       := br
-    ctrl.jal      := jal
-    ctrl.jalr     := jalr
-    ctrl.rd_wen := rd_wen
-    ctrl.is_mem := is_mem
-    ctrl.sel_imm := sel_imm
-    ctrl.sel_alu1 := sel_alu1
-    ctrl.sel_alu2 := sel_alu2
-    ctrl.alu_op := alu_op
-    ctrl.mem_op := mem_op
-    ctrl.mem_width := mem_width
-    ctrl.mem_signed := mem_signed
+    ctrl.br       ::= br
+    ctrl.jal      ::= jal
+    ctrl.jalr     ::= jalr
+    ctrl.rd_wen ::= rd_wen
+    ctrl.is_mem ::= is_mem
+    ctrl.sel_imm ::= sel_imm
+    ctrl.sel_alu1 ::= sel_alu1
+    ctrl.sel_alu2 ::= sel_alu2
+    ctrl.alu_op ::= alu_op
+    ctrl.mem_op ::= mem_op
+    ctrl.mem_width ::= mem_width
+    ctrl.mem_signed ::= mem_signed
 
   // TODO: Generate proper decoding logic w/ logic minimizer
   def decode(ctrl: CtrlSignals, inst: UInt)(using m: Module): CtrlSignals =

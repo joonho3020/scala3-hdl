@@ -74,7 +74,7 @@ class BitSel2 extends Module:
     Input(UInt(Width(8))),
     Output(Bool())
   ))
-  io.bit3 := io.in(3)
+  io.bit3 := io.in(3).asBool
 
 case class DataMemIO(
   writeEnable: Bool,
@@ -998,13 +998,6 @@ class SwitchEnum extends Module:
   }
   io.out := reg
 
-final case class SwitchTupleIO(
-  in_1: UInt,
-  in_2: UInt,
-  in_3: UInt,
-  out_1: UInt,
-  out_2: UInt) extends Bundle[SwitchTupleIO]
-
 case class SIntBasicIO(a: SInt, b: SInt, sum: SInt, diff: SInt, neg: SInt, cmp: Bool) extends Bundle[SIntBasicIO]
 
 class SIntBasic extends Module:
@@ -1085,6 +1078,13 @@ class SIntShift extends Module:
   io.shr := io.a >> io.amt
   io.shlConst := io.a << 4
   io.shrConst := io.a >> 2
+
+final case class SwitchTupleIO(
+  in_1: UInt,
+  in_2: UInt,
+  in_3: UInt,
+  out_1: UInt,
+  out_2: UInt) extends Bundle[SwitchTupleIO]
 
 object SwitchTupleIO:
   def apply(): SwitchTupleIO = SwitchTupleIO(

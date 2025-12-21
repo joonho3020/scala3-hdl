@@ -2091,6 +2091,74 @@ def sint_conversion_check(): Unit =
   assertDesigns("SInt Conversion Check", designs, expected)
   println("=" * 50)
 
+def connection_type_check(): Unit =
+  final case class MixedBundle(
+    in_1: UInt,
+    in_2: SInt,
+    in_3: Bool,
+    out_1: UInt,
+    out_2: SInt) extends Bundle[MixedBundle]
+
+  object MixedBundle:
+    def apply(): MixedBundle = MixedBundle(
+      Input(UInt(Width(8))),
+      Input(SInt(Width(8))),
+      Input(Bool()),
+      Output(UInt(Width(8))),
+      Output(SInt(Width(8)))
+    )
+
+  case class ConnectionTestIO(in: MixedBundle, out: MixedBundle) extends Bundle[ConnectionTestIO]
+
+  object ConnectionTestIO:
+    def apply(): ConnectionTestIO =
+      ConnectionTestIO(
+        in = MixedBundle(),
+        out = MixedBundle())
+
+  class ConnectionTest extends Module:
+    given Module = this
+    val io = IO(ConnectionTestIO())
+
+    inline val tc1 = """
+    io.out.out_1 := io.in.in_2
+    """
+    assert(typeCheckErrors(tc1).nonEmpty)
+
+    inline val tc2 = """
+    io.out := io.in
+    """
+    assert(typeCheckErrors(tc2).isEmpty)
+
+    inline val tc3 = """
+    io.out := DontCare
+    """
+    assert(typeCheckErrors(tc3).isEmpty)
+
+    inline val tc4 = """
+    io.out <> io.in
+    """
+    assert(typeCheckErrors(tc4).isEmpty)
+
+    inline val tc5 = """
+    io.out <> DontCare
+    """
+    assert(typeCheckErrors(tc5).isEmpty)
+
+    inline val tc6 = """
+    io.out.out_2 <> DontCare
+    """
+    assert(typeCheckErrors(tc6).nonEmpty)
+
+    inline val tc7 = """
+    io.out.out_2 <> io.in
+    """
+    assert(typeCheckErrors(tc7).nonEmpty)
+
+  val elaborator = new Elaborator
+  val a = new ConnectionTest
+  val designs = elaborator.elaborate(a)
+
 object ModuleChecksSpec extends TestSuite:
   val tests = Tests {
     test("simple_module_test") { simple_module_test() }
@@ -2122,4 +2190,5 @@ object ModuleChecksSpec extends TestSuite:
     test("bitpat_switch_check") { bitpat_switch_check() }
     test("sint_basic_check") { sint_basic_check() }
     test("sint_conversion_check") { sint_conversion_check() }
+    test("connection_type_check") { connection_type_check() }
   }

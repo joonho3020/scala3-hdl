@@ -303,10 +303,6 @@ private[hdl] object ModuleOps:
     }
     data
 
-extension [T <: HWData](dst: T)
-  def :=(src: T)(using m: Module): Unit =
-    ModuleOps.connect(dst, src, m)
-
 extension (lhs: UInt)
   def +&(rhs: UInt)(using m: Module): UInt =
     val w = lhs.getWidth.max(rhs.getWidth) + Width(1)

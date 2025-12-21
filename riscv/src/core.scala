@@ -83,10 +83,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(mem_stall)
 
     val dcache = Module(new DCache(p, log2Ceil(coreWidth)))
-    dcache.io.mem.req.ready := io.mem.req.ready
-    io.mem.req.valid := dcache.io.mem.req.valid
-    io.mem.req.bits := dcache.io.mem.req.bits
-    dcache.io.mem.resp := io.mem.resp
+    dcache.io.mem <> io.mem
 
     dcache.io.core.s0_req.valid := false.B
     dcache.io.core.s0_req.bits := DontCare
@@ -173,7 +170,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       val rs2_oh = (1.U(XLEN.W) << rs2_shamt)(XLEN - 1, 0)
       val imm_oh = (1.U(XLEN.W) << imm_shamt)(XLEN - 1, 0)
 
-      alu(i).io.fn  := ex_uops(i).bits.ctrl.alu_op
+      alu(i).io.fn  := ex_uops(i).bits.ctrl.alu_op.asUInt
 
       alu(i).io.dw  := CoreConstants.DW.DW64.EN
 

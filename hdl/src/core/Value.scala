@@ -56,6 +56,8 @@ sealed trait HWData extends Cloneable:
     ret.irExpr = None
     ret
 
+sealed trait AggregateHWData extends HWData
+
 sealed class UInt extends HWData:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[UInt]])
@@ -211,7 +213,7 @@ object DontCare extends HWData:
     throw new NoSuchElementException("DontCare does not carry a literal value")
   override def toString(): String = "DontCare"
 
-sealed class Vec[T <: HWData](val elems: Seq[T]) extends HWData with IterableOnce[T]:
+sealed class Vec[T <: HWData](val elems: Seq[T]) extends AggregateHWData with IterableOnce[T]:
   def iterator: Iterator[T] = elems.iterator
 
   def length: Int = elems.length
@@ -321,7 +323,7 @@ type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] = (Labels,
 
 // NOTE: Literals assume that the BundleIf is pure. That is, all fields are of HWData
 // and there is no mixing with Scala's library types such as Option, Seq, List
-trait Bundle[T] extends Selectable with HWData { self: T =>
+trait Bundle[T] extends Selectable with AggregateHWData { self: T =>
   type FieldToNode[X] = X match
     case _           => X
 

@@ -65,7 +65,7 @@
 - [x] DontTouch annos
 - [x] Fix caching support
     - Must invalidate parent modules when child modules are removed
-- [ ] Better naming macros...?
+- [x] Better naming macros...?
 - [ ] Derive Rust testbench bindings given a Bundle case class
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
 - [ ] Mixed vectors

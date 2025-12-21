@@ -23,28 +23,13 @@ class Tile(p: CoreParams) extends Module:
     val core = Module(new Core(p))
     val memarb = Module(new MemArbiter(p))
 
-    memarb.io.icache.req.valid := frontend.io.mem.req.valid
-    memarb.io.icache.req.bits := frontend.io.mem.req.bits
-    frontend.io.mem.req.ready := memarb.io.icache.req.ready
+    memarb.io.icache <> frontend.io.mem
+    memarb.io.dcache <> core.io.mem
+    io.mem <> memarb.io.mem
 
-    frontend.io.mem.resp := memarb.io.icache.resp
+    core.io.fetch_uops <> frontend.io.uops
+    frontend.io.redirect <> core.io.redirect
+    frontend.io.bpu_update <> core.io.bpu_update
 
-    memarb.io.dcache.req.valid := core.io.mem.req.valid
-    memarb.io.dcache.req.bits := core.io.mem.req.bits
-    core.io.mem.req.ready := memarb.io.dcache.req.ready
-
-    core.io.mem.resp := memarb.io.dcache.resp
-
-    io.mem.req.valid := memarb.io.mem.req.valid
-    io.mem.req.bits := memarb.io.mem.req.bits
-    memarb.io.mem.req.ready := io.mem.req.ready
-
-    memarb.io.mem.resp := io.mem.resp
-
-
-    core.io.fetch_uops := frontend.io.uops
-    frontend.io.redirect := core.io.redirect
-    frontend.io.bpu_update := core.io.bpu_update
-
-    io.retire_info := core.io.retire_info
+    io.retire_info <> core.io.retire_info
   }

@@ -124,7 +124,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module:
       val ret = Wire(Vec.fill(lineBytes)(Bool()))
       val mask = ((1.U((lineBytes + 1).W) << sizeBytes(size)) - 1.U)(lineBytes-1,0) << off
       for (i <- 0 until lineBytes) {
-        ret(i) := mask(i)
+        ret(i) := mask(i).asBool
       }
       ret
 
