@@ -35,9 +35,17 @@ private[hdl] object ModuleOps:
       }
     case _ => None
 
+  private def resolveName(
+    explicit: Option[String],
+    data: HWData,
+    fallback: String,
+    mod: Module
+  ): String =
+    mod.getBuilder.allocateName(explicit, fallback)
+
   def io[T <: HWData](t: T, name: Option[String], mod: Module): T =
-    val baseName = mod.getBuilder.allocateName(name, "io")
     val inst = HWAggregate.cloneData(t)
+    val baseName = resolveName(name, inst, "io", mod)
     inst.setNodeKind(NodeKind.IO)
     mod.register(inst, Some(baseName))
     emitPortDecl(baseName, inst)
@@ -45,16 +53,16 @@ private[hdl] object ModuleOps:
     inst
 
   def wire[T <: HWData](t: T, name: Option[String], mod: Module): T =
-    val wireName = mod.getBuilder.allocateName(name, "wire")
     val inst = HWAggregate.cloneData(t)
+    val wireName = resolveName(name, inst, "wire", mod)
     inst.setNodeKind(NodeKind.Wire)
     mod.register(inst, Some(wireName))
     mod.getBuilder.addStmt(IR.Wire(IR.Identifier(wireName), irTypeOf(inst)))
     inst
 
   def reg[T <: HWData](t: T, name: Option[String], mod: Module): T =
-    val regName = mod.getBuilder.allocateName(name, "reg")
     val inst = HWAggregate.cloneData(t)
+    val regName = resolveName(name, inst, "reg", mod)
     inst.setNodeKind(NodeKind.Reg)
     mod.register(inst, Some(regName))
     val clockExpr = exprFor(mod.getImplicitClock, mod)
@@ -69,7 +77,7 @@ private[hdl] object ModuleOps:
   def regInit[T <: HWData](t: T, name: Option[String], mod: Module): T =
     val initExpr = exprFor(t, mod)
     val inst = HWAggregate.cloneData(t)
-    val regName = mod.getBuilder.allocateName(name, "reginit")
+    val regName = resolveName(name, inst, "reginit", mod)
     inst.setNodeKind(NodeKind.Reg)
     mod.register(inst, Some(regName))
 
@@ -87,7 +95,7 @@ private[hdl] object ModuleOps:
   def wireInit[T <: HWData](t: T, name: Option[String], mod: Module): T =
     val initExpr = exprFor(t, mod)
     val inst = HWAggregate.cloneData(t)
-    val wireName = mod.getBuilder.allocateName(name, "wireinit")
+    val wireName = resolveName(name, inst, "wireinit", mod)
     inst.setNodeKind(NodeKind.Wire)
     mod.register(inst, Some(wireName))
 
