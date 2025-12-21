@@ -263,16 +263,16 @@ fn main() {
 
     dut.poke_io_mem_req_ready(1);
 
-    for cycle in 0..1000000 {
+    for cycle in 0..10000 {
         let retire_0 = get_retire_info_0(&dut);
         let retire_1 = get_retire_info_1(&dut);
 
-// if retire_0.valid {
-// println!("retire_0 pc 0x{:x}", retire_0.pc);
-// }
-// if retire_1.valid {
-// println!("retire_1 pc 0x{:x}", retire_1.pc);
-// }
+        if retire_0.valid {
+            println!("retire_0 pc 0x{:x}", retire_0.pc);
+        }
+        if retire_1.valid {
+            println!("retire_1 pc 0x{:x}", retire_1.pc);
+        }
 
         let mut halt_detected = false;
 
@@ -312,7 +312,7 @@ fn main() {
 
         if pending_mem_req {
             let line_base_addr = pending_mem_addr & !(((CACHE_LINE_WORDS * WORD_SIZE as usize) - 1) as u64);
-            println!("pending mem req 0x{:x} is_write {}", line_base_addr, pending_mem_is_write);
+// println!("pending mem req 0x{:x} is_write {}", line_base_addr, pending_mem_is_write);
 
             if pending_mem_is_write {
                 for i in 0..CACHE_LINE_WORDS {

@@ -304,7 +304,6 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val mem_mem_uop = mem_uops(mem_mem_idx)
     val mem_mem_addr = mem_alu_out(mem_mem_idx)
     val mem_mem_wdata = mem_rs2(mem_mem_idx)
-
     val mem_req_sent = Reg(Bool())
 
     when (!mem_waiting && mem_has_mem_op && !mem_flush(mem_mem_idx)) {
@@ -331,15 +330,12 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     when (dc_resp_valid) {
       mem_waiting := false.B
-    }
-
-    mem_stall := (mem_has_mem_op && !mem_flush(mem_mem_idx) && !dc_resp_valid) || mem_waiting
-    ex_stall := mem_stall
-    dec_stall := mem_stall
-
-    when (!mem_stall) {
       mem_req_sent := false.B
     }
+
+    mem_stall := (mem_has_mem_op && !mem_flush(mem_mem_idx) && !dc_resp_valid)
+    ex_stall := mem_stall
+    dec_stall := mem_stall
 
     // -----------------------------------------------------------------------
     // Stage 3: Writeback
@@ -350,12 +346,10 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val wb_load_data = Reg(UInt(XLEN.W))
 
     for (i <- 0 until coreWidth) {
-      when (!mem_stall) {
-        wb_uops(i)  := mem_uops(i)
-        wb_uops(i).valid := mem_uops(i).valid && !mem_flush(i)
-        wb_wdata(i) := mem_wdata(i)
-        wb_is_load(i) := mem_uops(i).bits.ctrl.is_load
-      }
+      wb_uops(i)  := mem_uops(i)
+      wb_uops(i).valid := mem_uops(i).valid && !mem_flush(i) && !mem_stall
+      wb_wdata(i) := mem_wdata(i)
+      wb_is_load(i) := mem_uops(i).bits.ctrl.is_load
     }
 
     when (dc_resp_valid) {
