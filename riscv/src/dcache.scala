@@ -93,6 +93,9 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
     def VecTagEntry(entries: Int): Vec[TagEntry] =
       Vec.fill(entries)(TagEntry(cacheTagBits))
 
+    def VecDataEntry(bytes: Int): Vec[UInt] =
+      Vec.fill(bytes)(UInt(8.W))
+
     def setIdx(addr: UInt): UInt =
       addr(lineOffBits + setIdxBits - 1, lineOffBits)
 
@@ -137,7 +140,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
     def storeMerge(data: UInt, vaddr: UInt, size: HWEnum[MemWidth], cl: UInt): UInt =
       val offset = byteOff(vaddr)
       val wdata = storeShift(data, offset)
-      val wmask = storeMask(offset, s1_req.bits.size)
+      val wmask = storeMask(offset, size)
       val wmask_bits = storeBitMask(Cat(wmask.reverse))
       (cl & ~wmask_bits) | (wdata & wmask_bits)
 
@@ -151,7 +154,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
         val load_b = Cat(Seq(Fill(p.xlenBits - 8, Mux(signed, raw8(7), 0.U)   ), raw8 ))
         val load_h = Cat(Seq(Fill(p.xlenBits - 16, Mux(signed, raw16(15), 0.U)), raw16))
         val load_w = Cat(Seq(Fill(p.xlenBits - 32, Mux(signed, raw32(31), 0.U)), raw32))
-        val load_d = Cat(Seq(Fill(p.xlenBits - 64, Mux(signed, raw64(63), 0.U)), raw64))
+        val load_d = raw64
         val out = Wire(UInt(p.xlenBits.W))
         out := 0.U
         switch(size) {
@@ -167,7 +170,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
                         (reads = 1, writes = 1, readwrites = 0, masked = true)
 
     val data_array = Seq.fill(nWays)(
-                     SRAM(UInt(lineBits.W), nSets)
+                     SRAM(VecDataEntry(lineBytes), nSets)
                          (reads = 1, writes = 1, readwrites = 0, masked = true))
 
     val dirty_array = RegInit(Vec.fill(nSets)(Vec.fill(nWays)(false.B)))
@@ -216,7 +219,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
       tag_array.readPorts(0).read(s0_set)
     }
 
-    io.core.s0_req.ready := is_busy(mstate) && !s1_miss
+    io.core.s0_req.ready := !is_busy(mstate) && !s1_miss
 
     // -----------------------------------------------------------------------
     // S1
@@ -264,12 +267,13 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
         is(MemOp.St.EN) {
           val offset = byteOff(s1_req.bits.vaddr)
           val wdata = storeShift(s1_req.bits.data, offset)
+          val wdata_vec = Splice(wdata, Seq.fill(lineBytes)(8))
           val wmask = storeMask(offset, s1_req.bits.size)
 
           dirty_array(s1_set)(s1_hit_way) := true.B
           for (i <- 0 until nWays) {
             when (i.U === s1_hit_way) {
-              data_array(i).writePorts(0).write(s1_set, wdata, wmask)
+              data_array(i).writePorts(0).write(s1_set, wdata_vec, wmask)
             }
           }
         }
@@ -305,7 +309,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
       victim_tag := s1_tags(miss_victim).tag
       for (i <- 0 until nWays) {
         when (i.U === miss_victim) {
-          victim_line := data_array(i).readPorts(0).data
+          victim_line := Cat(data_array(i).readPorts(0).data.reverse)
         }
       }
     }
@@ -322,7 +326,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
 
         for (i <- 0 until nWays) {
           when (i.U === miss_victim) {
-            io.mem.req.bits.data := data_array(i).readPorts(0).data
+            io.mem.req.bits.data := Cat(data_array(i).readPorts(0).data.reverse)
           }
         }
         io.mem.req.bits.tpe := MagicMemMsg.Write.EN 
@@ -368,9 +372,14 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
                                         miss_req.size,
                                         resp_data)
           fill_data := Mux(write, merged_wdata, resp_data)
+          val wdata_vec = Splice(fill_data, Seq.fill(lineBytes)(8))
+
+          val wmask = Wire(Vec.fill(lineBytes)(Bool()))
+          wmask.foreach(_ := true.B)
+
           for (i <- 0 until nWays) {
             when (i.U === miss_victim) {
-              data_array(i).writePorts(0).write(miss_set, fill_data)
+              data_array(i).writePorts(0).write(miss_set, wdata_vec, wmask)
             }
           }
 
@@ -406,7 +415,7 @@ class DCache(p: CoreParams, tagBits: Int) extends Module with CoreCacheable(p):
         when (i.U === s2_hit_way) {
           io.core.s2_resp.bits.data :=
             loadData(
-              data_array(i).readPorts(0).data,
+              Cat(data_array(i).readPorts(0).data.reverse),
               byteOff(s2_req.bits.vaddr),
               s2_req.bits.size,
               s2_req.bits.signed)

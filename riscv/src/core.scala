@@ -69,18 +69,47 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     val dec_clear = WireInit(false.B)
     val  ex_clear = WireInit(false.B)
+    val mem_clear = WireInit(false.B)
+
+    val dec_stall = WireInit(false.B)
+    val  ex_stall = WireInit(false.B)
+    val mem_stall = WireInit(false.B)
 
     dontTouch(dec_clear)
     dontTouch( ex_clear)
+    dontTouch(mem_clear)
+    dontTouch(dec_stall)
+    dontTouch( ex_stall)
+    dontTouch(mem_stall)
+
+    val dcache = Module(new DCache(p, log2Ceil(coreWidth)))
+    dcache.io.mem.req.ready := io.mem.req.ready
+    io.mem.req.valid := dcache.io.mem.req.valid
+    io.mem.req.bits := dcache.io.mem.req.bits
+    dcache.io.mem.resp := io.mem.resp
+
+    dcache.io.core.s0_req.valid := false.B
+    dcache.io.core.s0_req.bits := DontCare
+    dcache.io.core.s1_kill := false.B
+    dcache.io.core.s1_paddr := DontCare
+    dcache.io.core.s2_kill := false.B
+
+    val dc_req_fire = dcache.io.core.s0_req.fire
+    val dc_resp_valid = dcache.io.core.s2_resp.valid
+    val dc_resp_data = dcache.io.core.s2_resp.bits.data
+
+    val mem_waiting = Reg(Bool())
+
+    val mem_has_mem_op = Wire(Bool())
 
     // -----------------------------------------------------------------------
     // Stage 0: Decode & read register operands
     // -----------------------------------------------------------------------
     val dec = Module(new Decoder(p))
     dec.io.enq.zip(io.fetch_uops).foreach((d, f) => {
-      d.valid := f.valid
+      d.valid := f.valid && !dec_stall
       d.bits  := f.bits
-      f.ready := d.ready
+      f.ready := d.ready && !dec_stall
     })
 
     dec.io.deq.foreach(x => x.ready := false.B)
@@ -95,7 +124,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     dec_ready.zip(dec.io.deq.map(_.ready)).foreach((u, d) => d := u)
 
     for (i <- 0 until coreWidth) {
-      dec_ready(i)  := !dec_hazards.take(i+1).reduce(_ || _)
+      dec_ready(i)  := !dec_hazards.take(i+1).reduce(_ || _) && !dec_stall
     }
 
     val imm_gens = Seq.fill(coreWidth)(Module(new ImmGen(XLEN)))
@@ -118,15 +147,17 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val ex_imm     = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
 
     for (i <- 0 until coreWidth) {
-      when (dec_uops(i).valid && dec_ready(i) && !ex_clear) {
-        ex_uops(i).valid := true.B
-        ex_uops(i).bits  := dec_uops(i).bits
+      when (!ex_stall) {
+        when (dec_uops(i).valid && dec_ready(i) && !ex_clear) {
+          ex_uops(i).valid := true.B
+          ex_uops(i).bits  := dec_uops(i).bits
 
-        ex_rs1_rf(i) := rf(dec_uops(i).bits.rs1)
-        ex_rs2_rf(i) := rf(dec_uops(i).bits.rs2)
-        ex_imm(i)    := dec_imms(i)
-      } .otherwise {
-        ex_uops(i).valid := false.B
+          ex_rs1_rf(i) := rf(dec_uops(i).bits.rs1)
+          ex_rs2_rf(i) := rf(dec_uops(i).bits.rs2)
+          ex_imm(i)    := dec_imms(i)
+        } .otherwise {
+          ex_uops(i).valid := false.B
+        }
       }
     }
 
@@ -144,7 +175,6 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
       alu(i).io.fn  := ex_uops(i).bits.ctrl.alu_op
 
-      // TODO
       alu(i).io.dw  := CoreConstants.DW.DW64.EN
 
       switch (ex_uops(i).bits.ctrl.sel_alu1) {
@@ -183,14 +213,16 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val mem_rs2     = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
 
     for (i <- 0 until coreWidth) {
-      mem_uops(i).valid := ex_uops(i).valid && !ex_clear
-      mem_uops(i).bits  := ex_uops(i).bits
-      mem_uops(i).bits.taken := alu(i).io.cmp_out
+      when (!mem_stall) {
+        mem_uops(i).valid := ex_uops(i).valid && !ex_clear
+        mem_uops(i).bits  := ex_uops(i).bits
+        mem_uops(i).bits.taken := alu(i).io.cmp_out
 
-      mem_alu_out(i)     := alu(i).io.out
-      mem_alu_cmp_out(i) := alu(i).io.cmp_out
-      mem_imm(i) := ex_imm(i)
-      mem_rs2(i) := ex_rs2_rf(i)
+        mem_alu_out(i)     := alu(i).io.out
+        mem_alu_cmp_out(i) := alu(i).io.cmp_out
+        mem_imm(i) := ex_imm(i)
+        mem_rs2(i) := ex_rs2_rf(i)
+      }
     }
 
     val mem_branch_target = Wire(Vec.fill(coreWidth)(UInt(p.pcBits.W)))
@@ -245,11 +277,12 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     mem_predict_success := !mem_redirect_valid && bpu_update.valid
     dontTouch(mem_predict_success)
 
-    io.redirect.valid  := mem_redirect_valid
+    io.redirect.valid  := mem_redirect_valid && !mem_stall
     io.redirect.target := mem_target_pc
-    io.bpu_update := bpu_update
+    io.bpu_update.valid := bpu_update.valid && !mem_stall
+    io.bpu_update.bits := bpu_update.bits
 
-    when (mem_redirect_valid) {
+    when (mem_redirect_valid && !mem_stall) {
       dec_clear := true.B
       ex_clear := true.B
     }
@@ -269,21 +302,74 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(mem_uops)
     dontTouch(mem_wdata)
 
+    val mem_mem_valids = mem_uops.map(u => u.valid && u.bits.ctrl.is_mem)
+    mem_has_mem_op := mem_mem_valids.reduce(_ || _)
+    val mem_mem_idx = PriorityEncoder(Cat(mem_mem_valids.reverse))
+    val mem_mem_uop = mem_uops(mem_mem_idx)
+    val mem_mem_addr = mem_alu_out(mem_mem_idx)
+    val mem_mem_wdata = mem_rs2(mem_mem_idx)
+
+    val mem_req_sent = Reg(Bool())
+
+    when (!mem_waiting && mem_has_mem_op && !mem_flush(mem_mem_idx)) {
+      dcache.io.core.s0_req.valid := !mem_req_sent
+      dcache.io.core.s0_req.bits.vaddr := mem_mem_addr
+      dcache.io.core.s0_req.bits.data := mem_mem_wdata
+      dcache.io.core.s0_req.bits.size := mem_mem_uop.bits.ctrl.mem_width
+      dcache.io.core.s0_req.bits.signed := mem_mem_uop.bits.ctrl.mem_signed
+      dcache.io.core.s0_req.bits.tpe := mem_mem_uop.bits.ctrl.mem_op
+      dcache.io.core.s0_req.bits.tag := mem_mem_idx
+
+      when (dc_req_fire) {
+        mem_waiting := true.B
+        mem_req_sent := true.B
+      }
+    }
+
+    // No virtual addressing for now
+    dcache.io.core.s1_paddr.valid := RegNext(dc_req_fire)
+    dcache.io.core.s1_paddr.bits := RegNext(mem_mem_addr)
+
+    dcache.io.core.s1_kill := false.B
+    dcache.io.core.s2_kill := false.B
+
+    when (dc_resp_valid) {
+      mem_waiting := false.B
+    }
+
+    mem_stall := (mem_has_mem_op && !mem_flush(mem_mem_idx) && !dc_resp_valid) || mem_waiting
+    ex_stall := mem_stall
+    dec_stall := mem_stall
+
+    when (!mem_stall) {
+      mem_req_sent := false.B
+    }
+
     // -----------------------------------------------------------------------
     // Stage 3: Writeback
     // -----------------------------------------------------------------------
     val wb_uops  = Reg(Vec.fill(coreWidth)(Valid(UOp(p))))
     val wb_wdata = Reg(Vec.fill(coreWidth)(UInt(XLEN.W)))
+    val wb_is_load = Reg(Vec.fill(coreWidth)(Bool()))
+    val wb_load_data = Reg(UInt(XLEN.W))
 
     for (i <- 0 until coreWidth) {
-      wb_uops(i)  := mem_uops(i)
-      wb_uops(i).valid := mem_uops(i).valid && !mem_flush(i)
-      wb_wdata(i) := mem_wdata(i)
+      when (!mem_stall) {
+        wb_uops(i)  := mem_uops(i)
+        wb_uops(i).valid := mem_uops(i).valid && !mem_flush(i)
+        wb_wdata(i) := mem_wdata(i)
+        wb_is_load(i) := mem_uops(i).bits.ctrl.is_load
+      }
+    }
+
+    when (dc_resp_valid) {
+      wb_load_data := dc_resp_data
     }
 
     for (i <- 0 until coreWidth) {
       when (wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen) {
-        rf(wb_uops(i).bits.rd) := wb_wdata(i)
+        val wdata = Mux(wb_is_load(i), wb_load_data, wb_wdata(i))
+        rf(wb_uops(i).bits.rd) := wdata
       }
     }
 
@@ -291,7 +377,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       io.retire_info(i).valid    := wb_uops(i).valid
       io.retire_info(i).pc       := wb_uops(i).bits.pc
       io.retire_info(i).wb_valid := wb_uops(i).bits.ctrl.rd_wen
-      io.retire_info(i).wb_data  := wb_wdata(i)
+      io.retire_info(i).wb_data  := Mux(wb_is_load(i), wb_load_data, wb_wdata(i))
       io.retire_info(i).wb_rd    := wb_uops(i).bits.rd
     }
 
@@ -314,6 +400,10 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
         prev_uop.valid && prev_uop.bits.ctrl.is_cfi
       }).foldLeft(false.B)(_ || _)
 
+      val dec_prev_has_mem = dec_uops.take(i).map(prev_uop => {
+        prev_uop.valid && prev_uop.bits.ctrl.is_mem
+      }).foldLeft(false.B)(_ || _)
+
       val inflight_hazards = inflight_uops.map(prev_uop => {
         val prev_rd = prev_uop.bits.rd
         prev_uop.valid &&
@@ -321,12 +411,11 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
          prev_rd === dec_uops(i).bits.rs2)
       }).reduce(_ || _)
 
-      h := dec_hazards_local || inflight_hazards || dec_prev_has_cfi
+      h := dec_hazards_local || inflight_hazards || dec_prev_has_cfi || dec_prev_has_mem
     })
 
     ///////////////////////////////////////////////////////////
 
-    // x0 is always 0
     rf(0) := 0.U
 
     when (reset.asBool) {
@@ -336,6 +425,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
         mem_uops(i).valid := false.B
         wb_uops(i).valid := false.B
       }
+      mem_waiting := false.B
+      mem_req_sent := false.B
     }
 
     dontTouch(io.redirect)

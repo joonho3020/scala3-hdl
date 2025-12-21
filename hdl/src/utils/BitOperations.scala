@@ -66,3 +66,51 @@ object PriorityEncoder:
 
   def apply(x: OneHot)(using m: Module): UInt =
     PriorityEncoder(x.asUInt)
+
+// TODO: Find a way to abstract of types such as UInt/SInt here
+object Splice:
+  def apply(x: UInt, widths: Seq[Int])(using m: Module): Vec[UInt] =
+    val inputWidth = x.getWidth match
+      case KnownWidth(v) => v
+      case _ => throw new IllegalArgumentException("Splice requires UInt with known width")
+
+    val totalWidth = widths.sum
+    if totalWidth != inputWidth then
+      throw new IllegalArgumentException(
+        s"Splice widths must sum to input width (expected $inputWidth, got $totalWidth)"
+      )
+
+    if widths.exists(_ <= 0) then
+      throw new IllegalArgumentException("Splice widths must all be positive")
+
+    var offset = 0
+    val elems = widths.map { w =>
+      val elem = x(offset + w - 1, offset)
+      offset += w
+      elem
+    }
+
+    Vec(elems.toSeq)
+
+  def apply(x: SInt, widths: Seq[Int])(using m: Module): Vec[SInt] =
+    val inputWidth = x.getWidth match
+      case KnownWidth(v) => v
+      case _ => throw new IllegalArgumentException("Splice requires SInt with known width")
+
+    val totalWidth = widths.sum
+    if totalWidth != inputWidth then
+      throw new IllegalArgumentException(
+        s"Splice widths must sum to input width (expected $inputWidth, got $totalWidth)"
+      )
+
+    if widths.exists(_ <= 0) then
+      throw new IllegalArgumentException("Splice widths must all be positive")
+
+    var offset = 0
+    val elems = widths.map { w =>
+      val bits = x(offset + w - 1, offset)
+      offset += w
+      ModuleOps.prim1Op(SInt(Width(w)), IR.PrimOp.AsSInt, bits, m)
+    }
+
+    Vec(elems.toSeq)
