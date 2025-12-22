@@ -334,18 +334,20 @@ class DCache(p: CoreParams) extends Module:
     switch (mstate) {
       is (EvictReq.EN) {
         io.mem.req.bits.addr := Mux(mstate_prev === Idle.EN,
-          blockAlign(s1_tags(miss_victim) << tagOffBits),
-          blockAlign(victim_tag << tagOffBits))
+          (s1_tags(miss_victim) << tagOffBits) | (miss_set << lineOffBits),
+          (victim_tag << tagOffBits) | (miss_set << lineOffBits))
 
+        val fresh_evict_data = Wire(UInt(lineBits.W))
+        fresh_evict_data := 0.U
         for (i <- 0 until nWays) {
           when (i.U === miss_victim) {
-            val readport_data = Wire(UInt(lineBits.W))
-            readport_data := Cat(data_array(i).readPorts(0).data.reverse)
-            io.mem.req.bits.data := Splice(readport_data, p.memLineBytes/p.memLineWords * 8)
+            fresh_evict_data := Cat(data_array(i).readPorts(0).data.reverse)
           }
         }
-        io.mem.req.bits.tpe := MagicMemMsg.Write.EN 
-        io.mem.req.bits.mask := ((1 << lineBytes) - 1).U
+        val evict_data = Mux(mstate_prev === Idle.EN, fresh_evict_data, victim_line)
+        io.mem.req.bits.data := Splice(evict_data, p.memLineBytes/p.memLineWords * 8)
+        io.mem.req.bits.tpe := MagicMemMsg.Write.EN
+        io.mem.req.bits.mask := ~0.U(lineBytes.W)
 
         when (io.mem.req.fire) {
           mstate := EvictWait.EN
@@ -360,7 +362,7 @@ class DCache(p: CoreParams) extends Module:
         valid_array(miss_set)(miss_victim) := false.B
         dirty_array(miss_set)(miss_victim) := false.B
 
-        io.mem.req.bits.addr := blockAlign(miss_tag << tagOffBits)
+        io.mem.req.bits.addr := (miss_tag << tagOffBits) | (miss_set << lineOffBits)
         io.mem.req.bits.data := DontCare
         io.mem.req.bits.tpe  := MagicMemMsg.Read.EN
         io.mem.req.bits.mask := DontCare
@@ -440,16 +442,12 @@ class DCache(p: CoreParams) extends Module:
       io.core.s2_resp.bits.tpe := s2_req.bits.tpe
     } .elsewhen (mstate === Response.EN) {
       io.core.s2_resp.valid := true.B
-      for (i <- 0 until nWays) {
-        when (i.U === s2_hit_way) {
-          io.core.s2_resp.bits.data :=
-            loadData(
-              s2_miss_fill_data,
-              byteOff(s2_miss_req.vaddr),
-              s2_miss_req.size,
-              s2_miss_req.signed)
-        }
-      }
+      io.core.s2_resp.bits.data :=
+        loadData(
+          s2_miss_fill_data,
+          byteOff(s2_miss_req.vaddr),
+          s2_miss_req.size,
+          s2_miss_req.signed)
       io.core.s2_resp.bits.tag := DontCare
       io.core.s2_resp.bits.tpe := s2_miss_req.tpe
     }

@@ -263,7 +263,7 @@ fn main() {
 
     dut.poke_io_mem_req_ready(1);
 
-    for cycle in 0..12150 {
+    for cycle in 0..12120 {
         let retire_0 = get_retire_info_0(&dut);
         let retire_1 = get_retire_info_1(&dut);
 
