@@ -97,19 +97,23 @@ class BranchPredictor(p: CoreParams) extends Module:
     dontTouch(ptr)
     dontTouch(stack)
 
-    def top: UInt = stack(ptr)
+    def top: UInt =
+      val top_idx = Mux(ptr === 0.U, (nras - 1).U, ptr - 1.U)
+      stack(top_idx)
     def empty: Bool = count === 0.U
-    def clear: Unit = count := 0.U
+    def clear: Unit =
+      count := 0.U
+      ptr := 0.U
     def pop: Unit =
       when (!empty) {
+        ptr   := Mux(ptr === 0.U, (nras - 1).U, ptr - 1.U)
         count := count - 1.U
-        ptr   := Mux(ptr > 0.U, ptr - 1.U, (nras - 1).U)
       }
     def push(addr: UInt): Unit =
       when (count < nras.U) {
-        val nxt_ptr = Mux(ptr < (nras - 1).U, ptr + 1.U, 0.U)
         stack(ptr) := addr
-        ptr := nxt_ptr
+        ptr := Mux(ptr === (nras - 1).U, 0.U, ptr + 1.U)
+        count := count + 1.U
       }
 
   class BTB(entries: Int):
@@ -199,10 +203,11 @@ class BranchPredictor(p: CoreParams) extends Module:
       val (btb_hit, btb_entry) = btb.lookup(pc)
       val use_ras = btb_entry.is_ret && !ras.empty
       val predicted_target = Mux(use_ras, ras.top, btb_entry.target)
-      val predicted_taken = btb_hit && pred_taken
+      val predicted_taken = btb_hit && (use_ras || pred_taken)
 
       io.resp(i).bits.hit := btb_hit
       io.resp(i).bits.taken := predicted_taken
+      io.resp(i).bits.target := predicted_target
       io.resp(i).bits.is_ret := btb_entry.is_ret
       io.resp(i).bits.uses_ras := use_ras
     }
@@ -229,5 +234,6 @@ class BranchPredictor(p: CoreParams) extends Module:
     when (reset.asBool || io.flush) {
       bht.clear
       btb.clear
+      ras.clear
     }
   }

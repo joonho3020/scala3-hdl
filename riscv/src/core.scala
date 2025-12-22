@@ -21,6 +21,8 @@ case class RetireInfoIf(
   wb_valid: Bool,
   wb_data: UInt,
   wb_rd: UInt,
+  bpu_preds: UInt,
+  bpu_hits: UInt
 ) extends Bundle[RetireInfoIf]
 
 object RetireInfoIf:
@@ -31,6 +33,8 @@ object RetireInfoIf:
       wb_valid = Output(Bool()),
       wb_data  = Output(UInt(p.xlenBits.W)),
       wb_rd    = Output(UInt(p.xlenBits.W)),
+      bpu_preds = Output(UInt(p.xlenBits.W)),
+      bpu_hits = Output(UInt(p.xlenBits.W))
     )
 
 case class CoreIf(
@@ -65,6 +69,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       ri.wb_valid := DontCare
       ri.wb_data := DontCare
       ri.wb_rd := DontCare
+      ri.bpu_preds := DontCare
+      ri.bpu_hits := DontCare
     })
 
     val dec_clear = WireInit(false.B)
@@ -277,15 +283,28 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     val mem_predict_success = WireInit(false.B)
 
-    mem_predict_success := !mem_has_mispred && bpu_update.valid
+    val bpu_update_fire = bpu_update.valid && !mem_stall
+
+    mem_predict_success := bpu_update_fire && !mem_has_mispred
     dontTouch(mem_predict_success)
 
     val mem_redirect_valid = cfi_uop.valid && mem_has_mispred && !mem_stall
 
     io.redirect.valid  := mem_redirect_valid
     io.redirect.target := Mux(mem_mispred_not_taken, cfi_uop.bits.pc + 4.U, mem_target_pc)
-    io.bpu_update.valid := bpu_update.valid && !mem_stall
+    io.bpu_update.valid := bpu_update_fire
     io.bpu_update.bits := bpu_update.bits
+
+    val bpu_pred_count = RegInit(0.U(XLEN.W))
+    val bpu_hit_count = RegInit(0.U(XLEN.W))
+
+    when (bpu_update_fire) {
+      bpu_pred_count := bpu_pred_count + 1.U
+    }
+
+    when (mem_predict_success) {
+      bpu_hit_count := bpu_hit_count + 1.U
+    }
 
     when (mem_redirect_valid) {
       dec_clear := true.B
@@ -378,6 +397,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       io.retire_info(i).wb_valid := wb_uops(i).bits.ctrl.rd_wen
       io.retire_info(i).wb_data  := Mux(wb_is_load(i), wb_load_data, wb_wdata(i))
       io.retire_info(i).wb_rd    := wb_uops(i).bits.rd
+      io.retire_info(i).bpu_preds := bpu_pred_count
+      io.retire_info(i).bpu_hits := bpu_hit_count
     }
 
     dontTouch(wb_uops)

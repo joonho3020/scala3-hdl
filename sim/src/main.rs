@@ -84,6 +84,8 @@ struct RetireInfo {
     wb_valid: bool,
     wb_rd: u64,
     wb_data: u64,
+    bpu_preds: u64,
+    bpu_hits: u64,
 }
 
 fn get_retire_info_0(dut: &Dut) -> RetireInfo {
@@ -93,6 +95,8 @@ fn get_retire_info_0(dut: &Dut) -> RetireInfo {
         wb_valid: dut.peek_io_retire_info_0_wb_valid() != 0,
         wb_rd: dut.peek_io_retire_info_0_wb_rd(),
         wb_data: dut.peek_io_retire_info_0_wb_data(),
+        bpu_preds: dut.peek_io_retire_info_0_bpu_preds(),
+        bpu_hits: dut.peek_io_retire_info_0_bpu_hits(),
     }
 }
 
@@ -103,6 +107,8 @@ fn get_retire_info_1(dut: &Dut) -> RetireInfo {
         wb_valid: dut.peek_io_retire_info_1_wb_valid() != 0,
         wb_rd: dut.peek_io_retire_info_1_wb_rd(),
         wb_data: dut.peek_io_retire_info_1_wb_data(),
+        bpu_preds: dut.peek_io_retire_info_1_bpu_preds(),
+        bpu_hits: dut.peek_io_retire_info_1_bpu_hits(),
     }
 }
 
@@ -263,7 +269,7 @@ fn main() {
 
     dut.poke_io_mem_req_ready(1);
 
-    for cycle in 0..12120 {
+    for cycle in 0..1212000 {
         let retire_0 = get_retire_info_0(&dut);
         let retire_1 = get_retire_info_1(&dut);
 
@@ -378,11 +384,24 @@ fn main() {
         stop_reason = Some("cycle limit reached".to_string());
     }
 
+    let final_stats = get_retire_info_0(&dut);
+    let bpu_preds = final_stats.bpu_preds;
+    let bpu_hits = final_stats.bpu_hits;
+    let bpu_rate = if bpu_preds == 0 {
+        0.0
+    } else {
+        bpu_hits as f64 / bpu_preds as f64
+    };
+
     println!("\n========================================");
     println!("Test Summary:");
     println!("  Total retired: {}", retired_count);
     println!("  Mismatches: {}", mismatch_count);
     println!("  Stop reason: {}", stop_reason.unwrap());
+    println!(
+        "  BPU preds: {} hits: {} rate: {:.3}",
+        bpu_preds, bpu_hits, bpu_rate
+    );
     if mismatch_count == 0 {
         println!("  Status: PASSED");
     } else {
