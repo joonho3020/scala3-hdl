@@ -263,22 +263,31 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     bpu_update.bits.is_call := (cfi_uop.bits.ctrl.jal || cfi_uop.bits.ctrl.jalr) && cfi_uop.bits.rd === 1.U
     bpu_update.bits.is_ret  := cfi_uop.bits.ctrl.jalr && cfi_uop.bits.rs1 === 1.U && cfi_uop.bits.rd === 0.U
 
-    val mem_wrong_next_pc = cfi_uop.bits.next_pc.bits =/= mem_target_pc
-    val mem_mispred_taken = mem_brjmp_taken && (mem_wrong_next_pc || !cfi_uop.bits.next_pc.valid)
-    val mem_mispred_not_taken = (cfi_uop.bits.ctrl.br && !mem_brjmp_taken) && cfi_uop.bits.next_pc.valid
-    val mem_redirect_valid = mem_mispred_taken || mem_mispred_not_taken
+    val mem_wrong_next_pc = Wire(Bool())
+    mem_wrong_next_pc := cfi_uop.bits.next_pc.bits =/= mem_target_pc
+    val mem_mispred_taken = Wire(Bool())
+    mem_mispred_taken := mem_brjmp_taken && (mem_wrong_next_pc || !cfi_uop.bits.next_pc.valid)
+    val mem_mispred_not_taken = Wire(Bool())
+    mem_mispred_not_taken := (cfi_uop.bits.ctrl.br && !mem_brjmp_taken) && cfi_uop.bits.next_pc.valid
+    val mem_has_mispred = mem_mispred_taken || mem_mispred_not_taken
+
+    dontTouch(mem_wrong_next_pc)
+    dontTouch(mem_mispred_taken)
+    dontTouch(mem_mispred_not_taken)
 
     val mem_predict_success = WireInit(false.B)
 
-    mem_predict_success := !mem_redirect_valid && bpu_update.valid
+    mem_predict_success := !mem_has_mispred && bpu_update.valid
     dontTouch(mem_predict_success)
 
-    io.redirect.valid  := mem_redirect_valid && !mem_stall
-    io.redirect.target := mem_target_pc
+    val mem_redirect_valid = cfi_uop.valid && mem_has_mispred && !mem_stall
+
+    io.redirect.valid  := mem_redirect_valid
+    io.redirect.target := Mux(mem_mispred_not_taken, cfi_uop.bits.pc + 4.U, mem_target_pc)
     io.bpu_update.valid := bpu_update.valid && !mem_stall
     io.bpu_update.bits := bpu_update.bits
 
-    when (mem_redirect_valid && !mem_stall) {
+    when (mem_redirect_valid) {
       dec_clear := true.B
       ex_clear := true.B
     }

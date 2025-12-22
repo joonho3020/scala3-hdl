@@ -70,7 +70,7 @@ object BPUUpdate:
 
 case class BranchPredictorIO(
   req: Valid[BPUReq],
-  resp: Valid[BPUResp],
+  resp: Vec[Valid[BPUResp]],
   update: Valid[BPUUpdate],
   flush: Bool
 ) extends Bundle[BranchPredictorIO]
@@ -79,12 +79,12 @@ object BranchPredictorIO:
   def apply(p: CoreParams): BranchPredictorIO =
     BranchPredictorIO(
       req = Input(Valid(BPUReq(p))),
-      resp = Output(Valid(BPUResp(p))),
+      resp = Output(Vec.fill(p.coreWidth)(Valid(BPUResp(p)))),
       update = Flipped(Valid(BPUUpdate(p))),
       flush = Input(Bool())
     )
 
-// TODO: Pipeline this...
+// TODO: Bank BTB, BHT memory structures
 class BranchPredictor(p: CoreParams) extends Module:
   given Module = this
 
@@ -180,28 +180,31 @@ class BranchPredictor(p: CoreParams) extends Module:
     val btb = new BTB(btbEntries)
     val bht = new BHT(bhtEntries)
 
-    io.resp.valid := io.req.valid
-    io.resp.bits.hit := false.B
-    io.resp.bits.taken := false.B
-    io.resp.bits.target := 0.U(p.pcBits.W)
-    io.resp.bits.is_ret := false.B
-    io.resp.bits.uses_ras := false.B
+    for (i <- 0 until p.coreWidth) {
+    }
 
-    val bht_idx = if bhtEntries == 1 then 0.U else io.req.bits.pc(bhtIdxBits + 1, 2)
+// io.resp.valid := io.req.valid
+// io.resp.bits.hit := false.B
+// io.resp.bits.taken := false.B
+// io.resp.bits.target := 0.U(p.pcBits.W)
+// io.resp.bits.is_ret := false.B
+// io.resp.bits.uses_ras := false.B
 
-    val pred_taken = bht.lookup(io.req.bits.pc)
-    val (btb_hit, btb_entry) = btb.lookup(io.req.bits.pc)
+    for (i <- 0 until p.coreWidth) {
+      io.resp(i).valid := io.req.valid
+      io.resp(i).bits  := DontCare
 
-    val use_ras = btb_entry.is_ret && !ras.empty
-    val predicted_target = Mux(use_ras, ras.top, btb_entry.target)
-    val predicted_taken = btb_hit && pred_taken
+      val pc = io.req.bits.pc + (4 * i).U
+      val pred_taken = bht.lookup(pc)
+      val (btb_hit, btb_entry) = btb.lookup(pc)
+      val use_ras = btb_entry.is_ret && !ras.empty
+      val predicted_target = Mux(use_ras, ras.top, btb_entry.target)
+      val predicted_taken = btb_hit && pred_taken
 
-    when (io.req.valid) {
-      io.resp.bits.hit := btb_hit
-      io.resp.bits.taken := predicted_taken
-      io.resp.bits.target := predicted_target
-      io.resp.bits.is_ret := btb_entry.is_ret
-      io.resp.bits.uses_ras := use_ras
+      io.resp(i).bits.hit := btb_hit
+      io.resp(i).bits.taken := predicted_taken
+      io.resp(i).bits.is_ret := btb_entry.is_ret
+      io.resp(i).bits.uses_ras := use_ras
     }
 
     when (io.update.valid) {

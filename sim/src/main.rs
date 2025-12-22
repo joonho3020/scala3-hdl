@@ -263,16 +263,16 @@ fn main() {
 
     dut.poke_io_mem_req_ready(1);
 
-    for cycle in 0..10000 {
+    for cycle in 0..12150 {
         let retire_0 = get_retire_info_0(&dut);
         let retire_1 = get_retire_info_1(&dut);
 
-        if retire_0.valid {
-            println!("retire_0 pc 0x{:x}", retire_0.pc);
-        }
-        if retire_1.valid {
-            println!("retire_1 pc 0x{:x}", retire_1.pc);
-        }
+// if retire_0.valid {
+// println!("retire_0 pc 0x{:x}", retire_0.pc);
+// }
+// if retire_1.valid {
+// println!("retire_1 pc 0x{:x}", retire_1.pc);
+// }
 
         let mut halt_detected = false;
 

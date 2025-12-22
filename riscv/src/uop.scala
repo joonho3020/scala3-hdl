@@ -76,6 +76,11 @@ object CoreConstants:
       Ld,
       St
 
+trait DecoderLogic:
+  def Y = true.B
+  def N = false.B
+  def X = DontCare
+
 case class CtrlSignals(
   valid:    Bool,
   br:       Bool,
@@ -101,7 +106,7 @@ case class CtrlSignals(
   def is_store(using m: Module): Bool =
     valid && is_mem && (mem_op === CoreConstants.MemOp.St.EN)
 
-object CtrlSignals:
+object CtrlSignals extends DecoderLogic:
   import Instructions._
   import CoreConstants._
   import ALUParams._
@@ -176,10 +181,6 @@ object CtrlSignals:
 
   // TODO: Generate proper decoding logic w/ logic minimizer
   def decode(ctrl: CtrlSignals, inst: UInt)(using m: Module): CtrlSignals =
-    def Y = true.B
-    def N = false.B
-    def X = DontCare
-
     default_assign(ctrl)
     switch(inst) {
       /*
@@ -232,3 +233,50 @@ object CtrlSignals:
       is(SD   ) { set(ctrl, Y,N,N,N,N,Y, IMM_S.EN,        RS1.EN,IMM.EN, FN_ADD.EN,St.EN,D.EN,X) }
     }
     ctrl
+
+case class BrJmpSignal(
+  is_br: Bool,
+  is_jal: Bool,
+  is_jalr: Bool
+) extends Bundle[BrJmpSignal]
+
+object BrJmpSignal extends DecoderLogic:
+  def apply(): BrJmpSignal =
+    BrJmpSignal(
+      is_br = Bool(),
+      is_jal = Bool(),
+      is_jalr = Bool()
+    )
+
+  def set(
+    signal: BrJmpSignal,
+    br:       Bool | DontCare.type,
+    jal:      Bool | DontCare.type,
+    jalr:     Bool | DontCare.type,
+  )(using m: Module): BrJmpSignal =
+    signal.is_br ::= br
+    signal.is_jal ::= jal
+    signal.is_jalr ::= jalr
+    signal
+
+  def predecode(signal: BrJmpSignal, inst: UInt)(using m: Module): BrJmpSignal =
+    import Instructions._
+    signal.is_br := false.B
+    signal.is_jal := false.B
+    signal.is_jalr := false.B
+
+    switch(inst) {
+      /*                    is_jalr
+       *                   is_jal |
+       *                  is_br | |
+       *                      | | |                                               */
+      is(JAL  ) { set(signal, N,Y,N) }
+      is(JALR ) { set(signal, N,N,Y) }
+      is(BEQ  ) { set(signal, Y,N,N) }
+      is(BNE  ) { set(signal, Y,N,N) }
+      is(BLT  ) { set(signal, Y,N,N) }
+      is(BGE  ) { set(signal, Y,N,N) }
+      is(BLTU ) { set(signal, Y,N,N) }
+      is(BGEU ) { set(signal, Y,N,N) }
+    }
+    signal

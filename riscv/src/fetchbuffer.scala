@@ -71,6 +71,8 @@ class FetchBuffer(p: CoreParams, depth: Int) extends Module with CoreCacheable(p
         mem(r)(c).bits      := DontCare
         mem(r)(c).bits.inst := io.enq.bits.insts(i).bits
         mem(r)(c).bits.pc   := p.fetchAlign(io.enq.bits.pc) + (p.instBytes * i).U
+
+        mem(r)(c).bits.next_pc := io.enq.bits.next_pc
       }
       enq_ptr := (enq_ptr +
                   next_offset(p.coreWidth - 1) +

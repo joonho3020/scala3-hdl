@@ -112,13 +112,19 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     ic.s1_kill := f1_clear
 
     bpu.io.req.valid := s1_valid && !f1_clear
-    bpu.io.req.bits.pc := s1_vpc
+    bpu.io.req.bits.pc := p.fetchAlign(s1_vpc)
+    dontTouch(bpu.io.resp)
 
+    val f1_fetch_mask  = p.fetchMask(s1_vpc)
     val f1_next_fetch  = p.nextFetch(s1_vpc)
-    val f1_pred_taken  = bpu.io.resp.valid && bpu.io.resp.bits.hit && bpu.io.resp.bits.taken
-    val f1_pred_target = Mux(f1_pred_taken, bpu.io.resp.bits.target, f1_next_fetch)
+    val f1_taken_hits = bpu.io.resp.zipWithIndex.map((x, i) => {
+        x.valid && x.bits.hit && x.bits.taken && f1_fetch_mask(i).asBool
+    })
+    val f1_taken_hit  = f1_taken_hits.reduce(_ || _)
+    val f1_taken_hit_idx = PriorityEncoder(Cat(f1_taken_hits.reverse))
+    val f1_pred_target = Mux(f1_taken_hit, bpu.io.resp(f1_taken_hit_idx).bits.target, f1_next_fetch)
 
-    when (s1_valid) {
+    when (s1_valid && !f1_clear) {
       s0_vpc := f1_pred_target
       s0_valid := true.B
     }
@@ -130,7 +136,9 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     val s2_valid = RegInit(false.B)
     val s2_fetch_mask = Wire(UInt())
     val f2_clear = WireInit(false.B)
-    val s2_pred_taken  = RegNext(f1_pred_taken)
+
+    val s2_taken_hit_idx = RegNext(f1_taken_hit_idx)
+    val s2_taken_hit  = RegNext(f1_taken_hit)
     val s2_pred_target = RegNext(f1_pred_target)
 
     s2_valid := s1_valid && !f1_clear
@@ -144,13 +152,34 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     val fetch_bundle = Wire(FetchBundle(p))
     fetch_bundle := DontCare
     fetch_bundle.pc := s2_vpc
-    fetch_bundle.insts.zipWithIndex.foreach((inst_val, idx) => {
-      inst_val.valid := s2_valid && ic.s2_valid && s2_fetch_mask(idx).asBool
-      inst_val.bits  := ic.s2_insts(idx)
-    })
 
-    // TODO: use this to add predicted branch target on a predicted-taken branch
-    fetch_bundle.next_pc.valid := s2_valid && s2_pred_taken
+    val brjmp = Wire(Vec.fill(p.coreWidth)(BrJmpSignal()))
+    val s2_is_taken = Wire(Vec.fill(p.coreWidth)(Bool()))
+    dontTouch(brjmp)
+    dontTouch(s2_is_taken)
+    dontTouch(fetch_bundle)
+
+    val s2_prev_brjmp_taken = Wire(Vec.fill(p.coreWidth)(Bool()))
+    for (i <- 0 until p.coreWidth) {
+      val inst = fetch_bundle.insts(i)
+      inst.bits  := ic.s2_insts(i)
+
+      BrJmpSignal.predecode(brjmp(i), inst.bits)
+      val brjmp_taken = s2_taken_hit &&
+                        (brjmp(i).is_jal  ||
+                         brjmp(i).is_jalr ||
+                         (brjmp(i).is_br && (i.U === s2_taken_hit_idx)))
+      s2_is_taken(i) := brjmp_taken && s2_fetch_mask(i).asBool
+
+      if i == 0 then
+        s2_prev_brjmp_taken(i) := s2_is_taken(i)
+        inst.valid := s2_valid && s2_fetch_mask(i).asBool
+      else
+        s2_prev_brjmp_taken(i) := s2_prev_brjmp_taken(i-1) || s2_is_taken(i)
+        inst.valid := s2_valid && s2_fetch_mask(i).asBool && !s2_prev_brjmp_taken(i-1)
+    }
+
+    fetch_bundle.next_pc.valid := s2_valid && s2_is_taken.reduce(_ || _)
     fetch_bundle.next_pc.bits  := s2_pred_target
 
     ic.s2_kill := f2_clear
@@ -176,8 +205,13 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
       s0_vpc := s2_vpc
       s0_valid := true.B
       f1_clear := true.B
-    } .elsewhen (s1_valid && ic.s2_valid) {
+    } .elsewhen (s2_valid && ic.s2_valid) {
       // Cache hit
+      when (fetch_bundle.next_pc.valid) {
+        s0_vpc := s2_pred_target
+        s0_valid := true.B
+        f1_clear := true.B
+      }
     }
 
     when (io.redirect.valid) {

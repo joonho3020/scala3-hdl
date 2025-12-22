@@ -51,6 +51,7 @@ case class CoreParams(
   def memLineBytes: Int = ic.cacheLineBytes
   def memLineWords: Int = memLineBytes / 4
 
+  def fetchOffset(addr: UInt)(using m: Module) = addr & (fetchBytes-1).U
   def fetchAlign(addr: UInt)(using m: Module) = ~(~addr | (fetchBytes-1).U)
   def blockAlign(addr: UInt)(using m: Module) = ~(~addr | (ic.cacheLineBytes-1).U)
   def nextFetch(addr: UInt)(using m: Module) = fetchAlign(addr) + fetchBytes.U
