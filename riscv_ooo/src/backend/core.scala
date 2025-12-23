@@ -1,7 +1,7 @@
 package riscv_ooo
 
 import hdl._
-import CoreConstants.{ALUOp1, ALUOp2, MemOp}
+import riscv_inorder.CoreConstants.{ALUOp1, ALUOp2, MemOp}
 import MagicMemMsg.Read
 
 case class RedirectIf(
@@ -115,8 +115,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     decoder.io.deq.zip(dec_uops).foreach((d, u) => {
       when(!dec_stall) {
         u.bits := d.bits
-        u.valid := d.valid
       }
+      u.valid := d.valid && !dec_stall
       d.ready := !dec_stall
     })
 

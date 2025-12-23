@@ -67,7 +67,32 @@ object PriorityEncoder:
   def apply(x: OneHot)(using m: Module): UInt =
     PriorityEncoder(x.asUInt)
 
-// TODO: Find a way to abstract of types such as UInt/SInt here
+// TODO: Need type specifier for data types that are indexible (e.g. UInt, SInt)
+object PriorityEncoderOH:
+  def apply(x: UInt)(using m: Module): OneHot =
+    val width = x.getWidth match
+      case KnownWidth(v) => v
+      case _ => throw new IllegalArgumentException("PriorityEncoderOH requires UInt with known width")
+    val bits = (0 until width).map(i => x(i).asBool)
+    bits.zipWithIndex.foldLeft(0.U(width.W))((acc, b) => {
+      val oneHot = 1.U(width.W) << b._2
+      Mux(acc.orR, acc, Mux(b._1, oneHot, acc))
+    }).asOH
+
+object MuxOneHot:
+  def apply[T <: HWData](sel: OneHot, in: Seq[T])(using m: Module): T =
+    val sel_uint = sel.asUInt
+    val width = sel_uint.getWidth match
+      case KnownWidth(v) => v
+      case _ => throw new IllegalArgumentException("PriorityEncoderOH requires UInt with known width")
+    (0 until width)
+      .map(i => sel_uint(i).asBool)
+      .zipWithIndex
+      .foldLeft(in(0))((acc, y) => {
+        Mux(y._1, in(y._2), acc)
+      })
+
+// TODO: Find a way to abstract over types such as UInt/SInt here
 object Splice:
   def apply(x: UInt, widths: Seq[Int])(using m: Module): Vec[UInt] =
     val inputWidth = x.getWidth match

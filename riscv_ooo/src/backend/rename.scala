@@ -89,11 +89,17 @@ abstract class BitMaskModule extends Module:
     def clear: Unit =
       data := initLit
 
-    def unset(x: UInt): Unit =
-      data := data & ~(1.U << x)
+    def unset(indices: Vec[UInt], valid: Vec[Bool]): Unit =
+      val mask = valid.zip(indices).map((v, idx) => {
+        Mux(v, 1.U << idx, 0.U)
+      }).reduce(_ | _)
+      data := data & ~mask
 
-    def set(x: UInt): Unit =
-      data := data | (1.U << x)
+    def set(indices: Vec[UInt], valid: Vec[Bool]): Unit =
+      val mask = valid.zip(indices).map((v, idx) => {
+        Mux(v, 1.U << idx, 0.U)
+      }).reduce(_ | _)
+      data := data | mask
 
     def count: UInt =
       PopCount(data)
@@ -114,12 +120,12 @@ abstract class BitMaskModule extends Module:
       for (i <- 0 until n) {
         if i == 0 then
           when (y(i).asBool) {
-            ret(found(i)) := i.U
+            ret(0) := 0.U
             found(i) := 1.U
           }
         else
           when (y(i).asBool && found(i-1) < cnt.U) {
-            ret(found(i)) := i.U
+            ret(found(i-1)) := i.U
             found(i) := found(i-1) + 1.U
           } .otherwise {
             found(i) := found(i-1)
@@ -147,33 +153,29 @@ class FreeList(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
     val entries = p.nPhysicalRegs
     require(entries > 32)
 
-    val free_list = new BitMask(entries, (BigInt(1) << entries) - 1)
+    // Initial 32 registers should be taken
+    val init = ((BigInt(1) << (entries - 32)) - 1) << 32
+    val free_list = new BitMask(entries, init)
 
     io.count := free_list.count
 
     io.alloc_resp := DontCare
     when (io.alloc_req.valid) {
       io.alloc_resp := free_list.getSetIds(p.coreWidth)
-      for (i <- 0 until p.coreWidth) {
-        when (i.U < io.alloc_req.bits) {
-          free_list.unset(io.alloc_resp(i))
-        }
-      }
+      free_list.unset(io.alloc_resp, Vec((0 until p.coreWidth).map(i => i.U < io.alloc_req.bits)))
       Assert(io.count >= io.alloc_req.bits, "Not enough entries in the free list")
     }
 
-    for (i <- 0 until p.coreWidth) {
-      when (io.comm_prds(i).valid) {
-        free_list.set(io.comm_prds(i).bits)
-      }
-    }
 
+    when (io.comm_prds.map(_.valid).reduce(_ || _)) {
+      free_list.set(io.comm_prds.map(_.bits), io.comm_prds.map(_.valid))
+    }
     dontTouch(io)
   }
 
 case class BusyTableRN1Req(
-  prs1: UInt,
-  prs2: UInt,
+  prs1: Valid[UInt],
+  prs2: Valid[UInt],
 ) extends Bundle[BusyTableRN1Req]
 
 case class BusyTableRN1Resp(
@@ -182,7 +184,7 @@ case class BusyTableRN1Resp(
 ) extends Bundle[BusyTableRN1Resp]
 
 case class BusyTableWBReq(
-  prd: UInt
+  prd: Valid[UInt]
 ) extends Bundle[BusyTableWBReq]
 
 
@@ -191,7 +193,7 @@ case class BusyTableIO(
   rn1_resp: Vec[BusyTableRN1Resp],
 
   // Unset busy bit for prd that finished computing
-  wb_req: Vec[Valid[BusyTableWBReq]],
+  wb_req: Vec[BusyTableWBReq],
 
   // Set busy bit for retired stale_rd
   comm_prds: Vec[Valid[UInt]]
@@ -200,48 +202,46 @@ case class BusyTableIO(
 class BusyTable(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
   val io = IO(BusyTableIO(
     rn1_req = Input(Vec.fill(p.coreWidth)(BusyTableRN1Req(
-      prs1 = UInt(p.pRegIdxBits.W),
-      prs2 = UInt(p.pRegIdxBits.W),
+      prs1 = Valid(UInt(p.pRegIdxBits.W)),
+      prs2 = Valid(UInt(p.pRegIdxBits.W)),
     ))),
     rn1_resp = Output(Vec.fill(p.coreWidth)(BusyTableRN1Resp(
       prs1_busy = Bool(),
       prs2_busy = Bool(),
     ))),
 
-    wb_req = Input(Vec.fill(p.coreWidth)(Valid(BusyTableWBReq(
-      prd = UInt(p.pRegIdxBits.W)
-    )))),
+    wb_req = Input(Vec.fill(p.coreWidth)(BusyTableWBReq(
+      prd = Valid(UInt(p.pRegIdxBits.W))
+    ))),
     comm_prds = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.pRegIdxBits.W)))),
   ))
 
   body {
     val entries = p.nPhysicalRegs
-    val busy_table = new BitMask(entries, (BigInt(1) << entries) - 1)
+
+    // Initial 32 registers should be taken
+    val init = ((BigInt(1) << (entries - 32)) - 1) << 32
+    val busy_table = new BitMask(entries, init)
 
     for (i <- 0 until p.coreWidth) {
       val req = io.rn1_req(i)
 
-      val prs1_wb_match = io.wb_req.map(wb => wb.valid && wb.bits.prd === req.prs1).reduce(_ || _)
+      val prs1_wb_match = io.wb_req.map(wb => wb.prd.valid && wb.prd.bits === req.prs1.bits).reduce(_ || _)
       io.rn1_resp(i).prs1_busy := Mux(prs1_wb_match,
         false.B,
-        busy_table.get(req.prs1).asBool)
+        busy_table.get(req.prs1.bits).asBool)
 
-      val prs2_wb_match = io.wb_req.map(wb => wb.valid && wb.bits.prd === req.prs2).reduce(_ || _)
+      val prs2_wb_match = io.wb_req.map(wb => wb.prd.valid && wb.prd.bits === req.prs2.bits).reduce(_ || _)
       io.rn1_resp(i).prs2_busy := Mux(prs2_wb_match,
         false.B,
-        busy_table.get(req.prs2).asBool)
+        busy_table.get(req.prs2.bits).asBool)
     }
-    for (i <- 0 until p.coreWidth) {
-      val wb = io.wb_req(i)
-      when (wb.valid) {
-        busy_table.unset(wb.bits.prd)
-      }
+
+    when (io.wb_req.map(_.prd.valid).reduce(_ || _)) {
+      busy_table.unset(io.wb_req.map(_.prd.bits), io.wb_req.map(_.prd.valid))
     }
-    for (i <- 0 until p.coreWidth) {
-      val comm = io.comm_prds(i)
-      when (comm.valid) {
-        busy_table.set(comm.bits)
-      }
+    when (io.comm_prds.map(_.valid).reduce(_ || _)) {
+      busy_table.set(io.comm_prds.map(_.bits), io.comm_prds.map(_.valid))
     }
     dontTouch(io)
   }
@@ -252,7 +252,7 @@ case class RenamerIO(
 
   rn2_uops: Vec[Valid[UOp]],
 
-  wb_done_phys: Vec[Valid[BusyTableWBReq]],
+  wb_done_phys: Vec[BusyTableWBReq],
 
   comm_free_phys: Vec[Valid[UInt]]
 ) extends Bundle[RenamerIO]
@@ -266,9 +266,9 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
 
     rn2_uops = Output(Vec.fill(p.coreWidth)(Valid(UOp(p)))),
 
-    wb_done_phys = Input(Vec.fill(p.coreWidth)(Valid(BusyTableWBReq(
-      prd = UInt(p.pRegIdxBits.W)
-    )))),
+    wb_done_phys = Input(Vec.fill(p.coreWidth)(BusyTableWBReq(
+      prd = Valid(UInt(p.pRegIdxBits.W))
+    ))),
 
     comm_free_phys = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.pRegIdxBits.W)))),
   ))
@@ -278,11 +278,12 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     val map_table  = Module(new MapTable(p))
     val busy_table = Module(new BusyTable(p))
 
-    val rn1_uops = Reg(Vec.fill(p.coreWidth)(Valid(UOp(p))))
+    val rn1_uops_reg = Reg(Vec.fill(p.coreWidth)(Valid(UOp(p))))
+    dontTouch(rn1_uops_reg)
 
-    io.dec_ready := free_list.io.count >=
-      io.dec_uops.map(_.valid.asUInt).reduce(_ +& _) +
-         rn1_uops.map(_.valid.asUInt).reduce(_ +& _)
+    val dec_alloc_reqs = io.dec_uops .map(u => (u.valid && u.bits.lrd_val).asUInt).reduce(_ +& _)
+    val rn1_alloc_reqs = rn1_uops_reg.map(u => (u.valid && u.bits.lrd_val).asUInt).reduce(_ +& _)
+    io.dec_ready := free_list.io.count > (dec_alloc_reqs +& rn1_alloc_reqs)
 
     // ------------------------------------------------------------------------
     // Rename 0
@@ -294,110 +295,107 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
       map_table.io.dec_req(i).lrd  := io.dec_uops(i).bits.lrd
     }
 
-
-    when (io.dec_ready && io.dec_uops.map(_.valid).reduce(_ || _)) {
-      for (i <- 0 until p.coreWidth) {
-        rn1_uops(i) := io.dec_uops(i)
-        rn1_uops(i).bits.stale_prd := map_table.io.dec_resp(i).stale_prd
-        rn1_uops(i).bits.prs1      := map_table.io.dec_resp(i).prs1
-        rn1_uops(i).bits.prs2      := map_table.io.dec_resp(i).prs2
-      }
+    for (i <- 0 until p.coreWidth) {
+      val dec = io.dec_uops(i).bits
+      rn1_uops_reg(i) := io.dec_uops(i)
+      rn1_uops_reg(i).valid := io.dec_uops(i).valid && io.dec_ready
+      rn1_uops_reg(i).bits.stale_prd := map_table.io.dec_resp(i).stale_prd
+      rn1_uops_reg(i).bits.prs1      := map_table.io.dec_resp(i).prs1
+      rn1_uops_reg(i).bits.prs2      := map_table.io.dec_resp(i).prs2
+      rn1_uops_reg(i).bits.prd       := 0.U
     }
 
     // ------------------------------------------------------------------------
     // Rename 1
     // - Get prd from freelist
-    // - bypass prd & update younger uop's stale_prd & prs1, prs2
     // - update renaming table & busy bit table
+    // - bypass prd & update younger uop's stale_prd & prs1, prs2
     // ------------------------------------------------------------------------
-    val rn1_valids = rn1_uops.map(_.valid)
-    free_list.io.alloc_req.bits := rn1_valids.map(_.asUInt).reduce(_ +& _)
-    free_list.io.alloc_req.valid := rn1_valids.reduce(_ || _)
+    val rn1_rd_wens = rn1_uops_reg.map(u => u.valid && u.bits.lrd_val)
+
+    free_list.io.alloc_req.bits  := rn1_rd_wens.map(_.asUInt).reduce(_ +& _)
+    free_list.io.alloc_req.valid := rn1_rd_wens.reduce(_ || _)
+
+    val alloc_offsets = Wire(Vec.fill(p.coreWidth)(UInt(log2Ceil(p.coreWidth + 1).W)))
+    alloc_offsets(0) := 0.U
+    for (i <- 1 until p.coreWidth) {
+      alloc_offsets(i) := alloc_offsets(i - 1) + rn1_rd_wens(i - 1).asUInt
+    }
+
+    val rn1_uops = Wire(Vec.fill(p.coreWidth)(Valid(UOp(p))))
+    rn1_uops.zip(rn1_uops_reg).foreach(_ := _)
+    dontTouch(rn1_uops)
+
+    for (i <- 0 until p.coreWidth) {
+      when (rn1_rd_wens(i)) {
+        rn1_uops(i).bits.prd := free_list.io.alloc_resp(alloc_offsets(i))
+      }
+    }
+
+    for (i <- 0 until p.coreWidth) {
+      map_table.io.rn1_update(i).valid := rn1_rd_wens(i)
+      map_table.io.rn1_update(i).bits.lrd := rn1_uops(i).bits.lrd
+      map_table.io.rn1_update(i).bits.prd := rn1_uops(i).bits.prd
+    }
+
+    val rn1_use_rs1 = rn1_uops_reg.map(u => u.valid && u.bits.lrs1_val)
+    val rn1_use_rs2 = rn1_uops_reg.map(u => u.valid && u.bits.lrs2_val)
+
+    for (i <- 0 until p.coreWidth) {
+      busy_table.io.rn1_req(i).prs1.valid := rn1_use_rs1(i)
+      busy_table.io.rn1_req(i).prs1.bits  := rn1_uops(i).bits.prs1
+
+      busy_table.io.rn1_req(i).prs2.valid := rn1_use_rs2(i)
+      busy_table.io.rn1_req(i).prs2.bits  := rn1_uops(i).bits.prs2
+
+      rn1_uops(i).bits.prs1_busy := busy_table.io.rn1_resp(i).prs1_busy
+      rn1_uops(i).bits.prs2_busy := busy_table.io.rn1_resp(i).prs2_busy
+    }
 
     val rn1_uops_bypass = Wire(Vec.fill(p.coreWidth)(Valid(UOp(p))))
-    rn1_uops_bypass.zip(rn1_uops).foreach(_ := _)
+    dontTouch(rn1_uops_bypass)
 
-    for (i <- 0 until p.coreWidth) {
-      when (rn1_uops_bypass(i).valid) {
-        rn1_uops_bypass(i).bits.prd := free_list.io.alloc_resp(i)
-      }
-    }
+    def lrd_dep(me: UOp, you: UOp): Bool =
+      me.lrd === you.lrd && me.lrd_val && you.lrd_val
 
+    def lrs1_dep(me: UOp, you: UOp): Bool =
+      me.lrs1 === you.lrd && me.lrs1_val && you.lrd_val
+
+    def lrs2_dep(me: UOp, you: UOp): Bool =
+      me.lrs2 === you.lrd && me.lrs2_val && you.lrd_val
+
+    rn1_uops_bypass(0) := rn1_uops(0)
+
+    // Bypass prd to younger uops
     for (i <- 1 until p.coreWidth) {
-      val prev = rn1_uops_bypass.take(i).reverse
-      val found_rs1 = Wire(Vec.fill(i)(Bool()))
-      val found_rs2 = Wire(Vec.fill(i)(Bool()))
-      val found_rd  = Wire(Vec.fill(i)(Bool()))
-      for (j <- 0 until i) {
-        val rs1_dep = prev(j).valid && (prev(j).bits.lrd === rn1_uops_bypass(i).bits.lrs1)
-        if j == 0 then
-          when (rs1_dep) {
-            found_rs1(j) := true.B
-            rn1_uops_bypass(i).bits.prs1 := prev(j).bits.prd
-          } .otherwise {
-            found_rs1(j) := false.B
-          }
-        else
-          when (!found_rs1(j-1) && rs1_dep) {
-            rn1_uops_bypass(i).bits.prs1 := prev(j).bits.prd
-            found_rs1(j) := true.B
-          } .otherwise {
-            found_rs1(j) := found_rs1(j-1)
-          }
+      val prev_uops = rn1_uops.take(i)
+      val bypass    = rn1_uops_bypass(i)
+      bypass := rn1_uops(i)
 
-        val rs2_dep = prev(j).valid && (prev(j).bits.lrd === rn1_uops_bypass(i).bits.lrs2)
-        if j == 0 then
-          when (rs2_dep) {
-            found_rs2(j) := true.B
-            rn1_uops_bypass(i).bits.prs2 := prev(j).bits.prd
-          } .otherwise {
-            found_rs2(j) := false.B
-          }
-        else
-          when (!found_rs2(j-1) && rs2_dep) {
-            rn1_uops_bypass(i).bits.prs2 := prev(j).bits.prd
-            found_rs2(j) := true.B
-          } .otherwise {
-            found_rs2(j) := found_rs2(j-1)
-          }
+      val lrd_deps  = prev_uops.map(p => p.valid && bypass.valid &&  lrd_dep(p.bits, bypass.bits))
+      val lrs1_deps = prev_uops.map(p => p.valid && bypass.valid && lrs1_dep(p.bits, bypass.bits))
+      val lrs2_deps = prev_uops.map(p => p.valid && bypass.valid && lrs2_dep(p.bits, bypass.bits))
 
-        val rd_match = prev(j).valid && (prev(j).bits.lrd === rn1_uops_bypass(i).bits.lrd)
-        if j == 0 then
-          when (rd_match) {
-            found_rd(j) := true.B
-            rn1_uops_bypass(i).bits.stale_prd := prev(j).bits.prd
-          } .otherwise {
-            found_rd(j) := false.B
-          }
-        else
-          when (!found_rd(j-1) && rd_match) {
-            rn1_uops_bypass(i).bits.stale_prd := prev(j).bits.prd
-            found_rd(j) := true.B
-          } .otherwise {
-            found_rd(j) := found_rd(j-1)
-          }
+      val lrd_dep_oh  = PriorityEncoderOH(Cat(lrd_deps .reverse))
+      val lrs1_dep_oh = PriorityEncoderOH(Cat(lrs1_deps.reverse))
+      val lrs2_dep_oh = PriorityEncoderOH(Cat(lrs2_deps.reverse))
+
+      when (lrd_deps.reduce(_ || _)) {
+        bypass.bits.stale_prd := MuxOneHot(lrd_dep_oh, prev_uops.map(_.bits.prd))
       }
-    }
-
-    for (i <- 0 until p.coreWidth) {
-      map_table.io.rn1_update(i).valid := rn1_uops_bypass(i).valid
-      map_table.io.rn1_update(i).bits.lrd := rn1_uops_bypass(i).bits.lrd
-      map_table.io.rn1_update(i).bits.prd := rn1_uops_bypass(i).bits.prd
-    }
-
-    for (i <- 0 until p.coreWidth) {
-      busy_table.io.rn1_req(i).prs1 := rn1_uops_bypass(i).bits.prs1
-      busy_table.io.rn1_req(i).prs2 := rn1_uops_bypass(i).bits.prs2
-
-      rn1_uops_bypass(i).bits.prs1_busy := busy_table.io.rn1_resp(i).prs1_busy
-      rn1_uops_bypass(i).bits.prs2_busy := busy_table.io.rn1_resp(i).prs2_busy
+      when (lrs1_deps.reduce(_ || _)) {
+        bypass.bits.prs1 := MuxOneHot(lrs1_dep_oh, prev_uops.map(_.bits.prd))
+        bypass.bits.prs1_busy := true.B
+      }
+      when (lrs2_deps.reduce(_ || _)) {
+        bypass.bits.prs2 := MuxOneHot(lrs2_dep_oh, prev_uops.map(_.bits.prd))
+        bypass.bits.prs2_busy := true.B
+      }
     }
 
     io.rn2_uops <> rn1_uops_bypass
 
-
     busy_table.io.wb_req <> io.wb_done_phys
-
 
     busy_table.io.comm_prds <> io.comm_free_phys
     free_list.io.comm_prds  <> io.comm_free_phys
@@ -405,4 +403,17 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(io.dec_uops)
     dontTouch(io.dec_ready)
     dontTouch(io.rn2_uops)
+
+    val debug_bypass_rs1_val = Wire(Vec.fill(p.coreWidth)(Bool()))
+    val debug_bypass_rs2_val = Wire(Vec.fill(p.coreWidth)(Bool()))
+    val debug_bypass_rd_val  = Wire(Vec.fill(p.coreWidth)(Bool()))
+
+    debug_bypass_rs1_val.zip(rn1_uops_bypass).foreach((d, u) => d := u.valid && u.bits.lrs1_val)
+    debug_bypass_rs2_val.zip(rn1_uops_bypass).foreach((d, u) => d := u.valid && u.bits.lrs2_val)
+    debug_bypass_rd_val .zip(rn1_uops_bypass).foreach((d, u) => d := u.valid && u.bits.lrd_val)
+
+    dontTouch(debug_bypass_rs1_val)
+    dontTouch(debug_bypass_rs2_val)
+    dontTouch(debug_bypass_rd_val)
+
   }

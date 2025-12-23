@@ -3,6 +3,7 @@ package riscv_ooo
 import hdl._
 import riscv_inorder.ALUParams.Opcode
 import riscv_inorder.Instructions
+import riscv_inorder.CoreConstants._
 
 case class UOp(
   pc: UInt,
@@ -22,7 +23,22 @@ case class UOp(
   taken: Bool,
   next_pc: Valid[UInt],
   ctrl: CtrlSignals,
-) extends Bundle[UOp]
+) extends Bundle[UOp]:
+  import riscv_inorder.ALUParams
+
+  def lrs1_val(using m: Module): Bool =
+    ctrl.valid &&
+      (ctrl.sel_alu1 === ALUOp1.RS1.EN) ||
+      (ctrl.sel_alu1 === ALUOp1.RS1SHL.EN)
+
+  def lrs2_val(using m: Module): Bool =
+    ctrl.valid &&
+      (ctrl.sel_alu2 === ALUOp2.RS2.EN) ||
+      (ctrl.sel_alu2 === ALUOp2.RS2OH.EN) ||
+      (ctrl.is_mem && (ctrl.mem_op === MemOp.St.EN))
+
+  def lrd_val(using m: Module): Bool =
+    ctrl.valid && ctrl.rd_wen
 
 object UOp:
   def apply(p: CoreParams): UOp =
@@ -47,49 +63,6 @@ object UOp:
       ctrl   = CtrlSignals()
     )
 
-object CoreConstants:
-  enum Immediates:
-    case
-      IMM_S,
-      IMM_SB,
-      IMM_U,
-      IMM_UJ,
-      IMM_I,
-      IMM_Z
-
-  enum ALUOp1:
-    case
-      ZERO,
-      RS1,
-      PC,
-      RS1SHL
-
-  enum ALUOp2:
-    case
-      ZERO,
-      SIZE,
-      RS2,
-      IMM,
-      RS2OH,
-      IMMOH
-
-  enum DW:
-    case
-      DW32,
-      DW64
-
-  enum MemWidth:
-    case
-      B,
-      H,
-      W,
-      D
-
-  enum MemOp:
-    case
-      Ld,
-      St
-
 trait DecoderLogic:
   def Y = true.B
   def N = false.B
@@ -102,12 +75,12 @@ case class CtrlSignals(
   jalr:     Bool,
   rd_wen:   Bool,
   is_mem:   Bool,
-  sel_imm:  HWEnum[CoreConstants.Immediates],
-  sel_alu1: HWEnum[CoreConstants.ALUOp1],
-  sel_alu2: HWEnum[CoreConstants.ALUOp2],
+  sel_imm:  HWEnum[Immediates],
+  sel_alu1: HWEnum[ALUOp1],
+  sel_alu2: HWEnum[ALUOp2],
   alu_op:   HWEnum[riscv_inorder.ALUParams.Opcode],
-  mem_op:   HWEnum[CoreConstants.MemOp],
-  mem_width: HWEnum[CoreConstants.MemWidth],
+  mem_op:   HWEnum[MemOp],
+  mem_width: HWEnum[MemWidth],
   mem_signed: Bool,
 ) extends Bundle[CtrlSignals]:
 
@@ -115,14 +88,13 @@ case class CtrlSignals(
     valid && (br || jal || jalr)
 
   def is_load(using m: Module): Bool =
-    valid && is_mem && (mem_op === CoreConstants.MemOp.Ld.EN)
+    valid && is_mem && (mem_op === MemOp.Ld.EN)
 
   def is_store(using m: Module): Bool =
-    valid && is_mem && (mem_op === CoreConstants.MemOp.St.EN)
+    valid && is_mem && (mem_op === MemOp.St.EN)
 
 object CtrlSignals extends DecoderLogic:
   import Instructions._
-  import CoreConstants._
   import riscv_inorder.ALUParams._
   import riscv_inorder.ALUParams.Opcode._
   import Immediates._

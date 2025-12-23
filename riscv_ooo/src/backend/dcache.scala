@@ -1,7 +1,7 @@
 package riscv_ooo
 
 import hdl._
-import CoreConstants._
+import riscv_inorder.CoreConstants._
 
 case class DCacheReq(
   vaddr: UInt,

@@ -26,8 +26,11 @@ struct SimConfig {
 #[derive(Clone, Debug)]
 struct RenamedUop {
     valid: bool,
+    lrs1_val: bool,
     lrs1: u64,
+    lrs2_val: bool,
     lrs2: u64,
+    lrd_val: bool,
     lrd: u64,
     prs1: u64,
     prs2: u64,
@@ -366,8 +369,15 @@ fn get_rn2_uops(dut: &Dut) -> [RenamedUop; CORE_WIDTH] {
     [
         RenamedUop {
             valid: dut.peek_io_rn2_uops_0_valid() != 0,
+            lrs1_val: (dut.peek_io_rn2_uops_0_bits_ctrl_sel_alu1() == 1) ||
+                      (dut.peek_io_rn2_uops_0_bits_ctrl_sel_alu1() == 3),
             lrs1: dut.peek_io_rn2_uops_0_bits_lrs1(),
+            lrs2_val: (dut.peek_io_rn2_uops_0_bits_ctrl_sel_alu2() == 2) ||
+                      (dut.peek_io_rn2_uops_0_bits_ctrl_sel_alu2() == 4) ||
+                      (dut.peek_io_rn2_uops_0_bits_ctrl_is_mem()  == 1 &&
+                       (dut.peek_io_rn2_uops_0_bits_ctrl_mem_op() == 1)),
             lrs2: dut.peek_io_rn2_uops_0_bits_lrs2(),
+            lrd_val: dut.peek_io_rn2_uops_0_bits_ctrl_rd_wen() == 1,
             lrd: dut.peek_io_rn2_uops_0_bits_lrd(),
             prs1: dut.peek_io_rn2_uops_0_bits_prs1(),
             prs2: dut.peek_io_rn2_uops_0_bits_prs2(),
@@ -376,9 +386,16 @@ fn get_rn2_uops(dut: &Dut) -> [RenamedUop; CORE_WIDTH] {
         },
         RenamedUop {
             valid: dut.peek_io_rn2_uops_1_valid() != 0,
+            lrs1_val: (dut.peek_io_rn2_uops_1_bits_ctrl_sel_alu1() == 1) ||
+                      (dut.peek_io_rn2_uops_1_bits_ctrl_sel_alu1() == 3),
             lrs1: dut.peek_io_rn2_uops_1_bits_lrs1(),
+            lrs2_val: (dut.peek_io_rn2_uops_1_bits_ctrl_sel_alu2() == 2) ||
+                      (dut.peek_io_rn2_uops_1_bits_ctrl_sel_alu2() == 4) ||
+                      (dut.peek_io_rn2_uops_1_bits_ctrl_is_mem()  == 1 &&
+                       (dut.peek_io_rn2_uops_1_bits_ctrl_mem_op() == 1)),
             lrs2: dut.peek_io_rn2_uops_1_bits_lrs2(),
             lrd: dut.peek_io_rn2_uops_1_bits_lrd(),
+            lrd_val: dut.peek_io_rn2_uops_1_bits_ctrl_rd_wen() == 1,
             prs1: dut.peek_io_rn2_uops_1_bits_prs1(),
             prs2: dut.peek_io_rn2_uops_1_bits_prs2(),
             prd: dut.peek_io_rn2_uops_1_bits_prd(),

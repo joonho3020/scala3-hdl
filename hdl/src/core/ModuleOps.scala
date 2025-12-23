@@ -388,6 +388,24 @@ extension (lhs: UInt)
     val shifted = ModuleOps.prim2Op(UInt(lhs.getWidth), IR.PrimOp.DShr, lhs, idx, m)
     ModuleOps.prim1Op2Const(UInt(Width(1)), IR.PrimOp.Bits, shifted, 0, 0, m)
 
+  def orR(using m: Module): Bool =
+    val width = lhs.getWidth match
+      case KnownWidth(v) => v
+      case _ => throw new IllegalArgumentException("orR requires UInt with known width")
+    if width < 1 then
+      throw new IllegalArgumentException("orR requires UInt width >= 1")
+    val bits = (0 until width).map(i => lhs(i).asBool)
+    bits.reduce(_ || _)
+
+  def andR(using m: Module): Bool =
+    val width = lhs.getWidth match
+      case KnownWidth(v) => v
+      case _ => throw new IllegalArgumentException("andR requires UInt with known width")
+    if width < 1 then
+      throw new IllegalArgumentException("andR requires UInt width >= 1")
+    val bits = (0 until width).map(i => lhs(i).asBool)
+    bits.reduce(_ && _)
+
   def asBool(using m: Module): Bool =
     ModuleOps.prim1Op(Bool(), IR.PrimOp.AsBool, lhs, m)
 
@@ -585,4 +603,3 @@ extension (lhs: OneHot)
 
   def =/=(rhs: OneHot)(using m: Module): Bool =
     ModuleOps.prim2Op(Bool(), IR.PrimOp.Neq, lhs, rhs, m)
-

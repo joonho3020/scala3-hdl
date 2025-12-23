@@ -33,10 +33,12 @@ private def lit(value: String): IR.Expr = IR.Literal(id(value))
 private def addPrim(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Add, Seq(a, b))
 private def add(a: IR.Expr, b: IR.Expr): IR.Expr = tail(addPrim(a, b), 1)
 private def and(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.And, Seq(a, b))
+private def or(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Or, Seq(a, b))
 private def eqv(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Eq, Seq(a, b))
 private def neqv(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Neq, Seq(a, b))
 private def not(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
 private def bits(a: IR.Expr, hi: Int, lo: Int): IR.Expr = IR.DoPrim(IR.PrimOp.Bits, Seq(a), Seq(hi, lo))
+private def asBoolPrim(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.AsBool, Seq(e))
 private def tail(a: IR.Expr, n: Int): IR.Expr = IR.DoPrim(IR.PrimOp.Tail, Seq(a), Seq(n))
 private def dshr(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.DShr, Seq(a, b))
 private def reverseBits(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
@@ -1464,6 +1466,79 @@ def bitwise_reverse_check(): Unit =
   assertDesigns("Bitwise Reverse Check", d, expected)
   println("=" * 50)
 
+def bitwise_reduce_check(): Unit =
+  final case class ReduceIO(in: UInt, orOut: Bool, andOut: Bool) extends Bundle[ReduceIO]
+  class ReduceModule extends Module:
+    given Module = this
+    val io = IO(ReduceIO(
+      in = Input(UInt(Width(4))),
+      orOut = Output(Bool()),
+      andOut = Output(Bool())
+    ))
+    io.orOut := io.in.orR
+    io.andOut := io.in.andR
+
+  val elaborator = new Elaborator
+  val m = new ReduceModule
+  val d = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(d)
+  val inRef = sf(ref("io"), "in")
+  val b0 = asBoolPrim(bits(inRef, 0, 0))
+  val b1 = asBoolPrim(bits(inRef, 1, 1))
+  val b2 = asBoolPrim(bits(inRef, 2, 2))
+  val b3 = asBoolPrim(bits(inRef, 3, 3))
+  val expected = Seq(
+    module(
+      "ReduceModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("in", true, u(4)),
+          ("orOut", false, IR.BoolType),
+          ("andOut", false, IR.BoolType)
+        ))
+      ),
+      Seq(
+        IR.Connect(
+          sf(ref("io"), "orOut"),
+          or(or(or(b0, b1), b2), b3)
+        ),
+        IR.Connect(
+          sf(ref("io"), "andOut"),
+          and(and(and(b0, b1), b2), b3)
+        )
+      )
+    )
+  )
+  println("=" * 50)
+  println("Bitwise Reduce Check:")
+  println(rendered)
+  assertDesigns("Bitwise Reduce Check", d, expected)
+  println("=" * 50)
+
+def first_set_indices_check(): Unit =
+  final case class FirstSetIO(out: Seq[UInt]) extends Bundle[FirstSetIO]
+  object FirstSetIO:
+    def apply(): FirstSetIO =
+      FirstSetIO(
+        out = Seq.fill(3)(Output(UInt(Width(3))))
+      )
+
+  class FirstSetModule extends Module:
+    given Module = this
+    val io = IO(FirstSetIO())
+    val res = FirstSetIndices(Lit(UInt(Width(5)))(22), 3)
+    io.out.zip(res).foreach((o, r) => o := r)
+
+  val elaborator = new Elaborator
+  val m = new FirstSetModule
+  val d = elaborator.elaborate(m)
+  val rendered = elaborator.emitAll(d)
+  assert(rendered.contains("connect io.out[0], UInt<3>(1)"))
+  assert(rendered.contains("connect io.out[1], UInt<3>(2)"))
+  assert(rendered.contains("connect io.out[2], UInt<3>(4)"))
+
 def mux_and_concat_check(): Unit =
   final case class MuxConcatIO(a: UInt, b: UInt, sel: Bool, out: UInt, cat: UInt) extends Bundle[MuxConcatIO]
   class MuxConcat extends Module:
@@ -2181,6 +2256,8 @@ object ModuleChecksSpec extends TestSuite:
     test("queue_check") { queue_check() }
     test("bit_select_check") { bit_select_check() }
     test("bitwise_reverse_check") { bitwise_reverse_check() }
+    test("bitwise_reduce_check") { bitwise_reduce_check() }
+    test("first_set_indices_check") { first_set_indices_check() }
     test("mux_and_concat_check") { mux_and_concat_check() }
     test("enum_basic_check") { enum_basic_check() }
     test("switch_check") { switch_check() }
