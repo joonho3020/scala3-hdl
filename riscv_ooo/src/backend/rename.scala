@@ -1,4 +1,4 @@
-package riscv
+package riscv_ooo
 
 import hdl._
 

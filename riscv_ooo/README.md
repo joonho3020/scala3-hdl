@@ -16,14 +16,31 @@ S0 S1 S2 FB
 
 ## Backend:
 
-- Fix this to OoO later
+<!-- - Fix this to OoO later -->
 
-D E M W
+<!-- D E M W -->
 
-- D: decode & register file lookup
-- E: execute
-- M: memory
-- W: writeback
+<!-- - D: decode & register file lookup -->
+<!-- - E: execute -->
+<!-- - M: memory -->
+<!-- - W: writeback -->
+
+Decode
+
+Rename 1
+
+Rename 2
+
+Dispatch
+
+Issue
+
+WB
+
+Commit
+
+
+
 
 ## LSU:
 

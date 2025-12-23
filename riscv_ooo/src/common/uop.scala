@@ -1,17 +1,24 @@
-package riscv
+package riscv_ooo
 
 import hdl._
 import riscv.ALUParams.Opcode
+import riscv.Instructions
 
 case class UOp(
   pc: UInt,
   inst: UInt,
-  opcode: UInt,
-  funct3: UInt,
-  funct7: UInt,
-  rs1: UInt,
-  rs2: UInt,
-  rd:  UInt,
+  lrs1: UInt,
+  lrs2: UInt,
+  lrd:  UInt,
+
+  prs1: UInt,
+  prs2: UInt,
+  prd:  UInt,
+  stale_prd: UInt,
+
+  prs1_busy: Bool,
+  prs2_busy: Bool,
+
   taken: Bool,
   next_pc: Valid[UInt],
   ctrl: CtrlSignals,
@@ -22,12 +29,19 @@ object UOp:
     UOp(
       pc = UInt(p.pcBits.W),
       inst = UInt(p.xlenBits.W),
-      opcode = UInt(7.W),
-      funct3 = UInt(3.W),
-      funct7 = UInt(7.W),
-      rs1    = UInt(5.W),
-      rs2    = UInt(5.W),
-      rd     = UInt(5.W),
+
+      lrs1    = UInt(5.W),
+      lrs2    = UInt(5.W),
+      lrd     = UInt(5.W),
+
+      prs1    = UInt(p.pRegIdxBits.W),
+      prs2    = UInt(p.pRegIdxBits.W),
+      prd     = UInt(p.pRegIdxBits.W),
+      stale_prd = UInt(p.pRegIdxBits.W),
+
+      prs1_busy = Bool(),
+      prs2_busy = Bool(),
+
       taken  = Bool(),
       next_pc = Valid(UInt(p.pcBits.W)),
       ctrl   = CtrlSignals()
@@ -91,7 +105,7 @@ case class CtrlSignals(
   sel_imm:  HWEnum[CoreConstants.Immediates],
   sel_alu1: HWEnum[CoreConstants.ALUOp1],
   sel_alu2: HWEnum[CoreConstants.ALUOp2],
-  alu_op:   HWEnum[ALUParams.Opcode],
+  alu_op:   HWEnum[riscv.ALUParams.Opcode],
   mem_op:   HWEnum[CoreConstants.MemOp],
   mem_width: HWEnum[CoreConstants.MemWidth],
   mem_signed: Bool,
@@ -109,8 +123,8 @@ case class CtrlSignals(
 object CtrlSignals extends DecoderLogic:
   import Instructions._
   import CoreConstants._
-  import ALUParams._
-  import ALUParams.Opcode._
+  import riscv.ALUParams._
+  import riscv.ALUParams.Opcode._
   import Immediates._
   import ALUOp1._
   import ALUOp2._
@@ -160,7 +174,7 @@ object CtrlSignals extends DecoderLogic:
     sel_imm:  HWEnum[Immediates]       | DontCare.type,
     sel_alu1: HWEnum[ALUOp1]           | DontCare.type,
     sel_alu2: HWEnum[ALUOp2]           | DontCare.type,
-    alu_op:   HWEnum[ALUParams.Opcode] | DontCare.type,
+    alu_op:   HWEnum[riscv.ALUParams.Opcode] | DontCare.type,
     mem_op:   HWEnum[MemOp]            | DontCare.type,
     mem_width: HWEnum[MemWidth]        | DontCare.type,
     mem_signed: Bool                   | DontCare.type,

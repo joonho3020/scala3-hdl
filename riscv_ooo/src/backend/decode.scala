@@ -1,6 +1,7 @@
-package riscv
+package riscv_ooo
 
 import hdl._
+import riscv.ALUParams
 
 case class DecoderIO(
   enq: Vec[Decoupled[UOp]],
@@ -28,12 +29,9 @@ class Decoder(p: CoreParams) extends Module with CoreCacheable(p):
       val inst = enq_uop.inst
 
       deq_uop        := enq_uop
-      deq_uop.opcode := inst(6,  0)
-      deq_uop.funct3 := inst(14, 12)
-      deq_uop.funct7 := inst(31, 25)
-      deq_uop.rs1    := inst(19, 15)
-      deq_uop.rs2    := inst(24, 20)
-      deq_uop.rd     := inst(11, 7)
+      deq_uop.lrs1    := inst(19, 15)
+      deq_uop.lrs2    := inst(24, 20)
+      deq_uop.lrd     := inst(11,  7)
       deq_uop.taken  := false.B
       CtrlSignals.decode(deq_uop.ctrl, enq_uop.inst)
     })
