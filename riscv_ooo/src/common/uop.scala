@@ -1,8 +1,8 @@
 package riscv_ooo
 
 import hdl._
-import riscv.ALUParams.Opcode
-import riscv.Instructions
+import riscv_inorder.ALUParams.Opcode
+import riscv_inorder.Instructions
 
 case class UOp(
   pc: UInt,
@@ -105,7 +105,7 @@ case class CtrlSignals(
   sel_imm:  HWEnum[CoreConstants.Immediates],
   sel_alu1: HWEnum[CoreConstants.ALUOp1],
   sel_alu2: HWEnum[CoreConstants.ALUOp2],
-  alu_op:   HWEnum[riscv.ALUParams.Opcode],
+  alu_op:   HWEnum[riscv_inorder.ALUParams.Opcode],
   mem_op:   HWEnum[CoreConstants.MemOp],
   mem_width: HWEnum[CoreConstants.MemWidth],
   mem_signed: Bool,
@@ -123,8 +123,8 @@ case class CtrlSignals(
 object CtrlSignals extends DecoderLogic:
   import Instructions._
   import CoreConstants._
-  import riscv.ALUParams._
-  import riscv.ALUParams.Opcode._
+  import riscv_inorder.ALUParams._
+  import riscv_inorder.ALUParams.Opcode._
   import Immediates._
   import ALUOp1._
   import ALUOp2._
@@ -174,7 +174,7 @@ object CtrlSignals extends DecoderLogic:
     sel_imm:  HWEnum[Immediates]       | DontCare.type,
     sel_alu1: HWEnum[ALUOp1]           | DontCare.type,
     sel_alu2: HWEnum[ALUOp2]           | DontCare.type,
-    alu_op:   HWEnum[riscv.ALUParams.Opcode] | DontCare.type,
+    alu_op:   HWEnum[riscv_inorder.ALUParams.Opcode] | DontCare.type,
     mem_op:   HWEnum[MemOp]            | DontCare.type,
     mem_width: HWEnum[MemWidth]        | DontCare.type,
     mem_signed: Bool                   | DontCare.type,

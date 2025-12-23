@@ -1,4 +1,4 @@
-package riscv
+package riscv_inorder
 
 import hdl._
 

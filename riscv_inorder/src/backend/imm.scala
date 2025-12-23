@@ -1,4 +1,4 @@
-package riscv
+package riscv_inorder
 
 import hdl._
 import CoreConstants.Immediates
@@ -40,15 +40,11 @@ class ImmGen(xlen: Int) extends Module with CacheableModule:
     val immUJ = Wire(UInt(xlen.W))
     immUJ := Cat(Seq(Fill(xlen - 20, io.inst(31)), io.inst(19, 12), io.inst(20), io.inst(30, 21), 0.U(1.W)))
 
-// val immZ  = Wire(UInt(xlen.W))
-// immZ := Cat(Seq(0.U((xlen - 5).W), io.inst(19, 15)))
-
     dontTouch(immI)
     dontTouch(immS)
     dontTouch(immSB)
     dontTouch(immU)
     dontTouch(immUJ)
-// dontTouch(immZ)
 
     import Immediates._
     switch (io.sel) {
@@ -57,6 +53,5 @@ class ImmGen(xlen: Int) extends Module with CacheableModule:
       is(IMM_SB.EN) { io.out := immSB    }
       is(IMM_U .EN) { io.out := immU     }
       is(IMM_UJ.EN) { io.out := immUJ    }
-// is(IMM_Z .EN) { io.out := immZ     }
       default       { io.out := DontCare }
     }

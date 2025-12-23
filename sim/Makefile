@@ -1,17 +1,21 @@
-.PHONY: all sim clean test-all
+.PHONY: all sim inorder-cosim clean test-all verilog-ooo verilog-inorder
 
-RISCV_SOURCES := $(shell find ../riscv/src -name "*.scala" 2>/dev/null)
-VERILOG_OUTPUT := test-outputs/chirrtl/Tile.fir
+INORDER_SOURCES := $(shell find ../riscv_inorder/src -name "*.scala" 2>/dev/null)
+OOO_SOURCES := $(shell find ../riscv_ooo/src -name "*.scala" 2>/dev/null)
 
-all: verilog sim
+all: sim
 
-verilog: $(VERILOG_OUTPUT)
+verilog-inorder: $(INORDER_SOURCES)
+	cd .. && ./mill riscv_inorder.run
 
-$(VERILOG_OUTPUT): $(RISCV_SOURCES)
-	cd .. && ./mill riscv.run
+verilog-ooo: $(OOO_SOURCES)
+	cd .. && ./mill riscv_ooo.run
 
-sim: verilog
+sim: verilog-ooo
 	cargo run --release -- $(TEST)
+
+inorder-cosim: verilog-inorder
+	cargo run --release --bin inorder-cosim -- $(TEST)
 
 clean:
 	cargo clean
@@ -19,7 +23,7 @@ clean:
 	rm -f libVdut.so
 	rm -f *.vcd
 
-test-all: verilog
+test-all: verilog-ooo
 	@for hex in tests/*.hex; do \
 		echo "Running $$hex..."; \
 		cargo run --release -- $$hex || exit 1; \

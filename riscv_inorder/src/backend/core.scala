@@ -1,4 +1,4 @@
-package riscv
+package riscv_inorder
 
 import hdl._
 import CoreConstants.{ALUOp1, ALUOp2, MemOp}

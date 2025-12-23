@@ -1,4 +1,4 @@
-package riscv
+package riscv_inorder
 
 import java.io.{File, PrintWriter}
 import scala.sys.process.*

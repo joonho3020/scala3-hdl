@@ -1,7 +1,7 @@
-package riscv
+package riscv_inorder
 
 import hdl._
-import riscv.ALUParams.Opcode
+import riscv_inorder.ALUParams.Opcode
 
 case class UOp(
   pc: UInt,

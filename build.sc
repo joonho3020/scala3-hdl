@@ -12,12 +12,12 @@ object hdl extends ScalaModule {
   }
 }
 
-object riscv extends ScalaModule {
+object riscv_inorder extends ScalaModule {
   def scalaVersion = SCALAVERSION
   override def moduleDeps = Seq(hdl)
 }
 
 object riscv_ooo extends ScalaModule {
   def scalaVersion = SCALAVERSION
-  override def moduleDeps = Seq(hdl, riscv)
+  override def moduleDeps = Seq(hdl, riscv_inorder)
 }

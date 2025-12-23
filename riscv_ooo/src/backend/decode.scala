@@ -1,7 +1,7 @@
 package riscv_ooo
 
 import hdl._
-import riscv.ALUParams
+import riscv_inorder.ALUParams
 
 case class DecoderIO(
   enq: Vec[Decoupled[UOp]],
