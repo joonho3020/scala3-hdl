@@ -71,7 +71,7 @@ object DCacheBundle:
       mem = MagicMemIf(p)
     )
 
-class DCache(p: CoreParams) extends Module:
+class DCache(p: CoreParams) extends Module with CoreCacheable(p):
   given Module = this
 
   val dc = p.dc

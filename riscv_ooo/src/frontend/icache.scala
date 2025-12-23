@@ -21,9 +21,7 @@ object ICacheBundle:
     )
 
 // TODO: proper banking of data arrays...
-class ICache(
-  p: CoreParams,
-) extends Module with CoreCacheable(p):
+class ICache(p: CoreParams) extends Module with CoreCacheable(p):
   given Module = this
   val io = IO(ICacheBundle(p))
 

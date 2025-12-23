@@ -6,13 +6,13 @@ OOO_SOURCES := $(shell find ../riscv_ooo/src -name "*.scala" 2>/dev/null)
 all: sim
 
 verilog-inorder: $(INORDER_SOURCES)
-	cd .. && ./mill riscv_inorder.run
+	cd .. && ./mill -i riscv_inorder.run
 
 verilog-ooo: $(OOO_SOURCES)
-	cd .. && ./mill riscv_ooo.run
+	cd .. && ./mill -i riscv_ooo.run
 
 sim: verilog-ooo
-	cargo run --release -- $(TEST)
+	cargo run --release --bin hdl-sim -- $(TEST)
 
 inorder-cosim: verilog-inorder
 	cargo run --release --bin inorder-cosim -- $(TEST)
@@ -26,5 +26,5 @@ clean:
 test-all: verilog-ooo
 	@for hex in tests/*.hex; do \
 		echo "Running $$hex..."; \
-		cargo run --release -- $$hex || exit 1; \
+		cargo run --release --bin hdl-sim -- $$hex || exit 1; \
 	done

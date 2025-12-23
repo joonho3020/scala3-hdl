@@ -2,6 +2,7 @@ package riscv_ooo
 
 import hdl._
 import CoreConstants.{ALUOp1, ALUOp2, MemOp}
+import MagicMemMsg.Read
 
 case class RedirectIf(
   valid:  Bool,
@@ -65,6 +66,22 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
   val coreWidth = p.coreWidth
 
   body {
+    io.redirect.valid := false.B
+    io.redirect.target := 0.U
+
+    io.bpu_update.valid := false.B
+    io.bpu_update.bits.pc := 0.U
+    io.bpu_update.bits.target := 0.U
+    io.bpu_update.bits.taken := false.B
+    io.bpu_update.bits.is_call := false.B
+    io.bpu_update.bits.is_ret := false.B
+
+    io.mem.req.valid := false.B
+    io.mem.req.bits.addr := 0.U
+    io.mem.req.bits.tpe := Read.EN
+    io.mem.req.bits.data.foreach(_ := 0.U)
+    io.mem.req.bits.mask := 0.U
+
     io.retire_info.foreach(ri => {
       ri.valid := false.B
       ri.pc := DontCare

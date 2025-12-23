@@ -321,9 +321,9 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
 
     for (i <- 1 until p.coreWidth) {
       val prev = rn1_uops_bypass.take(i).reverse
-      val found_rs1 = Wire(Vec.fill(i-1)(Bool()))
-      val found_rs2 = Wire(Vec.fill(i-1)(Bool()))
-      val found_rd  = Wire(Vec.fill(i-1)(Bool()))
+      val found_rs1 = Wire(Vec.fill(i)(Bool()))
+      val found_rs2 = Wire(Vec.fill(i)(Bool()))
+      val found_rd  = Wire(Vec.fill(i)(Bool()))
       for (j <- 0 until i) {
         val rs1_dep = prev(j).valid && (prev(j).bits.lrd === rn1_uops_bypass(i).bits.lrs1)
         if j == 0 then
