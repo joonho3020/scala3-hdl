@@ -42,7 +42,6 @@ def runFirtool(firFile: String): (Int, String) =
       cacheLineBytes = 64,
       mshrs = 2),
     aluPipes = 2,
-    lsu = LSUParams(),
   )
 
   val top = new Tile(p)

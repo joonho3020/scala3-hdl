@@ -37,7 +37,7 @@ case class CoreParams(
   bpu: BPUParams = BPUParams(),
   aluPipes: Int,
   dc: DCacheParams,
-  lsu: LSUParams,
+  lsu: LSUParams = LSUParams(),
 ) derives StableHash:
   def xlenBytes: Int = xlenBits / 8
 

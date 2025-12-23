@@ -85,7 +85,7 @@ object BranchPredictorIO:
     )
 
 // TODO: Bank BTB, BHT memory structures
-class BranchPredictor(p: CoreParams) extends Module:
+class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
   given Module = this
 
   class RAS(nras: Int):
