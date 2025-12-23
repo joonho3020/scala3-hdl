@@ -6,12 +6,18 @@ import riscv.ALUParams.Opcode
 case class UOp(
   pc: UInt,
   inst: UInt,
-  opcode: UInt,
-  funct3: UInt,
-  funct7: UInt,
-  rs1: UInt,
-  rs2: UInt,
-  rd:  UInt,
+  lrs1: UInt,
+  lrs2: UInt,
+  lrd:  UInt,
+
+  prs1: UInt,
+  prs2: UInt,
+  prd:  UInt,
+  stale_prd: UInt,
+
+  prs1_busy: Bool,
+  prs2_busy: Bool,
+
   taken: Bool,
   next_pc: Valid[UInt],
   ctrl: CtrlSignals,
@@ -22,12 +28,19 @@ object UOp:
     UOp(
       pc = UInt(p.pcBits.W),
       inst = UInt(p.xlenBits.W),
-      opcode = UInt(7.W),
-      funct3 = UInt(3.W),
-      funct7 = UInt(7.W),
-      rs1    = UInt(5.W),
-      rs2    = UInt(5.W),
-      rd     = UInt(5.W),
+
+      lrs1    = UInt(5.W),
+      lrs2    = UInt(5.W),
+      lrd     = UInt(5.W),
+
+      prs1    = UInt(p.pRegIdxBits.W),
+      prs2    = UInt(p.pRegIdxBits.W),
+      prd     = UInt(p.pRegIdxBits.W),
+      stale_prd = UInt(p.pRegIdxBits.W),
+
+      prs1_busy = Bool(),
+      prs2_busy = Bool(),
+
       taken  = Bool(),
       next_pc = Valid(UInt(p.pcBits.W)),
       ctrl   = CtrlSignals()

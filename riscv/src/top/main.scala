@@ -43,6 +43,7 @@ def runFirtool(firFile: String): (Int, String) =
       mshrs = 2),
     aluPipes = 2,
     lsu = LSUParams(),
+    nPhysicalRegs = 64,
   )
 
   val top = new Tile(p)

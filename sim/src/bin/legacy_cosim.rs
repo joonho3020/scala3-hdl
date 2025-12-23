@@ -2,10 +2,7 @@ use hdl_sim::asm_parser::parse_asm_file;
 use hdl_sim::Dut;
 use riscv_sim::RefCore;
 use rvdasm::disassembler::Disassembler;
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    env,
-};
+use std::{collections::HashMap, collections::HashSet, env};
 
 const RESET_PC: u64 = 0x80000000;
 const CACHE_LINE_WORDS: usize = 16;
@@ -13,150 +10,6 @@ const WORD_SIZE: u64 = 4;
 const HALT_OPCODE: u32 = 0x0000006f;
 const PAGE_SIZE: usize = 4096;
 const MEM_TYPE_WRITE: u64 = 1;
-const LOGICAL_REGS: usize = 32;
-const PHYSICAL_REGS: usize = 64;
-const CORE_WIDTH: usize = 2;
-
-struct SimConfig {
-    asm_file: String,
-    rename_trace: bool,
-    rename_check: bool,
-}
-
-#[derive(Clone, Debug)]
-struct RenamedUop {
-    valid: bool,
-    lrs1: u64,
-    lrs2: u64,
-    lrd: u64,
-    prs1: u64,
-    prs2: u64,
-    prd: u64,
-    stale_prd: u64,
-}
-
-struct RenameModel {
-    map_table: [u64; LOGICAL_REGS],
-    free_list: VecDeque<u64>,
-}
-
-impl SimConfig {
-    fn parse() -> Self {
-        let mut asm_file = "tests/alu_test.hex".to_string();
-        let mut rename_trace = false;
-        let mut rename_check = false;
-        let mut args = env::args().skip(1);
-        while let Some(arg) = args.next() {
-            match arg.as_str() {
-                "--rename-trace" => rename_trace = true,
-                "--rename-check" => rename_check = true,
-                _ => asm_file = arg,
-            }
-        }
-        SimConfig {
-            asm_file,
-            rename_trace,
-            rename_check,
-        }
-    }
-}
-
-impl RenameModel {
-    fn new() -> Self {
-        let mut map_table = [0u64; LOGICAL_REGS];
-        for i in 0..LOGICAL_REGS {
-            map_table[i] = i as u64;
-        }
-        let mut free_list = VecDeque::new();
-        for i in 0..PHYSICAL_REGS {
-            free_list.push_back(i as u64);
-        }
-        RenameModel { map_table, free_list }
-    }
-
-    fn check_cycle(&mut self, uops: &[RenamedUop; CORE_WIDTH], cycle: usize) -> Vec<String> {
-        let mut next_map = self.map_table;
-        let mut next_free = self.free_list.clone();
-        let mut issues = Vec::new();
-
-        for (lane, uop) in uops.iter().enumerate() {
-            if !uop.valid {
-                continue;
-            }
-            let rs1_idx = match usize::try_from(uop.lrs1).ok().filter(|idx| *idx < LOGICAL_REGS) {
-                Some(v) => v,
-                None => {
-                    issues.push(format!("cycle {} lane {} invalid lrs1 {}", cycle, lane, uop.lrs1));
-                    continue;
-                }
-            };
-            let rs2_idx = match usize::try_from(uop.lrs2).ok().filter(|idx| *idx < LOGICAL_REGS) {
-                Some(v) => v,
-                None => {
-                    issues.push(format!("cycle {} lane {} invalid lrs2 {}", cycle, lane, uop.lrs2));
-                    continue;
-                }
-            };
-            let rd_idx = match usize::try_from(uop.lrd).ok().filter(|idx| *idx < LOGICAL_REGS) {
-                Some(v) => v,
-                None => {
-                    issues.push(format!("cycle {} lane {} invalid lrd {}", cycle, lane, uop.lrd));
-                    continue;
-                }
-            };
-
-            let expected_prs1 = next_map[rs1_idx];
-            let expected_prs2 = next_map[rs2_idx];
-            let expected_stale = next_map[rd_idx];
-            let expected_prd = next_free.pop_front();
-
-            if uop.prs1 != expected_prs1 {
-                issues.push(format!(
-                    "cycle {} lane {} prs1 expected {} got {}",
-                    cycle, lane, expected_prs1, uop.prs1
-                ));
-            }
-            if uop.prs2 != expected_prs2 {
-                issues.push(format!(
-                    "cycle {} lane {} prs2 expected {} got {}",
-                    cycle, lane, expected_prs2, uop.prs2
-                ));
-            }
-            match expected_prd {
-                Some(prd) => {
-                    if uop.prd != prd {
-                        issues.push(format!(
-                            "cycle {} lane {} prd expected {} got {}",
-                            cycle, lane, prd, uop.prd
-                        ));
-                    }
-                }
-                None => issues.push(format!(
-                    "cycle {} lane {} freelist empty for lrd {}",
-                    cycle, lane, uop.lrd
-                )),
-            }
-            if let Some(pos) = next_free.iter().position(|&v| v == uop.prd) {
-                next_free.remove(pos);
-            }
-            if uop.stale_prd != expected_stale {
-                issues.push(format!(
-                    "cycle {} lane {} stale expected {} got {}",
-                    cycle, lane, expected_stale, uop.stale_prd
-                ));
-            }
-            next_map[rd_idx] = uop.prd;
-        }
-
-        self.map_table = next_map;
-        self.free_list = next_free;
-        issues
-    }
-
-    fn snapshot(&self) -> [u64; LOGICAL_REGS] {
-        self.map_table
-    }
-}
 
 struct SparseMemory {
     pages: HashMap<u64, Box<[u8; PAGE_SIZE]>>,
@@ -362,36 +215,16 @@ fn poke_mem_resp_data(dut: &mut Dut, data: &[u64; CACHE_LINE_WORDS]) {
     dut.poke_io_mem_resp_bits_lineWords_15(data[15]);
 }
 
-fn get_rn2_uops(dut: &Dut) -> [RenamedUop; CORE_WIDTH] {
-    [
-        RenamedUop {
-            valid: dut.peek_io_rn2_uops_0_valid() != 0,
-            lrs1: dut.peek_io_rn2_uops_0_bits_lrs1(),
-            lrs2: dut.peek_io_rn2_uops_0_bits_lrs2(),
-            lrd: dut.peek_io_rn2_uops_0_bits_lrd(),
-            prs1: dut.peek_io_rn2_uops_0_bits_prs1(),
-            prs2: dut.peek_io_rn2_uops_0_bits_prs2(),
-            prd: dut.peek_io_rn2_uops_0_bits_prd(),
-            stale_prd: dut.peek_io_rn2_uops_0_bits_stale_prd(),
-        },
-        RenamedUop {
-            valid: dut.peek_io_rn2_uops_1_valid() != 0,
-            lrs1: dut.peek_io_rn2_uops_1_bits_lrs1(),
-            lrs2: dut.peek_io_rn2_uops_1_bits_lrs2(),
-            lrd: dut.peek_io_rn2_uops_1_bits_lrd(),
-            prs1: dut.peek_io_rn2_uops_1_bits_prs1(),
-            prs2: dut.peek_io_rn2_uops_1_bits_prs2(),
-            prd: dut.peek_io_rn2_uops_1_bits_prd(),
-            stale_prd: dut.peek_io_rn2_uops_1_bits_stale_prd(),
-        },
-    ]
-}
-
 fn main() {
-    let config = SimConfig::parse();
+    let args: Vec<String> = env::args().collect();
+    let asm_file = if args.len() > 1 {
+        args[1].clone()
+    } else {
+        "tests/alu_test.hex".to_string()
+    };
 
-    println!("Loading instructions from: {}", config.asm_file);
-    let instructions = match parse_asm_file(&config.asm_file) {
+    println!("Loading instructions from: {}", asm_file);
+    let instructions = match parse_asm_file(&asm_file) {
         Ok(insns) => insns,
         Err(e) => {
             eprintln!("Failed to parse assembly file: {}", e);
@@ -425,12 +258,6 @@ fn main() {
     let mut pending_mem_mask: u64 = 0;
     let mut retired_count: usize = 0;
     let mut mismatch_count: usize = 0;
-    let mut rename_model = if config.rename_trace || config.rename_check {
-        Some(RenameModel::new())
-    } else {
-        None
-    };
-    let mut rename_mismatch_count: usize = 0;
     let mut coverage = HashSet::new();
     let target_coverage = instructions_len;
     let mut stop_reason: Option<String> = None;
@@ -442,35 +269,6 @@ fn main() {
     for cycle in 0..1212000 {
         let retire_0 = get_retire_info_0(&dut);
         let retire_1 = get_retire_info_1(&dut);
-
-        if let Some(model) = rename_model.as_mut() {
-            let rn2_uops = get_rn2_uops(&dut);
-            let issues = model.check_cycle(&rn2_uops, cycle);
-            if config.rename_trace {
-                for (lane, uop) in rn2_uops.iter().enumerate() {
-                    if uop.valid {
-                        println!(
-                            "Cycle {} rn2[{}]: lrs1 {}->{} lrs2 {}->{} lrd {} stale {} prd {}",
-                            cycle,
-                            lane,
-                            uop.lrs1,
-                            uop.prs1,
-                            uop.lrs2,
-                            uop.prs2,
-                            uop.lrd,
-                            uop.stale_prd,
-                            uop.prd
-                        );
-                    }
-                }
-            }
-            if config.rename_check {
-                rename_mismatch_count += issues.len();
-                for issue in issues {
-                    println!("{}", issue);
-                }
-            }
-        }
 
 // if retire_0.valid {
 // println!("retire_0 pc 0x{:x}", retire_0.pc);
@@ -601,14 +399,6 @@ fn main() {
         "  BPU preds: {} hits: {} rate: {:.3}",
         bpu_preds, bpu_hits, bpu_rate
     );
-    if config.rename_check {
-        println!("  Rename mismatches: {}", rename_mismatch_count);
-    }
-    if let Some(model) = rename_model.as_ref() {
-        if config.rename_trace || config.rename_check {
-            println!("  Final rename map: {:?}", model.snapshot());
-        }
-    }
     if mismatch_count == 0 {
         println!("  Status: PASSED");
     } else {

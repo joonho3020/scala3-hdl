@@ -4,14 +4,16 @@ import hdl._
 
 case class TileIO(
   mem: MagicMemIf,
-  retire_info: Vec[RetireInfoIf]
+  retire_info: Vec[RetireInfoIf],
+  rn2_uops: Vec[Valid[UOp]]
 ) extends Bundle[TileIO]
 
 object TileIO:
   def apply(p: CoreParams): TileIO =
     TileIO(
       mem = MagicMemIf(p),
-      retire_info = Vec.fill(p.coreWidth)(RetireInfoIf(p))
+      retire_info = Vec.fill(p.coreWidth)(RetireInfoIf(p)),
+      rn2_uops = Output(Vec.fill(p.coreWidth)(Valid(UOp(p))))
     )
 
 class Tile(p: CoreParams) extends Module:
@@ -32,4 +34,5 @@ class Tile(p: CoreParams) extends Module:
     frontend.io.bpu_update <> core.io.bpu_update
 
     io.retire_info <> core.io.retire_info
+    io.rn2_uops <> core.io.rn2_uops
   }

@@ -38,6 +38,7 @@ case class CoreParams(
   aluPipes: Int,
   dc: DCacheParams,
   lsu: LSUParams,
+  nPhysicalRegs: Int,
 ) derives StableHash:
   def xlenBytes: Int = xlenBits / 8
 
@@ -65,6 +66,8 @@ case class CoreParams(
   assert((coreWidth & (coreWidth-1)) == 0)
   assert(icacheFetchInstCount == coreWidth)
 
+  def pRegIdxBits: Int = log2Ceil(nPhysicalRegs + 1)
+  def coreWidthBits: Int = log2Ceil(coreWidth + 1)
 
 trait CoreCacheable(p: CoreParams) extends CacheableModule:
   this: Module =>

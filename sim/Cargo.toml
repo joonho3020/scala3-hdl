@@ -8,4 +8,13 @@ build = "build.rs"
 riscv-sim = { path = "riscv-functional-sim/sim" }
 rvdasm = { git = "https://github.com/iansseijelly/rvdasm.git" }
 
+[features]
+default = []
+legacy-main = []
+
+[[bin]]
+name = "legacy-cosim"
+path = "src/bin/legacy_cosim.rs"
+required-features = ["legacy-main"]
+
 [build-dependencies]
