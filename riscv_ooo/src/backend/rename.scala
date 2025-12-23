@@ -76,6 +76,7 @@ class MapTable(p: CoreParams) extends Module with CoreCacheable(p):
         table(i) := i.U
       }
     }
+    dontTouch(io)
   }
 
 abstract class BitMaskModule extends Module:
@@ -89,10 +90,10 @@ abstract class BitMaskModule extends Module:
       data := initLit
 
     def unset(x: UInt): Unit =
-      data(x) := 0.U
+      data := data & ~(1.U << x)
 
     def set(x: UInt): Unit =
-      data(x) := 1.U
+      data := data | (1.U << x)
 
     def count: UInt =
       PopCount(data)
@@ -166,6 +167,8 @@ class FreeList(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
         free_list.set(io.comm_prds(i).bits)
       }
     }
+
+    dontTouch(io)
   }
 
 case class BusyTableRN1Req(
@@ -240,6 +243,7 @@ class BusyTable(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
         busy_table.set(comm.bits)
       }
     }
+    dontTouch(io)
   }
 
 case class RenamerIO(

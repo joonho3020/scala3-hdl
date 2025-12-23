@@ -431,7 +431,7 @@ fn main() {
         None
     };
     let mut rename_mismatch_count: usize = 0;
-    let mut coverage = HashSet::new();
+// let mut coverage = HashSet::new();
     let target_coverage = instructions_len;
     let mut stop_reason: Option<String> = None;
 
@@ -439,38 +439,41 @@ fn main() {
 
     dut.poke_io_mem_req_ready(1);
 
-    for cycle in 0..1212000 {
-        let retire_0 = get_retire_info_0(&dut);
-        let retire_1 = get_retire_info_1(&dut);
+    for cycle in 0..100 {
+// let retire_0 = get_retire_info_0(&dut);
+// let retire_1 = get_retire_info_1(&dut);
 
-        if let Some(model) = rename_model.as_mut() {
-            let rn2_uops = get_rn2_uops(&dut);
-            let issues = model.check_cycle(&rn2_uops, cycle);
-            if config.rename_trace {
-                for (lane, uop) in rn2_uops.iter().enumerate() {
-                    if uop.valid {
-                        println!(
-                            "Cycle {} rn2[{}]: lrs1 {}->{} lrs2 {}->{} lrd {} stale {} prd {}",
-                            cycle,
-                            lane,
-                            uop.lrs1,
-                            uop.prs1,
-                            uop.lrs2,
-                            uop.prs2,
-                            uop.lrd,
-                            uop.stale_prd,
-                            uop.prd
-                        );
-                    }
-                }
-            }
-            if config.rename_check {
-                rename_mismatch_count += issues.len();
-                for issue in issues {
-                    println!("{}", issue);
-                }
-            }
-        }
+        let rn2_uops = get_rn2_uops(&dut);
+        println!("{:?}", rn2_uops[0]);
+        println!("{:?}", rn2_uops[1]);
+// if let Some(model) = rename_model.as_mut() {
+// let rn2_uops = get_rn2_uops(&dut);
+// let issues = model.check_cycle(&rn2_uops, cycle);
+// if config.rename_trace {
+// for (lane, uop) in rn2_uops.iter().enumerate() {
+// if uop.valid {
+// println!(
+// "Cycle {} rn2[{}]: lrs1 {}->{} lrs2 {}->{} lrd {} stale {} prd {}",
+// cycle,
+// lane,
+// uop.lrs1,
+// uop.prs1,
+// uop.lrs2,
+// uop.prs2,
+// uop.lrd,
+// uop.stale_prd,
+// uop.prd
+// );
+// }
+// }
+// }
+// if config.rename_check {
+// rename_mismatch_count += issues.len();
+// for issue in issues {
+// println!("{}", issue);
+// }
+// }
+// }
 
 // if retire_0.valid {
 // println!("retire_0 pc 0x{:x}", retire_0.pc);
@@ -479,41 +482,41 @@ fn main() {
 // println!("retire_1 pc 0x{:x}", retire_1.pc);
 // }
 
-        let mut halt_detected = false;
+// let mut halt_detected = false;
 
-        if retire_0.valid {
-            if process_retire(
-                &retire_0,
-                "pipe 0",
-                &mut ref_core,
-                &mut memory,
-                &disasm,
-                cycle,
-                &mut mismatch_count,
-                &mut retired_count,
-                &mut coverage,
-                instructions_len,
-            ) {
-                halt_detected = true;
-            }
-        }
+// if retire_0.valid {
+// if process_retire(
+// &retire_0,
+// "pipe 0",
+// &mut ref_core,
+// &mut memory,
+// &disasm,
+// cycle,
+// &mut mismatch_count,
+// &mut retired_count,
+// &mut coverage,
+// instructions_len,
+// ) {
+// halt_detected = true;
+// }
+// }
 
-        if retire_1.valid {
-            if process_retire(
-                &retire_1,
-                "pipe 1",
-                &mut ref_core,
-                &mut memory,
-                &disasm,
-                cycle,
-                &mut mismatch_count,
-                &mut retired_count,
-                &mut coverage,
-                instructions_len,
-            ) {
-                halt_detected = true;
-            }
-        }
+// if retire_1.valid {
+// if process_retire(
+// &retire_1,
+// "pipe 1",
+// &mut ref_core,
+// &mut memory,
+// &disasm,
+// cycle,
+// &mut mismatch_count,
+// &mut retired_count,
+// &mut coverage,
+// instructions_len,
+// ) {
+// halt_detected = true;
+// }
+// }
 
         if pending_mem_req {
             let line_base_addr = pending_mem_addr & !(((CACHE_LINE_WORDS * WORD_SIZE as usize) - 1) as u64);
@@ -563,18 +566,18 @@ fn main() {
             }
         }
 
-        let coverage_complete = coverage.len() >= target_coverage;
-        if halt_detected {
-            stop_reason = Some(format!("halt instruction retired at cycle {}", cycle));
-        } else if coverage_complete {
-            stop_reason = Some(format!(
-                "retired all {} instructions by cycle {}",
-                target_coverage, cycle
-            ));
-        }
-        if stop_reason.is_some() {
-            break;
-        }
+// let coverage_complete = coverage.len() >= target_coverage;
+// if halt_detected {
+// stop_reason = Some(format!("halt instruction retired at cycle {}", cycle));
+// } else if coverage_complete {
+// stop_reason = Some(format!(
+// "retired all {} instructions by cycle {}",
+// target_coverage, cycle
+// ));
+// }
+// if stop_reason.is_some() {
+// break;
+// }
 
         dut.step();
     }
