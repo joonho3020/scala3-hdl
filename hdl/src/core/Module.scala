@@ -97,46 +97,38 @@ object Module:
 object ModuleMacros:
   import scala.quoted.*
 
-  private def findEnclosingValName(using Quotes): Option[String] =
-    import quotes.reflect.*
-    def loop(sym: Symbol): Option[String] =
-      if sym.isNoSymbol then None
-      else if sym.isValDef && !sym.flags.is(Flags.Synthetic) && !sym.flags.is(Flags.Artifact) then Some(sym.name)
-      else loop(sym.owner)
-    loop(Symbol.spliceOwner)
-
   def ioImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
-    val nameOpt = findEnclosingValName
+    val nameOpt = MacroUtils.findEnclosingValName
     '{
       ModuleOps.io($t, ${Expr(nameOpt)}, $mod)
     }
 
   def wireImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
-    val nameOpt = findEnclosingValName
+    val nameOpt = MacroUtils.findEnclosingValName
     '{
       ModuleOps.wire($t, ${Expr(nameOpt)}, $mod)
     }
 
   def regImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
-    val nameOpt = findEnclosingValName
+    val nameOpt = MacroUtils.findEnclosingValName
     '{
       ModuleOps.reg($t, ${Expr(nameOpt)}, $mod)
     }
 
   def regInitImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
-    val nameOpt = findEnclosingValName
+    val nameOpt = MacroUtils.findEnclosingValName
     '{
       ModuleOps.regInit($t, ${Expr(nameOpt)}, $mod)
     }
 
   def regNextImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
-    val nameOpt = findEnclosingValName
+    val nameOpt = MacroUtils.findEnclosingValName
     '{
       ModuleOps.regNext($t, ${Expr(nameOpt)}, $mod)
     }
 
   def wireInitImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
-    val nameOpt = findEnclosingValName
+    val nameOpt = MacroUtils.findEnclosingValName
     '{
       ModuleOps.wireInit($t, ${Expr(nameOpt)}, $mod)
     }
@@ -147,17 +139,17 @@ object ModuleMacros:
     }
 
   def moduleInstImpl[M <: Module: Type](gen: Expr[M], parent: Expr[Module])(using Quotes): Expr[M] =
-    val nameOpt = findEnclosingValName
+    val nameOpt = MacroUtils.findEnclosingValName
     '{ Module.instantiate($gen, $parent, ${Expr(nameOpt)}) }
 
   def printfImpl(format: Expr[String], args: Expr[Seq[HWData]], mod: Expr[Module])(using Quotes): Expr[Unit] =
-    val nameOpt = findEnclosingValName
+    val nameOpt = MacroUtils.findEnclosingValName
     '{
       ModuleOps.printf(${Expr(nameOpt)}, $format, $args, $mod)
     }
 
   def assertImpl(cond: Expr[Bool], message: Expr[String], mod: Expr[Module])(using Quotes): Expr[Unit] =
-    val nameOpt = findEnclosingValName
+    val nameOpt = MacroUtils.findEnclosingValName
     '{
       ModuleOps.hwAssert(${Expr(nameOpt)}, $cond, $message, $mod)
     }

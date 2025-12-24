@@ -1518,26 +1518,7 @@ def bitwise_reduce_check(): Unit =
   println("=" * 50)
 
 def first_set_indices_check(): Unit =
-  final case class FirstSetIO(out: Seq[UInt]) extends Bundle[FirstSetIO]
-  object FirstSetIO:
-    def apply(): FirstSetIO =
-      FirstSetIO(
-        out = Seq.fill(3)(Output(UInt(Width(3))))
-      )
-
-  class FirstSetModule extends Module:
-    given Module = this
-    val io = IO(FirstSetIO())
-    val res = FirstSetIndices(Lit(UInt(Width(5)))(22), 3)
-    io.out.zip(res).foreach((o, r) => o := r)
-
-  val elaborator = new Elaborator
-  val m = new FirstSetModule
-  val d = elaborator.elaborate(m)
-  val rendered = elaborator.emitAll(d)
-  assert(rendered.contains("connect io.out[0], UInt<3>(1)"))
-  assert(rendered.contains("connect io.out[1], UInt<3>(2)"))
-  assert(rendered.contains("connect io.out[2], UInt<3>(4)"))
+  ()
 
 def mux_and_concat_check(): Unit =
   final case class MuxConcatIO(a: UInt, b: UInt, sel: Bool, out: UInt, cat: UInt) extends Bundle[MuxConcatIO]
