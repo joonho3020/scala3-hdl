@@ -691,22 +691,22 @@ def parameterized_bundle_check(): Unit =
     def apply(): Child =
       Child(age = Input(UInt(Width(4))))
 
-  case class Fletcher(
+  case class Turing(
     private val security: Security,
     private val students: Seq[Student],
     private val childs: Option[Seq[Child]]
-  ) extends Bundle[Fletcher]
+  ) extends Bundle[Turing]
 
-  case class FletcherParams(
+  case class TuringParams(
     num_students: Int,
     has_child: Boolean,
     num_childs: Int,
     security: SecurityParams
   )
 
-  object Fletcher:
-    def apply(p: FletcherParams): Fletcher =
-      Fletcher(
+  object Turing:
+    def apply(p: TuringParams): Turing =
+      Turing(
         security = Input(Security(p.security)),
         students = Seq.fill(p.num_students)(
           Flipped(Student())
@@ -714,26 +714,26 @@ def parameterized_bundle_check(): Unit =
         childs = if (p.has_child) Some(Seq.fill(p.num_childs)(Output(Child())))
                  else None)
 
-  val fp = FletcherParams(
+  val tp = TuringParams(
     num_students = 3,
     num_childs = 2,
     has_child = true,
     SecurityParams(w = 5))
 
-  val fletcher = Reg(Fletcher(fp))
+  val turing = Reg(Turing(tp))
 
-  val students: Seq[Student] = fletcher.students
-  val age: UInt = fletcher.students(0).age
+  val students: Seq[Student] = turing.students
+  val age: UInt = turing.students(0).age
 
-  assert(fletcher.security.dir == Direction.Flipped)
+  assert(turing.security.dir == Direction.Flipped)
 
-  fletcher.students.foreach(x => {
+  turing.students.foreach(x => {
     assert(x.dir        == Direction.Flipped)
     assert(x.age.dir    == Direction.Default)
     assert(x.female.dir == Direction.Default)
   })
 
-  fletcher.childs.map(child => {
+  turing.childs.map(child => {
     child.foreach(c => {
       assert(c.age.dir == Direction.Flipped)
     })
@@ -742,18 +742,18 @@ def parameterized_bundle_check(): Unit =
   // Note: Literals with Scala types doesn't work. In theary, we can add support
   // later by extending `HostTypeOf` and `FieldToNode` for `Bundle`.
   //
-  // val fletcher_lit = Lit(Fletcher(fp))((
+  // val turing_lit = Lit(Turing(tp))((
   //   security = (
   //     pixelstealing = BigInt(1),
   //     bpred = BigInt(2),
   //     prefetcher = BigInt(3)
   //   ),
-  //   students = Seq.fill(fp.num_students)((
+  //   students = Seq.fill(tp.num_students)((
   //     age = BigInt(4),
   //     female = true
   //   )),
-  //   childs = if (fp.has_child) Some(
-  //     Seq.fill(fp.num_childs)((
+  //   childs = if (tp.has_child) Some(
+  //     Seq.fill(tp.num_childs)((
   //       age = BigInt(5)
   //     )))
   //     else None

@@ -26,10 +26,12 @@ def runFirtool(firFile: String): (Int, String) =
 
 @main def main(): Unit =
   val p = CoreParams(
+    debug = true,
     pcBits = 64,
     xlenBits = 64,
     paddrBits = 64,
-    coreWidth = 2,
+    fetchWidth = 2,
+    issueWidth = 2,
     icacheFetchBytes = 2 * 4,
     instBytes = 4,
     ic = ICacheParams(
@@ -43,7 +45,7 @@ def runFirtool(firFile: String): (Int, String) =
       mshrs = 2),
     aluPipes = 2,
     lsu = LSUParams(),
-    nPhysicalRegs = 64,
+    prf = PRFParams(numEntries = 64),
   )
 
   val top = new Tile(p)

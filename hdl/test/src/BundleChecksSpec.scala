@@ -245,22 +245,22 @@ def parameterized_bundle_check(): Unit =
     def apply(): Child =
       Child(age = Input(UInt(Width(4))))
 
-  case class Fletcher(
+  case class Turing(
     private val security: Security,
     private val students: Seq[Student],
     private val childs: Option[Seq[Child]]
-  ) extends Bundle[Fletcher]
+  ) extends Bundle[Turing]
 
-  case class FletcherParams(
+  case class TuringParams(
     num_students: Int,
     has_child: Boolean,
     num_childs: Int,
     security: SecurityParams
   )
 
-  object Fletcher:
-    def apply(p: FletcherParams): Fletcher =
-      Fletcher(
+  object Turing:
+    def apply(p: TuringParams): Turing =
+      Turing(
         security = Input(Security(p.security)),
         students = Seq.fill(p.num_students)(
           Flipped(Student())
@@ -268,26 +268,26 @@ def parameterized_bundle_check(): Unit =
         childs = if (p.has_child) Some(Seq.fill(p.num_childs)(Output(Child())))
                  else None)
 
-  val fp = FletcherParams(
+  val tp = TuringParams(
     num_students = 3,
     num_childs = 2,
     has_child = true,
     SecurityParams(w = 5))
 
-  val fletcher = Reg(Fletcher(fp))
+  val turing = Reg(Turing(tp))
 
-  val students: Seq[Student] = fletcher.students
-  val age: UInt = fletcher.students(0).age
+  val students: Seq[Student] = turing.students
+  val age: UInt = turing.students(0).age
 
-  assert(fletcher.security.dir == Direction.Flipped)
+  assert(turing.security.dir == Direction.Flipped)
 
-  fletcher.students.foreach(x => {
+  turing.students.foreach(x => {
     assert(x.dir        == Direction.Flipped)
     assert(x.age.dir    == Direction.Default)
     assert(x.female.dir == Direction.Default)
   })
 
-  fletcher.childs.map(child => {
+  turing.childs.map(child => {
     child.foreach(c => {
       assert(c.age.dir == Direction.Flipped)
     })
@@ -296,20 +296,20 @@ def parameterized_bundle_check(): Unit =
   // Note: Literals with Scala types doesn't work. In theary, we can add support
   // later by extending `HostTypeOf` and `FieldToNode` for `Bundle`.
   //
-  // val fletcher_lit = Lit(Fletcher(fp))((
+  // val turing_lit = Lit(Turing(tp))((
   //   security = (
   //     pixelstealing = BigInt(1),
   //     bpred = BigInt(2),
   //     prefetcher = BigInt(3)
   //   ),
-  //   students = Seq.fill(fp.num_students)(
+  //   students = Seq.fill(tp.num_students)(
   //     (
   //       age = BigInt(4),
   //       female = true
   //     )
   //   ),
-  //   childs = if (fp.has_child) Some(
-  //     Seq.fill(fp.num_childs)(
+  //   childs = if (tp.has_child) Some(
+  //     Seq.fill(tp.num_childs)(
   //       (
   //         age = BigInt(5)
   //       )
@@ -317,20 +317,20 @@ def parameterized_bundle_check(): Unit =
   //     else None
   // ))
 
-  // val fletcher_lit = Lit(Fletcher(fp))((
-  //   security = Lit(Security(fp.security))((
+  // val turing_lit = Lit(Turing(tp))((
+  //   security = Lit(Security(tp.security))((
   //     pixelstealing = BigInt(1),
   //     bpred = BigInt(2),
   //     prefetcher = BigInt(3)
   //   )),
-  //   students = Seq.fill(fp.num_students)(
+  //   students = Seq.fill(tp.num_students)(
   //     Lit(Student())((
   //       age = BigInt(4),
   //       female = true
   //     ))
   //   ),
-  //   childs = if (fp.has_child) Some(
-  //     Seq.fill(fp.num_childs)(
+  //   childs = if (tp.has_child) Some(
+  //     Seq.fill(tp.num_childs)(
   //       Lit(Child())((
   //         age = BigInt(5)
   //       ))
@@ -338,21 +338,21 @@ def parameterized_bundle_check(): Unit =
   //     else None
   // ))
 
-  // assert(fletcher_lit.security.pixelstealing.getLitVal == BigInt(1))
+  // assert(turing_lit.security.pixelstealing.getLitVal == BigInt(1))
 
-  case class Shao(
+  case class Godel(
     private val security: Security,
     private val students: Vec[Vec[Student]],
-  ) extends Bundle[Shao]
+  ) extends Bundle[Godel]
 
-  case class ShaoParams(
+  case class GodelParams(
     num_students: Int,
     security: SecurityParams
   )
 
-  object Shao:
-    def apply(p: ShaoParams): Shao =
-      Shao(
+  object Godel:
+    def apply(p: GodelParams): Godel =
+      Godel(
         security = Input(Security(p.security)),
         students = Vec(Seq.fill(p.num_students)(
           Vec(Seq.fill(p.num_students)(
@@ -361,8 +361,8 @@ def parameterized_bundle_check(): Unit =
         ))
       )
 
-  val shao_lit = Lit(
-    Shao(ShaoParams(
+  val godel_lit = Lit(
+    Godel(GodelParams(
       num_students = 2,
       security = SecurityParams(3)
     ))
@@ -398,21 +398,21 @@ def parameterized_bundle_check(): Unit =
     )
   )
 
-  assert(shao_lit.students(0)(0).age.getLitVal == BigInt(4))
-  assert(shao_lit.students(0)(0).female.getLitVal == true)
+  assert(godel_lit.students(0)(0).age.getLitVal == BigInt(4))
+  assert(godel_lit.students(0)(0).female.getLitVal == true)
 
-  assert(shao_lit.students(0)(1).age.getLitVal == BigInt(5))
-  assert(shao_lit.students(0)(1).female.getLitVal == false)
+  assert(godel_lit.students(0)(1).age.getLitVal == BigInt(5))
+  assert(godel_lit.students(0)(1).female.getLitVal == false)
 
-  assert(shao_lit.students(1)(0).age.getLitVal == BigInt(6))
-  assert(shao_lit.students(1)(0).female.getLitVal == true)
+  assert(godel_lit.students(1)(0).age.getLitVal == BigInt(6))
+  assert(godel_lit.students(1)(0).female.getLitVal == true)
 
-  assert(shao_lit.students(1)(1).age.getLitVal == BigInt(7))
-  assert(shao_lit.students(1)(1).female.getLitVal == false)
+  assert(godel_lit.students(1)(1).age.getLitVal == BigInt(7))
+  assert(godel_lit.students(1)(1).female.getLitVal == false)
 
-  assert(shao_lit.security.pixelstealing.getLitVal == BigInt(1))
-  assert(shao_lit.security.bpred.getLitVal == BigInt(2))
-  assert(shao_lit.security.prefetcher.getLitVal == BigInt(3))
+  assert(godel_lit.security.pixelstealing.getLitVal == BigInt(1))
+  assert(godel_lit.security.bpred.getLitVal == BigInt(2))
+  assert(godel_lit.security.prefetcher.getLitVal == BigInt(3))
 
 object BundleChecksSpec extends TestSuite:
   val tests = Tests {

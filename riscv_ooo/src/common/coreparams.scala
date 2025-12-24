@@ -26,11 +26,28 @@ case class LSUParams(
   sqEntries: Int = 8
 ) derives StableHash
 
+case class ROBParams(
+  numEntries: Int = 32
+) derives StableHash
+
+
+case class PRFParams(
+  numEntries: Int = 64,
+) derives StableHash
+
+case class IssueQueueParams(
+  numEntries: Int = 8,
+) derives StableHash
+
 case class CoreParams(
+  debug: Boolean,
   pcBits: Int,
   xlenBits: Int,
   paddrBits: Int,
-  coreWidth: Int,
+
+  fetchWidth: Int,
+  issueWidth: Int,
+
   icacheFetchBytes: Int,
   instBytes: Int = 4,
   ic: ICacheParams,
@@ -38,7 +55,9 @@ case class CoreParams(
   aluPipes: Int,
   dc: DCacheParams,
   lsu: LSUParams,
-  nPhysicalRegs: Int,
+  rob: ROBParams = ROBParams(),
+  prf: PRFParams = PRFParams(),
+  isq: IssueQueueParams = IssueQueueParams(),
 ) derives StableHash:
   def xlenBytes: Int = xlenBits / 8
 
@@ -46,11 +65,14 @@ case class CoreParams(
   def icacheFetchInstCount: Int = icacheFetchBytes / instBytes
   def instBits: Int = instBytes * 8
 
-  def fetchWidth: Int = coreWidth
-  def fetchBytes: Int = coreWidth * instBytes
+  def coreWidth: Int = fetchWidth
+  def fetchBytes: Int = fetchWidth * instBytes
   def coreInstBytes: Int = instBytes
   def memLineBytes: Int = ic.cacheLineBytes
   def memLineWords: Int = memLineBytes / 4
+  def retireWidth: Int = issueWidth
+
+  require(retireWidth == issueWidth)
 
   def fetchOffset(addr: UInt)(using m: Module) = addr & (fetchBytes-1).U
   def fetchAlign(addr: UInt)(using m: Module) = ~(~addr | (fetchBytes-1).U)
@@ -68,6 +90,20 @@ case class CoreParams(
 
   def pRegIdxBits: Int = log2Ceil(nPhysicalRegs + 1)
   def coreWidthBits: Int = log2Ceil(coreWidth + 1)
+
+  def robEntries: Int = rob.numEntries
+  def robRows: Int = rob.numEntries / coreWidth
+  def robIdxBits: Int = log2Ceil(rob.numEntries)
+  def robRowIdxBits: Int = log2Ceil(robRows)
+
+  def nPhysicalRegs: Int = prf.numEntries
+
+  // TODO: need better uarching to prevent prfReadPort count from
+  // increasing linearly w.r.t the core width.
+  // Probably there is a way of banking it & multiplexing the physical ports
+  // across logical ports????
+  def prfReadPorts: Int = issueWidth * 2
+  def prfWritePorts: Int = issueWidth
 
 trait CoreCacheable(p: CoreParams) extends CacheableModule:
   this: Module =>

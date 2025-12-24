@@ -146,7 +146,7 @@ class FreeList(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
       alloc_req  = Input(Valid(UInt(p.coreWidthBits.W))),
       alloc_resp = Output(Vec.fill(p.coreWidth)(UInt(p.pRegIdxBits.W))),
       count      = Output(UInt(p.pRegIdxBits.W)),
-      comm_prds  = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.pRegIdxBits.W))))
+      comm_prds  = Input(Vec.fill(p.retireWidth)(Valid(UInt(p.pRegIdxBits.W))))
     ))
 
   body {
@@ -213,7 +213,7 @@ class BusyTable(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
     wb_req = Input(Vec.fill(p.coreWidth)(BusyTableWBReq(
       prd = Valid(UInt(p.pRegIdxBits.W))
     ))),
-    comm_prds = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.pRegIdxBits.W)))),
+    comm_prds = Input(Vec.fill(p.retireWidth)(Valid(UInt(p.pRegIdxBits.W)))),
   ))
 
   body {
@@ -252,7 +252,7 @@ case class RenamerIO(
 
   rn2_uops: Vec[Valid[UOp]],
 
-  wb_done_phys: Vec[BusyTableWBReq],
+  wb_wakeup: Vec[BusyTableWBReq],
 
   comm_free_phys: Vec[Valid[UInt]]
 ) extends Bundle[RenamerIO]
@@ -266,11 +266,11 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
 
     rn2_uops = Output(Vec.fill(p.coreWidth)(Valid(UOp(p)))),
 
-    wb_done_phys = Input(Vec.fill(p.coreWidth)(BusyTableWBReq(
+    wb_wakeup = Input(Vec.fill(p.coreWidth)(BusyTableWBReq(
       prd = Valid(UInt(p.pRegIdxBits.W))
     ))),
 
-    comm_free_phys = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.pRegIdxBits.W)))),
+    comm_free_phys = Input(Vec.fill(p.retireWidth)(Valid(UInt(p.pRegIdxBits.W)))),
   ))
 
   body {
@@ -395,7 +395,7 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
 
     io.rn2_uops <> rn1_uops_bypass
 
-    busy_table.io.wb_req <> io.wb_done_phys
+    busy_table.io.wb_req <> io.wb_wakeup
 
     busy_table.io.comm_prds <> io.comm_free_phys
     free_list.io.comm_prds  <> io.comm_free_phys

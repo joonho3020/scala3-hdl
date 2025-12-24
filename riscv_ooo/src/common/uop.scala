@@ -20,6 +20,8 @@ case class UOp(
   prs1_busy: Bool,
   prs2_busy: Bool,
 
+  rob_idx: UInt,
+
   taken: Bool,
   next_pc: Valid[UInt],
   ctrl: CtrlSignals,
@@ -57,6 +59,8 @@ object UOp:
 
       prs1_busy = Bool(),
       prs2_busy = Bool(),
+
+      rob_idx = UInt(p.robIdxBits.W),
 
       taken  = Bool(),
       next_pc = Valid(UInt(p.pcBits.W)),
