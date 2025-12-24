@@ -101,23 +101,6 @@ abstract class BitMaskModule extends Module:
       }).reduce(_ | _)
       data := data | mask
 
-    def update(
-      set_indices: Vec[UInt],
-      set_val: Vec[Bool],
-      unset_indices: Vec[UInt],
-      unset_val: Vec[Bool]
-    ): Unit =
-      val set_mask = set_val.zip(set_indices).map((v, idx) => {
-        Mux(v, 1.U << idx, 0.U)
-      }).reduce(_ | _)
-
-      val unset_mask = unset_val.zip(unset_indices).map((v, idx) => {
-        Mux(v, 1.U << idx, 0.U)
-      }).reduce(_ | _)
-
-      data := (data & ~unset_mask) | set_mask
-
-
     def count: UInt =
       PopCount(data)
 
@@ -177,20 +160,16 @@ class FreeList(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
     io.count := free_list.count
 
     io.alloc_resp := DontCare
-
-    val unset_mask_vec = Wire(Vec.fill(p.coreWidth)(Bool()))
     when (io.alloc_req.valid) {
       io.alloc_resp := free_list.getSetIds(p.coreWidth)
+      free_list.unset(io.alloc_resp, Vec((0 until p.coreWidth).map(i => i.U < io.alloc_req.bits)))
       Assert(io.count >= io.alloc_req.bits, "Not enough entries in the free list")
     }
 
-    free_list.update(
-      io.comm_prds.map(_.bits),
-      io.comm_prds.map(_.valid),
-      io.alloc_resp,
-      Vec((0 until p.coreWidth).map(i => (i.U < io.alloc_req.bits && io.alloc_req.valid)))
-    )
 
+    when (io.comm_prds.map(_.valid).reduce(_ || _)) {
+      free_list.set(io.comm_prds.map(_.bits), io.comm_prds.map(_.valid))
+    }
     dontTouch(io)
   }
 
