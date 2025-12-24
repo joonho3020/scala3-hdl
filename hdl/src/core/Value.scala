@@ -12,16 +12,6 @@ import scala.reflect.Selectable.reflectiveSelectable
 enum NodeKind:
   case Reg, Wire, IO, PrimOp, Lit, Unset
 
-enum Direction:
-  case Default, Flipped
-
-object Direction:
-  inline def In: Direction = Direction.Flipped
-  inline def Out: Direction = Direction.Default
-  inline def flip(d: Direction): Direction = d match
-    case Direction.Default => Direction.Flipped
-    case Direction.Flipped => Direction.Default
-
 sealed trait HWData extends Cloneable:
   var dir: Direction = Direction.Default
   def flip: Unit =
