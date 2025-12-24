@@ -12,6 +12,7 @@
     - When a single Module is instantiated multiple times *with different parameters*, it should elaborate the design with the new parameter values
     - In the build-cache, when there is a Module that has the same bytecode as well as the same instantiation parameters, it should reuse the value in the cache instead of performing elaboration again
 - Bundles should not be structural types. Rather, we want to have Bundles as case classes so that we can derive various Bundle definitions (e.g. Literals) from the case class
+    - This significantly improves the LSP experience
 - We want to preserve the strong metaprogramming experience that Chisel provides:
     - Must be able to mix in Scala datastructures (e.g. Seq, Option, List, ...) with the hardware description
     - Use Module inheritance to share common logic across slightly different modules
