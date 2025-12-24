@@ -429,7 +429,11 @@ def inheritance_check(): Unit =
       ),
       Seq(
         IR.Connect(sf(ref("io"), "out"), sf(ref("io"), "in")),
-        IR.Connect(sf(ref("io"), "out"), add(add(sf(ref("io"), "in"), sf(ref("io"), "in")), sf(ref("io"), "in")))
+        IR.DefNode(id("add_result"), addPrim(sf(ref("io"), "in"), sf(ref("io"), "in"))),
+        IR.DefNode(id("add_result_0"), tail(ref("add_result"), 1)),
+        IR.DefNode(id("add_result_1"), addPrim(ref("add_result_0"), sf(ref("io"), "in"))),
+        IR.DefNode(id("add_result_2"), tail(ref("add_result_1"), 1)),
+        IR.Connect(sf(ref("io"), "out"), ref("add_result_2"))
       )
     )
   )
@@ -868,13 +872,15 @@ def nested_seq_generation_check(): Unit =
         IR.Connect(ref("mats_2"), add(sf(ref("io"), "in"), lit("UInt<8>(3)"))),
         IR.Connect(ref("mats_3"), add(sf(ref("io"), "in"), lit("UInt<8>(4)"))),
         IR.Connect(ref("mats_4"), add(sf(ref("io"), "in"), lit("UInt<8>(5)"))),
-        IR.Connect(
-          sf(ref("io"), "out"),
-          add(
-            add(add(ref("mats"), ref("mats_0")), ref("mats_1")),
-            add(add(ref("mats_2"), ref("mats_3")), ref("mats_4"))
-          )
-        )
+        IR.DefNode(id("rowSums"), addPrim(ref("mats"), ref("mats_0"))),
+        IR.DefNode(id("rowSums_0"), tail(ref("rowSums"), 1)),
+        IR.DefNode(id("rowSums_1"), addPrim(ref("rowSums_0"), ref("mats_1"))),
+        IR.DefNode(id("rowSums_2"), tail(ref("rowSums_1"), 1)),
+        IR.DefNode(id("rowSums_3"), addPrim(ref("mats_2"), ref("mats_3"))),
+        IR.DefNode(id("rowSums_4"), tail(ref("rowSums_3"), 1)),
+        IR.DefNode(id("rowSums_5"), addPrim(ref("rowSums_4"), ref("mats_4"))),
+        IR.DefNode(id("rowSums_6"), tail(ref("rowSums_5"), 1)),
+        IR.Connect(sf(ref("io"), "out"), add(ref("rowSums_2"), ref("rowSums_6")))
       )
     )
   )
@@ -1215,11 +1221,20 @@ def queue_check(): Unit =
         regReset("enq_ptr", u(3), ref("clock"), ref("reset"), lit("UInt<3>(0)")),
         regReset("deq_ptr", u(3), ref("clock"), ref("reset"), lit("UInt<3>(0)")),
         regReset("full", IR.BoolType, ref("clock"), ref("reset"), lit("Bool(false)")),
+        IR.DefNode(id("empty"), eqv(ref("enq_ptr"), ref("deq_ptr"))),
+        IR.DefNode(id("empty_0"), not(ref("full"))),
+        IR.DefNode(id("empty_1"), and(ref("empty"), ref("empty_0"))),
         IR.Connect(sf(enqField, "ready"), not(ref("full"))),
-        IR.Connect(sf(deqField, "valid"), not(and(eqv(ref("enq_ptr"), ref("deq_ptr")), not(ref("full"))))),
+        IR.Connect(sf(deqField, "valid"), not(ref("empty_1"))),
         IR.Connect(deqBits, sa(ref("mem"), ref("deq_ptr"))),
+        IR.DefNode(id("enq_fire"), enqFire),
+        IR.DefNode(id("deq_fire"), deqFire),
+        IR.DefNode(id("almost_full"), addPrim(ref("enq_ptr"), lit("UInt(1)"))),
+        IR.DefNode(id("almost_full_0"), tail(ref("almost_full"), 1)),
+        IR.DefNode(id("almost_full_1"), rem(ref("almost_full_0"), lit("UInt(4)"))),
+        IR.DefNode(id("almost_full_2"), eqv(ref("almost_full_1"), ref("deq_ptr"))),
         IR.When(
-          enqFire,
+          ref("enq_fire"),
           Seq(
             IR.Connect(ref("enq_ptr"), rem(add(ref("enq_ptr"), lit("UInt(1)")), lit("UInt(4)"))),
             IR.Connect(sa(ref("mem"), ref("enq_ptr")), enqBits)
@@ -1227,24 +1242,24 @@ def queue_check(): Unit =
           Seq.empty
         ),
         IR.When(
-          deqFire,
+          ref("deq_fire"),
           Seq(
             IR.Connect(ref("deq_ptr"), rem(add(ref("deq_ptr"), lit("UInt(1)")), lit("UInt(4)")))
           ),
           Seq.empty
         ),
         IR.When(
-          and(enqFire, deqFire),
+          and(ref("enq_fire"), ref("deq_fire")),
           Seq(
             IR.Skip
           ),
           Seq(
             IR.When(
-              and(enqFire, eqv(rem(add(ref("enq_ptr"), lit("UInt(1)")), lit("UInt(4)")), ref("deq_ptr"))),
+              and(ref("enq_fire"), ref("almost_full_2")),
               Seq(IR.Connect(ref("full"), lit("Bool(true)"))),
               Seq(
                 IR.When(
-                  deqFire,
+                  ref("deq_fire"),
                   Seq(IR.Connect(ref("full"), lit("Bool(false)"))),
                   Seq.empty
                 )
@@ -1334,11 +1349,20 @@ def queue_check(): Unit =
         regReset("enq_ptr", u(3), ref("clock"), ref("reset"), lit("UInt<3>(0)")),
         regReset("deq_ptr", u(3), ref("clock"), ref("reset"), lit("UInt<3>(0)")),
         regReset("full", IR.BoolType, ref("clock"), ref("reset"), lit("Bool(false)")),
+        IR.DefNode(id("empty"), eqv(ref("enq_ptr"), ref("deq_ptr"))),
+        IR.DefNode(id("empty_0"), not(ref("full"))),
+        IR.DefNode(id("empty_1"), and(ref("empty"), ref("empty_0"))),
         IR.Connect(sf(enqField2, "ready"), not(ref("full"))),
-        IR.Connect(sf(deqField2, "valid"), not(and(eqv(ref("enq_ptr"), ref("deq_ptr")), not(ref("full"))))),
+        IR.Connect(sf(deqField2, "valid"), not(ref("empty_1"))),
         IR.Connect(deqBits2, sa(ref("mem"), ref("deq_ptr"))),
+        IR.DefNode(id("enq_fire"), enqFire2),
+        IR.DefNode(id("deq_fire"), deqFire2),
+        IR.DefNode(id("almost_full"), addPrim(ref("enq_ptr"), lit("UInt(1)"))),
+        IR.DefNode(id("almost_full_0"), tail(ref("almost_full"), 1)),
+        IR.DefNode(id("almost_full_1"), rem(ref("almost_full_0"), lit("UInt(4)"))),
+        IR.DefNode(id("almost_full_2"), eqv(ref("almost_full_1"), ref("deq_ptr"))),
         IR.When(
-          enqFire2,
+          ref("enq_fire"),
           Seq(
             IR.Connect(ref("enq_ptr"), rem(add(ref("enq_ptr"), lit("UInt(1)")), lit("UInt(4)"))),
             IR.Connect(sa(ref("mem"), ref("enq_ptr")), enqBits2)
@@ -1346,24 +1370,24 @@ def queue_check(): Unit =
           Seq.empty
         ),
         IR.When(
-          deqFire2,
+          ref("deq_fire"),
           Seq(
             IR.Connect(ref("deq_ptr"), rem(add(ref("deq_ptr"), lit("UInt(1)")), lit("UInt(4)")))
           ),
           Seq.empty
         ),
         IR.When(
-          and(enqFire2, deqFire2),
+          and(ref("enq_fire"), ref("deq_fire")),
           Seq(
             IR.Skip
           ),
           Seq(
             IR.When(
-              and(enqFire2, eqv(rem(add(ref("enq_ptr"), lit("UInt(1)")), lit("UInt(4)")), ref("deq_ptr"))),
+              and(ref("enq_fire"), ref("almost_full_2")),
               Seq(IR.Connect(ref("full"), lit("Bool(true)"))),
               Seq(
                 IR.When(
-                  deqFire2,
+                  ref("deq_fire"),
                   Seq(IR.Connect(ref("full"), lit("Bool(false)"))),
                   Seq.empty
                 )
@@ -1878,8 +1902,8 @@ def reverse_check(): Unit =
   val rendered = elaborator.emitAll(designs)
   val inRef = sf(ref("io"), "in")
   val reversedBits = cat(cat(cat(cat(cat(cat(cat(
-    bits(inRef, 7, 7), bits(inRef, 6, 6)), bits(inRef, 5, 5)), bits(inRef, 4, 4)),
-    bits(inRef, 3, 3)), bits(inRef, 2, 2)), bits(inRef, 1, 1)), bits(inRef, 0, 0))
+    ref("bits_6"), ref("bits_5")), ref("bits_4")), ref("bits_3")),
+    ref("bits_2")), ref("bits_1")), ref("bits_0")), ref("bits"))
   val expected = Seq(
     module(
       "ReverseModule",
@@ -1892,6 +1916,14 @@ def reverse_check(): Unit =
         ))
       ),
       Seq(
+        IR.DefNode(id("bits"), bits(inRef, 0, 0)),
+        IR.DefNode(id("bits_0"), bits(inRef, 1, 1)),
+        IR.DefNode(id("bits_1"), bits(inRef, 2, 2)),
+        IR.DefNode(id("bits_2"), bits(inRef, 3, 3)),
+        IR.DefNode(id("bits_3"), bits(inRef, 4, 4)),
+        IR.DefNode(id("bits_4"), bits(inRef, 5, 5)),
+        IR.DefNode(id("bits_5"), bits(inRef, 6, 6)),
+        IR.DefNode(id("bits_6"), bits(inRef, 7, 7)),
         IR.Connect(sf(ref("io"), "out"), reversedBits)
       )
     )
@@ -2076,11 +2108,11 @@ def sint_basic_check(): Unit =
       Seq(
         IR.Connect(
           sf(ref("io"), "sum"),
-          IR.DoPrim(IR.PrimOp.AsSInt, Seq(IR.DoPrim(IR.PrimOp.Add, Seq(sf(ref("io"), "a"), sf(ref("io"), "b")))))
+          IR.DoPrim(IR.PrimOp.AsSInt, Seq(tail(IR.DoPrim(IR.PrimOp.Add, Seq(sf(ref("io"), "a"), sf(ref("io"), "b"))), 1)))
         ),
         IR.Connect(
           sf(ref("io"), "diff"),
-          IR.DoPrim(IR.PrimOp.AsSInt, Seq(IR.DoPrim(IR.PrimOp.Sub, Seq(sf(ref("io"), "a"), sf(ref("io"), "b")))))
+          IR.DoPrim(IR.PrimOp.AsSInt, Seq(tail(IR.DoPrim(IR.PrimOp.Sub, Seq(sf(ref("io"), "a"), sf(ref("io"), "b"))), 1)))
         ),
         IR.Connect(
           sf(ref("io"), "neg"),

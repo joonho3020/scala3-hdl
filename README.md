@@ -1068,3 +1068,10 @@ Connection operators
 - <> : for aggregate types
 - type signature
     - lhs: T <: HWData rhs: T <: HWData | DontCare
+
+---
+
+Good time to perform a cleanup
+
+- Unify abstraction for cloning data
+- Unify abstraction for interfaces with width/interfaces that support bitoperations like popcount, priorityencoding etc

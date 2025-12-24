@@ -151,37 +151,56 @@ private[hdl] object ModuleOps:
     val predExpr = exprFor(cond, mod)
     mod.getBuilder.addStmt(IR.Assert(IR.Identifier(assertName), clockExpr, enableExpr, predExpr, message))
 
-  private def primOp[R <: HWData](result: R, op: IR.PrimOp, args: Seq[HWData], consts: Seq[Int], mod: Module): R =
+  private def primOp[R <: HWData](
+    result: R,
+    op: IR.PrimOp,
+    args: Seq[HWData],
+    consts: Seq[Int],
+    mod: Module,
+    nameHint: Option[String]
+  ): R =
     result.setNodeKind(NodeKind.PrimOp)
-    val name = mod.getBuilder.allocateName(None, op.opName)
-    mod.register(result, Some(name))
     val exprArgs = args.map(exprFor(_, mod))
     val expr = IR.DoPrim(op, exprArgs, consts)
-    result.setIRExpr(expr)
+    nameHint match
+      case Some(hint) =>
+        val nodeName = mod.getBuilder.allocateName(Some(hint), hint)
+        mod.register(result, Some(nodeName))
+        mod.getBuilder.addStmt(IR.DefNode(IR.Identifier(nodeName), expr))
+        result.setIRExpr(IR.Ref(IR.Identifier(nodeName)))
+      case None =>
+        val name = mod.getBuilder.allocateName(None, op.opName)
+        mod.register(result, Some(name))
+        result.setIRExpr(expr)
     result
 
   def prim2Op[R <: HWData, T <: HWData](
-    result: R, op: IR.PrimOp, lhs: T, rhs: T, mod: Module
+    result: R, op: IR.PrimOp, lhs: T, rhs: T, mod: Module, nameHint: Option[String] = None
   ): R =
-    primOp(result, op, Seq(lhs, rhs), Seq(), mod)
+    primOp(result, op, Seq(lhs, rhs), Seq(), mod, nameHint)
 
   def prim1Op1Const[R <: HWData, T <: HWData](
-    result: R, op: IR.PrimOp, lhs: T, const: Int, mod: Module
+    result: R, op: IR.PrimOp, lhs: T, const: Int, mod: Module, nameHint: Option[String] = None
   ): R =
-    primOp(result, op, Seq(lhs), Seq(const), mod)
+    primOp(result, op, Seq(lhs), Seq(const), mod, nameHint)
 
   def prim1Op2Const[R <: HWData, T <: HWData](
-    result: R, op: IR.PrimOp, lhs: T, a: Int, b: Int, mod: Module
+    result: R, op: IR.PrimOp, lhs: T, a: Int, b: Int, mod: Module, nameHint: Option[String] = None
   ): R =
-    primOp(result, op, Seq(lhs), Seq(a, b), mod)
+    primOp(result, op, Seq(lhs), Seq(a, b), mod, nameHint)
 
   def prim1Op[R <: HWData, T <: HWData](
-    result: R, op: IR.PrimOp, lhs: T, mod: Module
+    result: R, op: IR.PrimOp, lhs: T, mod: Module, nameHint: Option[String] = None
   ): R =
-    primOp(result, op, Seq(lhs), Seq(), mod)
+    primOp(result, op, Seq(lhs), Seq(), mod, nameHint)
 
-  def mux[T <: HWData](cond: Bool, tval: T, fval: T, mod: Module): T =
-    primOp(HWAggregate.cloneData(tval), IR.PrimOp.Mux, Seq(cond, tval, fval), Seq.empty, mod)
+  def prim3Op[R <: HWData](
+    result: R, op: IR.PrimOp, a: HWData, b: HWData, c: HWData, mod: Module, nameHint: Option[String] = None
+  ): R =
+    primOp(result, op, Seq(a, b, c), Seq(), mod, nameHint)
+
+  def mux[T <: HWData](cond: Bool, tval: T, fval: T, mod: Module, nameHint: Option[String] = None): T =
+    primOp(HWAggregate.cloneData(tval), IR.PrimOp.Mux, Seq(cond, tval, fval), Seq.empty, mod, nameHint)
 
   def asUInt(value: HWData, mod: Module): UInt =
     prim1Op(UInt(value.getWidth), IR.PrimOp.AsUInt, value, mod)
@@ -192,7 +211,7 @@ private[hdl] object ModuleOps:
   def uintToOH(value: UInt, mod: Module): OneHot =
     prim1Op(OneHot(value.getWidth), IR.PrimOp.AsUInt, value, mod)
 
-  def concatBits(values: Seq[HWData], mod: Module): UInt =
+  def concatBits(values: Seq[HWData], mod: Module, nameHint: Option[String] = None): UInt =
     val flat = values.flatMap {
       case u: UInt      => Seq(u)
       case s: SInt      => Seq(asUInt(s, mod))
@@ -216,9 +235,12 @@ private[hdl] object ModuleOps:
     if bits.length == 1 then
       bits.head
     else
-      bits.tail.foldLeft(bits.head) { (acc, next) =>
+      val numCats = bits.length - 1
+      bits.tail.zipWithIndex.foldLeft(bits.head) { case (acc, (next, idx)) =>
         val width = acc.getWidth + next.getWidth
-        prim2Op(UInt(width), IR.PrimOp.Cat, acc, next, mod)
+        val isLast = idx == numCats - 1
+        val catName = if isLast then nameHint else None
+        prim2Op(UInt(width), IR.PrimOp.Cat, acc, next, mod, catName)
       }
 
 // def pad(lhs: UInt, width: Int, mod: Module): UInt =
