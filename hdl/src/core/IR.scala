@@ -41,14 +41,22 @@ private[hdl] object IR:
   final case class BundleField(name: Identifier, flipped: Boolean, tpe: Type) extends Serializable
   final case class BundleType(fields: Seq[BundleField]) extends Type
 
-  sealed trait Expr extends Serializable
-  final case class Ref(name: Identifier) extends Expr
-  final case class Literal(value: Identifier) extends Expr
-  final case object DontCare extends Expr
-  final case class DoPrim(op: PrimOp, args: Seq[Expr], consts: Seq[Int] = Seq.empty) extends Expr
-  final case class SubIndex(expr: Expr, value: Int) extends Expr
-  final case class SubAccess(expr: Expr, index: Expr) extends Expr
-  final case class SubField(expr: Expr, field: Identifier) extends Expr
+  sealed trait Expr extends Serializable:
+    def depth: Int
+  final case class Ref(name: Identifier) extends Expr:
+    def depth: Int = 1
+  final case class Literal(value: Identifier) extends Expr:
+    def depth: Int = 1
+  final case object DontCare extends Expr:
+    def depth: Int = 1
+  final case class DoPrim(op: PrimOp, args: Seq[Expr], consts: Seq[Int] = Seq.empty) extends Expr:
+    lazy val depth: Int = if args.isEmpty then 1 else args.map(_.depth).max + 1
+  final case class SubIndex(expr: Expr, value: Int) extends Expr:
+    def depth: Int = expr.depth + 1
+  final case class SubAccess(expr: Expr, index: Expr) extends Expr:
+    def depth: Int = math.max(expr.depth, index.depth) + 1
+  final case class SubField(expr: Expr, field: Identifier) extends Expr:
+    def depth: Int = expr.depth + 1
 
   final case class AnnotationTarget(module: Identifier, path: Identifier) extends Serializable
   final case class Annotation(cls: Identifier, target: AnnotationTarget) extends Serializable

@@ -3,6 +3,7 @@ package hdl
 import scala.collection.mutable
 
 private[hdl] object ModuleOps:
+  private val ExprDepthThreshold = 32
   private[hdl] def irTypeOf(tpe: HWData): IR.Type = tpe match
     case u: UInt => IR.UIntType(u.getWidth)
     case s: SInt => IR.SIntType(s.getWidth)
@@ -151,6 +152,17 @@ private[hdl] object ModuleOps:
     val predExpr = exprFor(cond, mod)
     mod.getBuilder.addStmt(IR.Assert(IR.Identifier(assertName), clockExpr, enableExpr, predExpr, message))
 
+  private def materializeIfDeep(data: HWData, mod: Module): IR.Expr =
+    val expr = exprFor(data, mod)
+    if expr.depth > ExprDepthThreshold then
+      val nodeName = mod.getBuilder.freshName("_T")
+      mod.getBuilder.addStmt(IR.DefNode(IR.Identifier(nodeName), expr))
+      val ref = IR.Ref(IR.Identifier(nodeName))
+      data.setIRExpr(ref)
+      ref
+    else
+      expr
+
   private def primOp[R <: HWData](
     result: R,
     op: IR.PrimOp,
@@ -160,18 +172,20 @@ private[hdl] object ModuleOps:
     nameHint: Option[String]
   ): R =
     result.setNodeKind(NodeKind.PrimOp)
-    val exprArgs = args.map(exprFor(_, mod))
+    val exprArgs = args.map(materializeIfDeep(_, mod))
     val expr = IR.DoPrim(op, exprArgs, consts)
-    nameHint match
-      case Some(hint) =>
-        val nodeName = mod.getBuilder.allocateName(Some(hint), hint)
-        mod.register(result, Some(nodeName))
-        mod.getBuilder.addStmt(IR.DefNode(IR.Identifier(nodeName), expr))
-        result.setIRExpr(IR.Ref(IR.Identifier(nodeName)))
-      case None =>
-        val name = mod.getBuilder.allocateName(None, op.opName)
-        mod.register(result, Some(name))
-        result.setIRExpr(expr)
+    val shouldMaterialize = nameHint.isDefined || expr.depth > ExprDepthThreshold
+    if shouldMaterialize then
+      val nodeName = nameHint match
+        case Some(hint) => mod.getBuilder.allocateName(Some(hint), hint)
+        case None => mod.getBuilder.freshName("_T")
+      mod.register(result, Some(nodeName))
+      mod.getBuilder.addStmt(IR.DefNode(IR.Identifier(nodeName), expr))
+      result.setIRExpr(IR.Ref(IR.Identifier(nodeName)))
+    else
+      val name = mod.getBuilder.allocateName(None, op.opName)
+      mod.register(result, Some(name))
+      result.setIRExpr(expr)
     result
 
   def prim2Op[R <: HWData, T <: HWData](
