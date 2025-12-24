@@ -69,6 +69,9 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
   val retireWidth = p.retireWidth
 
   body {
+    val bpu_pred_count = WireInit(0.U(p.xlenBits.W))
+    val bpu_hit_count = WireInit(0.U(p.xlenBits.W))
+
     io.redirect.valid := false.B
     io.redirect.target := 0.U
 
@@ -87,12 +90,12 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     io.retire_info.foreach(ri => {
       ri.valid := false.B
-      ri.pc := DontCare
-      ri.wb_valid := DontCare
-      ri.wb_data := DontCare
-      ri.wb_rd := DontCare
-      ri.bpu_preds := DontCare
-      ri.bpu_hits := DontCare
+      ri.pc := 0.U
+      ri.wb_valid := false.B
+      ri.wb_data := 0.U
+      ri.wb_rd := 0.U
+      ri.bpu_preds := bpu_pred_count
+      ri.bpu_hits := bpu_hit_count
     })
 
     val renamer     = Module(new Renamer(p))
@@ -236,6 +239,9 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       wb_data(i) := alus(i).io.out
     }
 
+    rob.io.wb_req := wb_uops
+    rob.io.wb_data := wb_data
+
     for (i <- 0 until issueWidth) {
       prf.io.write_ports(i).valid := wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen
       prf.io.write_ports(i).addr := wb_uops(i).bits.prd
@@ -264,9 +270,19 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     // -----------------------------------------------------------------------
     // Commit
     // -----------------------------------------------------------------------
-    val comm_uops = Reg(Vec.fill(retireWidth)(Valid(UOp(p))))
-    comm_uops := wb_uops
-    rob.io.commit := comm_uops
+    val comm_uops = Wire(Vec.fill(retireWidth)(Valid(UOp(p))))
+    comm_uops := rob.io.commit
+    val comm_wb_data = rob.io.commit_data
+
+    for (i <- 0 until retireWidth) {
+      io.retire_info(i).valid := comm_uops(i).valid
+      io.retire_info(i).pc := comm_uops(i).bits.pc
+      io.retire_info(i).wb_valid := comm_uops(i).bits.ctrl.rd_wen
+      io.retire_info(i).wb_data := comm_wb_data(i)
+      io.retire_info(i).wb_rd := comm_uops(i).bits.lrd
+      io.retire_info(i).bpu_preds := bpu_pred_count
+      io.retire_info(i).bpu_hits := bpu_hit_count
+    }
 
     renamer.io.comm_free_phys := DontCare
     for (i <- 0 until retireWidth) {

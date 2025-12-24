@@ -11,8 +11,8 @@ verilog-inorder: $(INORDER_SOURCES)
 verilog-ooo: $(OOO_SOURCES)
 	cd .. && ./mill -i riscv_ooo.run
 
-sim: verilog-ooo
-	cargo run --release --bin hdl-sim -- $(TEST)
+ooo-cosim: verilog-ooo
+	cargo run --release --bin ooo-cosim -- $(TEST)
 
 inorder-cosim: verilog-inorder
 	cargo run --release --bin inorder-cosim -- $(TEST)
@@ -23,7 +23,7 @@ clean:
 	rm -f libVdut.so
 	rm -f *.vcd
 
-test-all: verilog-ooo
+test-all: verilog-inorder
 	@for hex in tests/*.hex; do \
 		echo "Running $$hex..."; \
 		cargo run --release --bin hdl-sim -- $$hex || exit 1; \

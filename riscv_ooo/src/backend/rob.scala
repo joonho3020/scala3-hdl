@@ -4,21 +4,27 @@ import hdl._
 
 case class ROBEntry(
   valid: Bool,
-  uop: UOp
+  done: Bool,
+  uop: UOp,
+  wb_data: UInt
 ) extends Bundle[ROBEntry]
 
 object ROBEntry:
   def apply(p: CoreParams): ROBEntry =
     ROBEntry(
       valid = Bool(),
-      uop = UOp(p)
+      done = Bool(),
+      uop = UOp(p),
+      wb_data = UInt(p.xlenBits.W)
     )
 
 case class ROBIO(
   dispatch_req: Vec[Valid[UOp]],
   dispatch_rob_idxs: Vec[UInt],
-// wb_reqs: Vec[Valid[UInt]],
+  wb_req: Vec[Valid[UOp]],
+  wb_data: Vec[UInt],
   commit: Vec[Valid[UOp]],
+  commit_data: Vec[UInt],
   full:  Bool,
   empty: Bool,
   valid_entries: UInt,
@@ -29,8 +35,10 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
   val io = IO(ROBIO(
     dispatch_req = Input(Vec.fill(p.coreWidth)(Valid(UOp(p)))),
     dispatch_rob_idxs = Output(Vec.fill(p.coreWidth)(UInt(p.robIdxBits.W))),
-// wb_reqs = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.robIdxBits.W)))),
-    commit = Input(Vec.fill(p.retireWidth)(Valid(UOp(p)))),
+    wb_req = Input(Vec.fill(p.issueWidth)(Valid(UOp(p)))),
+    wb_data = Input(Vec.fill(p.issueWidth)(UInt(p.xlenBits.W))),
+    commit = Output(Vec.fill(p.retireWidth)(Valid(UOp(p)))),
+    commit_data = Output(Vec.fill(p.retireWidth)(UInt(p.xlenBits.W))),
     full = Output(Bool()),
     empty = Output(Bool()),
     valid_entries = Output(UInt(log2Ceil(p.robEntries + 1).W)),
@@ -43,8 +51,8 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
 
     val rob_entries = Reg(Vec.fill(numRows)(Vec.fill(coreWidth)(ROBEntry(p))))
 
-    val rob_head = RegInit(0.U(p.robRowIdxBits.W))
-    val rob_tail = RegInit(0.U(p.robRowIdxBits.W))
+    val rob_head = RegInit(0.U(p.robIdxBits.W))
+    val rob_tail = RegInit(0.U(p.robIdxBits.W))
     val maybe_full = RegInit(false.B)
 
     val full  = (rob_head === rob_tail) && maybe_full
@@ -77,44 +85,78 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
     def bump_ptr(ptr: UInt, amount: UInt): Unit =
       ptr := (ptr + amount) % entries.U
 
-    when (dispatch_fire) {
-      for (i <- 0 until coreWidth) {
-        val req = io.dispatch_req(i)
-        val rob_idx = idx_offset(rob_tail, i)
+    for (i <- 0 until coreWidth) {
+      val req = io.dispatch_req(i)
+      val rob_idx = idx_offset(rob_tail, i)
+      val row  = robIdxToRow(rob_idx)
+      val bank = robIdxToBank(rob_idx)
 
-        val row  = robIdxToRow(rob_idx)
-        val bank = robIdxToBank(rob_idx)
-
-        io.dispatch_rob_idxs(i) := rob_idx
+      io.dispatch_rob_idxs(i) := rob_idx
+      when (dispatch_fire) {
         rob_entries(row)(bank).valid := req.valid
+        rob_entries(row)(bank).done  := false.B
         rob_entries(row)(bank).uop   := req.bits
       }
+    }
+
+    when (dispatch_fire) {
       bump_ptr(rob_tail, dispatch_cnt)
     }
 
-    // -----------------------------------------------------------------------
-    // Commit Logic
-    // -----------------------------------------------------------------------
-    val commit_fire = io.commit.map(_.valid).reduce(_ || _)
-    val commit_cnt  = io.commit.map(_.valid.asUInt).reduce(_ +& _)
-    when (commit_fire) {
+    for (i <- 0 until p.issueWidth) {
+      val req = io.wb_req(i)
+      val rob_idx = req.bits.rob_idx
+      val row  = robIdxToRow(rob_idx)
+      val bank = robIdxToBank(rob_idx)
 
-      for (i <- 0 until p.retireWidth) {
-        val req = io.commit(i)
-        val rob_idx = req.bits.rob_idx
-        val row  = robIdxToRow(rob_idx)
-        val bank = robIdxToBank(rob_idx)
+      when (req.valid) {
+        rob_entries(row)(bank).done := true.B
+        rob_entries(row)(bank).wb_data := io.wb_data(i)
+      }
+    }
 
-        rob_entries(row)(bank).valid := false.B
+    val commit_mask = Wire(Vec.fill(p.retireWidth)(Bool()))
+    for (i <- 0 until p.retireWidth) {
+      val rob_idx = idx_offset(rob_head, i)
+      val row  = robIdxToRow(rob_idx)
+      val bank = robIdxToBank(rob_idx)
+      val entry = rob_entries(row)(bank)
+      val ready = entry.valid && entry.done
+
+      if (i == 0) {
+        commit_mask(i) := ready
+      } else {
+        commit_mask(i) := ready && commit_mask(i - 1)
       }
 
-      bump_ptr(rob_head, dispatch_cnt)
+      io.commit(i).valid := commit_mask(i)
+      io.commit(i).bits := entry.uop
+      io.commit_data(i) := Mux(commit_mask(i), entry.wb_data, 0.U)
+    }
+
+    val commit_fire = commit_mask.reduce(_ || _)
+    val commit_cnt  = commit_mask.map(_.asUInt).reduce(_ +& _)
+    when (commit_fire) {
+      for (i <- 0 until p.retireWidth) {
+        when (commit_mask(i)) {
+          val rob_idx = idx_offset(rob_head, i)
+          val row  = robIdxToRow(rob_idx)
+          val bank = robIdxToBank(rob_idx)
+          rob_entries(row)(bank).valid := false.B
+          rob_entries(row)(bank).done := false.B
+        }
+      }
+
+      bump_ptr(rob_head, commit_cnt)
     }
 
     //////////////////////////////////////////////////////////////////////////
 
     when (reset.asBool) {
-      rob_entries.foreach(row => row.foreach(entry => entry.valid := false.B))
+      rob_entries.foreach(row => row.foreach(entry => {
+        entry.valid := false.B
+        entry.done := false.B
+      }))
     }
 
     dontTouch(io)

@@ -160,4 +160,5 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(io)
     dontTouch(entries)
     dontTouch(age_matrix)
+    dontTouch(issue_grants)
   }

@@ -17,4 +17,8 @@ name = "legacy-cosim"
 path = "src/bin/legacy_cosim.rs"
 required-features = ["legacy-main"]
 
+[[bin]]
+name = "ooo-cosim"
+path = "src/bin/ooo-cosim.rs"
+
 [build-dependencies]

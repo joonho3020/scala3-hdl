@@ -46,7 +46,7 @@ object UOp:
   def apply(p: CoreParams): UOp =
     UOp(
       pc = UInt(p.pcBits.W),
-      inst = UInt(p.xlenBits.W),
+      inst = UInt(p.instBits.W),
 
       lrs1    = UInt(5.W),
       lrs2    = UInt(5.W),

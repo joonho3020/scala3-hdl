@@ -67,6 +67,9 @@
 - [x] Fix caching support
     - Must invalidate parent modules when child modules are removed
 - [x] Better naming macros...?
+- [ ] Need to fix caching
+    - When we change a bundle that is used for a cached module & change the bundle, the cache is not invalidated
+    - Need some way of tracking classfile dependencies?
 - [ ] Derive Rust testbench bindings given a Bundle case class
 - [ ] Lazy elaboration (diplomacy like 2-step elaboration)
 - [ ] Mixed vectors
