@@ -2,6 +2,33 @@ package hdl
 
 import scala.quoted.*
 
+extension (lhs: Bits)
+  def orR(using m: Module): Bool =
+    val width = lhs.requireKnownWidth("orR")
+    if width < 1 then
+      throw new IllegalArgumentException("orR requires width >= 1")
+    val u = lhs match
+      case u: UInt => u
+      case other => ModuleOps.prim1Op(UInt(other.getWidth), IR.PrimOp.AsUInt, other, m)
+    val bits = (0 until width).map { i =>
+      val bit = ModuleOps.prim1Op2Const(UInt(Width(1)), IR.PrimOp.Bits, u, i, i, m)
+      ModuleOps.prim1Op(Bool(), IR.PrimOp.AsBool, bit, m)
+    }
+    bits.reduce((a, b) => ModuleOps.prim2Op(Bool(), IR.PrimOp.Or, a, b, m))
+
+  def andR(using m: Module): Bool =
+    val width = lhs.requireKnownWidth("andR")
+    if width < 1 then
+      throw new IllegalArgumentException("andR requires width >= 1")
+    val u = lhs match
+      case u: UInt => u
+      case other => ModuleOps.prim1Op(UInt(other.getWidth), IR.PrimOp.AsUInt, other, m)
+    val bits = (0 until width).map { i =>
+      val bit = ModuleOps.prim1Op2Const(UInt(Width(1)), IR.PrimOp.Bits, u, i, i, m)
+      ModuleOps.prim1Op(Bool(), IR.PrimOp.AsBool, bit, m)
+    }
+    bits.reduce((a, b) => ModuleOps.prim2Op(Bool(), IR.PrimOp.And, a, b, m))
+
 extension (lhs: UInt)
   inline def +&(rhs: UInt)(using inline m: Module): UInt =
     ${ OperationMacros.uint2OpMaxWidthPlus1('lhs, 'rhs, '{ IR.PrimOp.Add }, 'm) }
@@ -78,30 +105,6 @@ extension (lhs: UInt)
   def apply(idx: UInt)(using m: Module): UInt =
     val shifted = ModuleOps.prim2Op(UInt(lhs.getWidth), IR.PrimOp.DShr, lhs, idx, m)
     ModuleOps.prim1Op2Const(UInt(Width(1)), IR.PrimOp.Bits, shifted, 0, 0, m)
-
-  def orR(using m: Module): Bool =
-    val width = lhs.getWidth match
-      case KnownWidth(v) => v
-      case _ => throw new IllegalArgumentException("orR requires UInt with known width")
-    if width < 1 then
-      throw new IllegalArgumentException("orR requires UInt width >= 1")
-    val bits = (0 until width).map { i =>
-      val bit = ModuleOps.prim1Op2Const(UInt(Width(1)), IR.PrimOp.Bits, lhs, i, i, m)
-      ModuleOps.prim1Op(Bool(), IR.PrimOp.AsBool, bit, m)
-    }
-    bits.reduce((a, b) => ModuleOps.prim2Op(Bool(), IR.PrimOp.Or, a, b, m))
-
-  def andR(using m: Module): Bool =
-    val width = lhs.getWidth match
-      case KnownWidth(v) => v
-      case _ => throw new IllegalArgumentException("andR requires UInt with known width")
-    if width < 1 then
-      throw new IllegalArgumentException("andR requires UInt width >= 1")
-    val bits = (0 until width).map { i =>
-      val bit = ModuleOps.prim1Op2Const(UInt(Width(1)), IR.PrimOp.Bits, lhs, i, i, m)
-      ModuleOps.prim1Op(Bool(), IR.PrimOp.AsBool, bit, m)
-    }
-    bits.reduce((a, b) => ModuleOps.prim2Op(Bool(), IR.PrimOp.And, a, b, m))
 
   inline def asBool(using inline m: Module): Bool =
     ${ OperationMacros.uint1OpToBool('lhs, '{ IR.PrimOp.AsBool }, 'm) }

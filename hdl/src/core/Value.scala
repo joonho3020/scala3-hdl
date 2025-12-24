@@ -58,7 +58,13 @@ sealed trait HWData extends Cloneable:
 
 sealed trait AggregateHWData extends HWData
 
-sealed class UInt extends HWData:
+sealed trait Bits extends HWData:
+  def requireKnownWidth(opName: String): Int =
+    getWidth match
+      case KnownWidth(v) => v
+      case _ => throw new IllegalArgumentException(s"$opName requires known width")
+
+sealed class UInt extends Bits:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[UInt]])
 
@@ -78,7 +84,7 @@ object UInt:
   def apply(): UInt =
     new UInt
 
-sealed class SInt extends HWData:
+sealed class SInt extends Bits:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[SInt]])
 
@@ -147,7 +153,7 @@ sealed class Reset extends HWData:
 object Reset:
   def apply(): Reset = new Reset
 
-sealed class OneHot extends HWData:
+sealed class OneHot extends Bits:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[OneHot]])
 
@@ -169,7 +175,7 @@ object OneHot:
 
 class HWEnum[E <: scala.reflect.Enum](
   val enumObj: { def values: Array[E] }
-) extends HWData:
+) extends HWData with Bits:
   def setLitVal(payload: Any): Unit = literal = Some(payload.asInstanceOf[E])
   def getLitVal: E =
     literal match

@@ -64,22 +64,6 @@ private[hdl] object HWAggregate:
 
   private def transformHW(h: HWData, path: String, ctx: Option[IR.Expr], f: (HWData, String, HWData, Option[IR.Expr]) => HWData): HWData =
     val rebuilt: HWData = h match
-      case u: UInt =>
-        val x = u.cloneType
-        x
-      case s: SInt =>
-        val x = s.cloneType
-        x
-      case b: Bool =>
-        Bool()
-      case c: Clock =>
-        Clock()
-      case r: Reset =>
-        Reset()
-      case oh: OneHot =>
-        oh.cloneType
-      case e: HWEnum[?] =>
-        e.cloneType
       case _: DontCare.type =>
         DontCare
       case v: Vec[?] =>
@@ -99,6 +83,8 @@ private[hdl] object HWAggregate:
           values(i) = transformAny(prod.productElement(i), childPath, childCtx, f)
           i += 1
         rebuildProduct(prod, values).asInstanceOf[HWData]
+      case other =>
+        other.cloneType
     f(h, path, rebuilt, ctx)
 
   private def transformIterable(it: Iterable[?], path: String, ctx: Option[IR.Expr], f: (HWData, String, HWData, Option[IR.Expr]) => HWData): Iterable[?] =
