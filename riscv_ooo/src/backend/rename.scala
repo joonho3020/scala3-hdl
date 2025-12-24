@@ -89,17 +89,22 @@ abstract class BitMaskModule extends Module:
     def clear: Unit =
       data := initLit
 
-    def unset(indices: Vec[UInt], valid: Vec[Bool]): Unit =
+    def unset(input: UInt, indices: Vec[UInt], valid: Vec[Bool]): UInt =
       val mask = valid.zip(indices).map((v, idx) => {
         Mux(v, 1.U << idx, 0.U)
       }).reduce(_ | _)
-      data := data & ~mask
+      val ret = Wire(UInt(n.W))
+      ret := input & ~mask
+      ret
 
-    def set(indices: Vec[UInt], valid: Vec[Bool]): Unit =
+    def set(input: UInt, indices: Vec[UInt], valid: Vec[Bool]): UInt =
       val mask = valid.zip(indices).map((v, idx) => {
         Mux(v, 1.U << idx, 0.U)
       }).reduce(_ | _)
-      data := data | mask
+
+      val ret = Wire(UInt(n.W))
+      ret := input | mask
+      ret
 
     def count: UInt =
       PopCount(data)
@@ -160,16 +165,18 @@ class FreeList(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
     io.count := free_list.count
 
     io.alloc_resp := DontCare
+
     when (io.alloc_req.valid) {
       io.alloc_resp := free_list.getSetIds(p.coreWidth)
-      free_list.unset(io.alloc_resp, Vec((0 until p.coreWidth).map(i => i.U < io.alloc_req.bits)))
       Assert(io.count >= io.alloc_req.bits, "Not enough entries in the free list")
     }
 
+    var mask = free_list.data
+    val unset_mask_valids = Vec((0 until p.coreWidth).map(i => i.U < io.alloc_req.bits && io.alloc_req.valid))
+    mask = free_list.unset(mask, io.alloc_resp, unset_mask_valids)
+    mask = free_list.set(mask, io.comm_prds.map(_.bits), io.comm_prds.map(_.valid))
+    free_list.data := mask
 
-    when (io.comm_prds.map(_.valid).reduce(_ || _)) {
-      free_list.set(io.comm_prds.map(_.bits), io.comm_prds.map(_.valid))
-    }
     dontTouch(io)
   }
 
@@ -237,12 +244,11 @@ class BusyTable(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
         busy_table.get(req.prs2.bits).asBool)
     }
 
-    when (io.wb_req.map(_.prd.valid).reduce(_ || _)) {
-      busy_table.unset(io.wb_req.map(_.prd.bits), io.wb_req.map(_.prd.valid))
-    }
-    when (io.comm_prds.map(_.valid).reduce(_ || _)) {
-      busy_table.set(io.comm_prds.map(_.bits), io.comm_prds.map(_.valid))
-    }
+    var mask = busy_table.data
+    mask = busy_table.unset(mask, io.wb_req.map(_.prd.bits), io.wb_req.map(_.prd.valid))
+    mask = busy_table.set(mask, io.comm_prds.map(_.bits), io.comm_prds.map(_.valid))
+    busy_table.data := mask
+
     dontTouch(io)
   }
 
