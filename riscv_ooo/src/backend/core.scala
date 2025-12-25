@@ -176,10 +176,18 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       val lrs1_wakeup = wb_uops.map(w => w.valid && dis_uop.lrs1_dep(w.bits)).reduce(_ || _)
       val lrs2_wakeup = wb_uops.map(w => w.valid && dis_uop.lrs2_dep(w.bits)).reduce(_ || _)
       when (lrs1_wakeup) {
-        issue_queue.io.dis_uops(i).bits.prs1_busy := false.B
+        when (!dis_stall) {
+          issue_queue.io.dis_uops(i).bits.prs1_busy := false.B
+        } .otherwise {
+          dis_uops(i).bits.prs1_busy := false.B
+        }
       }
       when (lrs2_wakeup) {
-        issue_queue.io.dis_uops(i).bits.prs2_busy := false.B
+        when (!dis_stall) {
+          issue_queue.io.dis_uops(i).bits.prs2_busy := false.B
+        } .otherwise {
+          dis_uops(i).bits.prs2_busy := false.B
+        }
       }
     }
 
