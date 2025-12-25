@@ -60,9 +60,29 @@ class MapTable(p: CoreParams) extends Module with CoreCacheable(p):
     val table = Reg(Vec.fill(32)(UInt(p.xlenBits.W)))
 
     for (i <- 0 until p.coreWidth) {
+      val req = io.dec_req(i)
+
+      val lrd_deps  = io.rn1_update.map(p => p.valid && p.bits.lrd === req.lrd)
+      val lrs1_deps = io.rn1_update.map(p => p.valid && p.bits.lrd === req.lrs1)
+      val lrs2_deps = io.rn1_update.map(p => p.valid && p.bits.lrd === req.lrs2)
+
+      val lrd_dep_oh  = PriorityEncoderOH(Cat(lrd_deps .reverse))
+      val lrs1_dep_oh = PriorityEncoderOH(Cat(lrs1_deps.reverse))
+      val lrs2_dep_oh = PriorityEncoderOH(Cat(lrs2_deps.reverse))
+
       io.dec_resp(i).prs1 := table(io.dec_req(i).lrs1)
       io.dec_resp(i).prs2 := table(io.dec_req(i).lrs2)
       io.dec_resp(i).stale_prd := table(io.dec_req(i).lrd)
+
+      when (lrd_deps.reduce(_ || _)) {
+        io.dec_resp(i).stale_prd := MuxOneHot(lrd_dep_oh, io.rn1_update.map(_.bits.prd).toSeq)
+      }
+      when (lrs1_deps.reduce(_ || _)) {
+        io.dec_resp(i).prs1 := MuxOneHot(lrs1_dep_oh, io.rn1_update.map(_.bits.prd).toSeq)
+      }
+      when (lrs2_deps.reduce(_ || _)) {
+        io.dec_resp(i).prs2 := MuxOneHot(lrs2_dep_oh, io.rn1_update.map(_.bits.prd).toSeq)
+      }
     }
 
     for (i <- 0 until p.coreWidth) {
@@ -256,6 +276,8 @@ case class RenamerIO(
   dec_uops: Vec[Valid[UOp]],
   dec_ready: Bool,
 
+  dis_stall: Bool,
+
   rn2_uops: Vec[Valid[UOp]],
 
   wb_wakeup: Vec[BusyTableWBReq],
@@ -269,6 +291,8 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
   val io = IO(RenamerIO(
     dec_uops  = Input(Vec.fill(p.coreWidth)(Valid(UOp(p)))),
     dec_ready = Output(Bool()),
+
+    dis_stall = Input(Bool()),
 
     rn2_uops = Output(Vec.fill(p.coreWidth)(Valid(UOp(p)))),
 
@@ -303,12 +327,14 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
 
     for (i <- 0 until p.coreWidth) {
       val dec = io.dec_uops(i).bits
-      rn1_uops_reg(i) := io.dec_uops(i)
-      rn1_uops_reg(i).valid := io.dec_uops(i).valid && io.dec_ready
-      rn1_uops_reg(i).bits.stale_prd := map_table.io.dec_resp(i).stale_prd
-      rn1_uops_reg(i).bits.prs1      := map_table.io.dec_resp(i).prs1
-      rn1_uops_reg(i).bits.prs2      := map_table.io.dec_resp(i).prs2
-      rn1_uops_reg(i).bits.prd       := 0.U
+      when (!io.dis_stall) {
+        rn1_uops_reg(i) := io.dec_uops(i)
+        rn1_uops_reg(i).valid := io.dec_uops(i).valid && io.dec_ready
+        rn1_uops_reg(i).bits.stale_prd := map_table.io.dec_resp(i).stale_prd
+        rn1_uops_reg(i).bits.prs1      := map_table.io.dec_resp(i).prs1
+        rn1_uops_reg(i).bits.prs2      := map_table.io.dec_resp(i).prs2
+        rn1_uops_reg(i).bits.prd       := 0.U
+      }
     }
 
     // ------------------------------------------------------------------------

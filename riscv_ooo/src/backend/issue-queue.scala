@@ -40,9 +40,9 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
     val valid_mask = entries.map(_.valid)
     val free_mask  = valid_mask.map(!_)
     val num_free   = free_mask.map(_.asUInt).reduce(_ +& _)
-    val num_dis    = io.dis_uops.map(_.valid.asUInt).reduce(_ +& _)
 
-    io.dis_ready := num_free >= num_dis
+    // TODO: Fix w/ actual backpressure
+    io.dis_ready := num_free >= p.coreWidth.U
 
     // -------------------------------------------------------------------------
     // Wakeup Logic

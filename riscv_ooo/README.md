@@ -25,21 +25,35 @@ S0 S1 S2 FB
 <!-- - M: memory -->
 <!-- - W: writeback -->
 
-Decode & Rename 1
+          Fetch Buffer
 
-Rename 2
+                      fb_stall
+------ io.fetch_uops -----------
 
-Dispatch
+             Decoder
+                      dec_stall
+----------- dec_uops -----------
+                               ---
+                               v  |
+----------- rn1_uops -----------  |
+                                  |
+                        dis_stall -
+----------- dis_uops -----------
 
-Issue
+           Issue Queue
 
-PRF read
+----------- iss_uops -----------
 
-Execute
+               PRF
 
-WB
+----------- exe_uops  ----------
 
-Commit
+           ALU & ImmGen
+
+----------  wb_uops ------------
+
+
+---------- comm_uops -----------
 
 
 - Properly bank PRF

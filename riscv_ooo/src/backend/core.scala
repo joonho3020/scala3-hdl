@@ -140,6 +140,10 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       dec_stall := true.B
     }
 
+    when (dec_stall) {
+      fb_stall := true.B
+    }
+
     // -----------------------------------------------------------------------
     // Dispatch (ROB & IssueQueue allocation)
     // -----------------------------------------------------------------------
@@ -147,18 +151,21 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val dis_uops = Reg(Vec.fill(coreWidth)(Valid(UOp(p))))
     val dis_uops_wire = Wire(Vec.fill(coreWidth)(Valid(UOp(p))))
 
+    renamer.io.dis_stall := dis_stall
+
     dis_stall := rob.io.full || !issue_queue.io.dis_ready
-    dis_uops.zip(renamer.io.rn2_uops).foreach((dis, ren) => {
-      dis.valid := ren.valid && !dis_stall
-      dis.bits  := ren.bits
-    })
+    when (!dis_stall) {
+      for (i <- 0 until coreWidth) {
+        dis_uops(i) := renamer.io.rn2_uops(i)
+      }
+    }
 
     dis_uops_wire <> dis_uops
 
     rob.io.dispatch_req := dis_uops_wire
 
     for (i <- 0 until coreWidth) {
-      issue_queue.io.dis_uops(i).valid := dis_uops_wire(i).valid && !rob.io.full
+      issue_queue.io.dis_uops(i).valid := dis_uops_wire(i).valid && !dis_stall
       issue_queue.io.dis_uops(i).bits := dis_uops_wire(i).bits
       issue_queue.io.dis_uops(i).bits.rob_idx := rob.io.dispatch_rob_idxs(i)
 
@@ -181,20 +188,14 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     di_compactor.io.enq <> issue_queue.io.issue_uops
 
     // -----------------------------------------------------------------------
-    // Issue
+    // Issue & Read PRF
     // -----------------------------------------------------------------------
     val iss_uops = Reg(Vec.fill(coreWidth)(Valid(UOp(p))))
     iss_uops := di_compactor.io.deq
 
-    // -----------------------------------------------------------------------
-    // Register Read
-    // -----------------------------------------------------------------------
-    val rrd_uops = Reg(Vec.fill(issueWidth)(Valid(UOp(p))))
-    rrd_uops := iss_uops
-
     for (i <- 0 until issueWidth) {
-      prf.io.read_ports(i * 2 + 0).addr := rrd_uops(i).bits.prs1
-      prf.io.read_ports(i * 2 + 1).addr := rrd_uops(i).bits.prs2
+      prf.io.read_ports(i * 2 + 0).addr := iss_uops(i).bits.prs1
+      prf.io.read_ports(i * 2 + 1).addr := iss_uops(i).bits.prs2
     }
 
     val rrd_rs1_data = (0 until issueWidth).map(i => prf.io.read_ports(i * 2 + 0).data)
@@ -208,7 +209,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val exe_rs2_data = Reg(Vec.fill(issueWidth)(UInt(XLEN.W)))
 
     for (i <- 0 until issueWidth) {
-      exe_uops(i) := rrd_uops(i)
+      exe_uops(i) := iss_uops(i)
       exe_rs1_data(i) := rrd_rs1_data(i)
       exe_rs2_data(i) := rrd_rs2_data(i)
     }
@@ -310,9 +311,9 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     when (reset.asBool) {
       for (i <- 0 until coreWidth) {
         dec_uops(i).valid := false.B
+        dis_uops(i).valid := false.B
       }
       for (i <- 0 until issueWidth) {
-        rrd_uops(i).valid := false.B
         exe_uops(i).valid := false.B
         wb_uops(i).valid := false.B
       }
@@ -329,7 +330,6 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(iss_uops)
 
     dontTouch(iss_uops)
-    dontTouch(rrd_uops)
     dontTouch(exe_uops)
     dontTouch(wb_uops)
     dontTouch(wb_data)
