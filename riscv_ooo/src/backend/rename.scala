@@ -194,7 +194,7 @@ class FreeList(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
     var mask = free_list.data
     val unset_mask_valids = Vec((0 until p.coreWidth).map(i => i.U < io.alloc_req.bits && io.alloc_req.valid))
     mask = free_list.unset(mask, io.alloc_resp, unset_mask_valids)
-    mask = free_list.set(mask, io.comm_prds.map(_.bits), io.comm_prds.map(_.valid))
+    mask = free_list  .set(mask, io.comm_prds.map(_.bits), io.comm_prds.map(_.valid))
     free_list.data := mask
 
     dontTouch(io)
@@ -266,8 +266,11 @@ class BusyTable(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
 
     var mask = busy_table.data
     mask = busy_table.unset(mask, io.wb_req.map(_.prd.bits), io.wb_req.map(_.prd.valid))
-    mask = busy_table.set(mask, io.comm_prds.map(_.bits), io.comm_prds.map(_.valid))
+    mask = busy_table  .set(mask, io.comm_prds.map(_.bits), io.comm_prds.map(_.valid))
     busy_table.data := mask
+
+    val busy_count = PopCount(busy_table.data).asWire
+    dontTouch(busy_count)
 
     dontTouch(io)
   }
@@ -311,7 +314,10 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     val rn1_uops_reg = Reg(Vec.fill(p.coreWidth)(Valid(UOp(p))))
     dontTouch(rn1_uops_reg)
 
-    io.free_count := free_list.io.count
+    // TODO: too pessimistic???
+    val fc = free_list.io.count
+    val uc = rn1_uops_reg.map(_.valid.asUInt).reduce(_ + _)
+    io.free_count := Mux(fc >= (uc + p.coreWidth.U), fc - uc - p.coreWidth.U, 0.U)
 
     // ------------------------------------------------------------------------
     // Rename 0
@@ -327,7 +333,6 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
       val dec = io.dec_uops(i).bits
       when (!io.dis_stall) {
         rn1_uops_reg(i) := io.dec_uops(i)
-// rn1_uops_reg(i).valid := io.dec_uops(i).valid
         rn1_uops_reg(i).bits.stale_prd := map_table.io.dec_resp(i).stale_prd
         rn1_uops_reg(i).bits.prs1      := map_table.io.dec_resp(i).prs1
         rn1_uops_reg(i).bits.prs2      := map_table.io.dec_resp(i).prs2

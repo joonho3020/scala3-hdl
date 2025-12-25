@@ -146,15 +146,6 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       issue_queue.io.dis_uops(i).valid := dis_uops(i).valid && !dis_stall
       issue_queue.io.dis_uops(i).bits := dis_uops(i).bits
       issue_queue.io.dis_uops(i).bits.rob_idx := rob.io.dispatch_rob_idxs(i)
-// val dis_uop = dis_uops(i).bits
-// val lrs1_wakeup = wb_uops.map(w => w.valid && dis_uop.lrs1_dep(w.bits)).reduce(_ || _)
-// val lrs2_wakeup = wb_uops.map(w => w.valid && dis_uop.lrs2_dep(w.bits)).reduce(_ || _)
-// when (lrs1_wakeup) {
-// issue_queue.io.dis_uops(i).bits.prs1_busy := false.B
-// }
-// when (lrs2_wakeup) {
-// issue_queue.io.dis_uops(i).bits.prs2_busy := false.B
-// }
     }
 
     when (dis_stall) {
@@ -175,23 +166,16 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       prf.io.read_ports(i * 2 + 1).addr := iss_uops(i).bits.prs2
     }
 
-    val rrd_rs1_data = (0 until issueWidth).map(i => prf.io.read_ports(i * 2 + 0).data)
-    val rrd_rs2_data = (0 until issueWidth).map(i => prf.io.read_ports(i * 2 + 1).data)
-
     // -----------------------------------------------------------------------
     // Execute
     // -----------------------------------------------------------------------
     val exe_uops = Reg(Vec.fill(issueWidth)(Valid(UOp(p))))
-    val exe_rs1_data = Reg(Vec.fill(issueWidth)(UInt(XLEN.W)))
-    val exe_rs2_data = Reg(Vec.fill(issueWidth)(UInt(XLEN.W)))
+    val exe_rs1_data = (0 until issueWidth).map(i => prf.io.read_ports(i * 2 + 0).data)
+    val exe_rs2_data = (0 until issueWidth).map(i => prf.io.read_ports(i * 2 + 1).data)
 
     for (i <- 0 until issueWidth) {
       exe_uops(i) := iss_uops(i)
-      exe_rs1_data(i) := rrd_rs1_data(i)
-      exe_rs2_data(i) := rrd_rs2_data(i)
-    }
 
-    for (i <- 0 until issueWidth) {
       val uop = exe_uops(i).bits
       val ctrl = uop.ctrl
 

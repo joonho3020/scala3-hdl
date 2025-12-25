@@ -42,31 +42,26 @@ class PhysicalRegfile(p: CoreParams) extends Module with CoreCacheable(p):
   ))
 
   body {
-    val regfile = Reg(Vec.fill(p.nPhysicalRegs)(UInt(p.xlenBits.W)))
+    val regfile = SRAM(UInt(p.xlenBits.W), p.nPhysicalRegs)
+                      (p.prfReadPorts, p.prfWritePorts, 0, false)
 
-    for (rp <- io.read_ports) {
+    io.read_ports.zipWithIndex.foreach((rp, idx) => {
       val bypass_hit = io.write_ports.map(wp => wp.valid && wp.addr === rp.addr)
       val bypass_data = io.write_ports.map(_.data)
       val bypass_en = bypass_hit.reduce(_ || _)
       val bypass_oh = Cat(bypass_hit.reverse).asOH
+      rp.data := Mux(RegNext(bypass_en),
+                     RegNext(MuxOneHot(bypass_oh, bypass_data.toSeq)),
+                     regfile.readPorts(idx).data)
 
-      rp.data := Mux(bypass_en,
-        MuxOneHot(bypass_oh, bypass_data.toSeq),
-        regfile(rp.addr))
-    }
+      regfile.readPorts(idx).read(rp.addr)
+    })
 
-    for (wp <- io.write_ports) {
+    io.write_ports.zipWithIndex.foreach((wp, idx) => {
       when (wp.valid && wp.addr =/= 0.U) {
-        regfile(wp.addr) := wp.data
+        regfile.writePorts(idx).write(wp.addr, wp.data)
       }
-    }
-
-    when (reset.asBool) {
-      for (i <- 0 until p.nPhysicalRegs) {
-        regfile(i) := 0.U
-      }
-    }
+    })
 
     dontTouch(io)
-    dontTouch(regfile)
   }
