@@ -266,6 +266,10 @@ extension (h: HWData)
   inline def asUInt(using inline m: Module): UInt =
     ${ OperationMacros.hwdata1OpToUInt('h, 'm) }
 
+extension [T <: HWData](t: T)
+  inline def asWire(using inline m: Module): T =
+    ${ OperationMacros.asWireImpl[T]('t, 'm) }
+
 extension (dc: DontCare.type)
   inline def as[T <: HWData]: T = dc.asInstanceOf[T]
 
@@ -560,4 +564,10 @@ object OperationMacros:
     val nameOpt = MacroUtils.findEnclosingValName
     '{
       ModuleOps.prim2Op(Bool(), $op, $lhs, $rhs, $mod, ${Expr(nameOpt)})
+    }
+
+  def asWireImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =
+    val nameOpt = MacroUtils.findEnclosingValName
+    '{
+      ModuleOps.asWire($t, ${Expr(nameOpt)}, $mod)
     }

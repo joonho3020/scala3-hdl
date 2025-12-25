@@ -42,6 +42,16 @@ case class UOp(
   def lrd_val(using m: Module): Bool =
     ctrl.valid && ctrl.rd_wen
 
+  def lrd_dep(prev: UOp)(using m: Module): Bool =
+    lrd === prev.lrd && lrd_val && prev.lrd_val
+
+  def lrs1_dep(prev: UOp)(using m: Module): Bool =
+    lrs1 === prev.lrd && lrs1_val && prev.lrd_val
+
+  def lrs2_dep(prev: UOp)(using m: Module): Bool =
+    lrs2 === prev.lrd && lrs2_val && prev.lrd_val
+
+
 object UOp:
   def apply(p: CoreParams): UOp =
     UOp(

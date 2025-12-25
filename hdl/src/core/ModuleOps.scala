@@ -105,6 +105,16 @@ private[hdl] object ModuleOps:
     mod.getBuilder.addStmt(IR.WireInit(IR.Identifier(wireName), irTypeOf(inst), clockExpr, resetExpr, initExpr))
     inst
 
+  def asWire[T <: HWData](t: T, name: Option[String], mod: Module): T =
+    val inst = HWAggregate.cloneData(t)
+    val wireName = resolveName(name, inst, "wire", mod)
+    inst.setNodeKind(NodeKind.Wire)
+    mod.register(inst, Some(wireName))
+    mod.getBuilder.addStmt(IR.Wire(IR.Identifier(wireName), irTypeOf(inst)))
+    connect(inst, t, mod)
+    dontTouch(inst, mod)
+    inst
+
   def connect[T <: HWData](dst: T, src: T, mod: Module): Unit =
     if src eq DontCare then
       val lhs = locFor(dst, mod)

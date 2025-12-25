@@ -25,9 +25,7 @@ S0 S1 S2 FB
 <!-- - M: memory -->
 <!-- - W: writeback -->
 
-Decode
-
-Rename 1
+Decode & Rename 1
 
 Rename 2
 
@@ -35,9 +33,16 @@ Dispatch
 
 Issue
 
+PRF read
+
+Execute
+
 WB
 
 Commit
+
+
+- Properly bank PRF
 
 
 

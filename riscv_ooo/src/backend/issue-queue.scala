@@ -71,7 +71,8 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
       e.valid &&
       (!e.uop.prs1_busy || !e.uop.lrs1_val) &&
       (!e.uop.prs2_busy || !e.uop.lrs2_val)
-    })
+    }).asWire
+    dontTouch(ready_mask)
 
     val oldest_mask = Wire(Vec.fill(numEntries)(Bool()))
     for (i <- 0 until numEntries) {
@@ -88,9 +89,14 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
     var remaining_oldest = Cat(oldest_mask.reverse)
 
     for (i <- 0 until issueWidth) {
-      val candidates = remaining_ready & remaining_oldest
-      val use_oldest = candidates.orR
-      val select_from = Mux(use_oldest, candidates, remaining_ready)
+      val candidates = Wire(UInt(numEntries.W))
+      val select_from = Wire(UInt(numEntries.W))
+      dontTouch(candidates)
+      dontTouch(select_from)
+
+      candidates := remaining_ready & remaining_oldest
+      select_from := Mux(candidates.orR, candidates, remaining_ready)
+
       val grant = PriorityEncoderOH(select_from)
       issue_grants(i) := grant.asUInt
 
@@ -161,4 +167,5 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(entries)
     dontTouch(age_matrix)
     dontTouch(issue_grants)
+    dontTouch(oldest_mask)
   }

@@ -265,7 +265,7 @@ fn main() {
 
     dut.poke_io_mem_req_ready(1);
 
-    for cycle in 0..50 {
+    for cycle in 0..100 {
         let mut halt_detected = false;
         for lane in 0..RETIRE_WIDTH {
             let retire = get_retire_info(&dut, lane);

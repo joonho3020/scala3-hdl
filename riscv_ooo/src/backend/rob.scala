@@ -163,4 +163,5 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(rob_entries)
     dontTouch(rob_head)
     dontTouch(rob_tail)
+    dontTouch(commit_mask)
   }

@@ -361,15 +361,6 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     val rn1_uops_bypass = Wire(Vec.fill(p.coreWidth)(Valid(UOp(p))))
     dontTouch(rn1_uops_bypass)
 
-    def lrd_dep(me: UOp, you: UOp): Bool =
-      me.lrd === you.lrd && me.lrd_val && you.lrd_val
-
-    def lrs1_dep(me: UOp, you: UOp): Bool =
-      me.lrs1 === you.lrd && me.lrs1_val && you.lrd_val
-
-    def lrs2_dep(me: UOp, you: UOp): Bool =
-      me.lrs2 === you.lrd && me.lrs2_val && you.lrd_val
-
     rn1_uops_bypass(0) := rn1_uops(0)
 
     // Bypass prd to younger uops
@@ -378,9 +369,9 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
       val bypass    = rn1_uops_bypass(i)
       bypass := rn1_uops(i)
 
-      val lrd_deps  = prev_uops.map(p => p.valid && bypass.valid &&  lrd_dep(p.bits, bypass.bits))
-      val lrs1_deps = prev_uops.map(p => p.valid && bypass.valid && lrs1_dep(p.bits, bypass.bits))
-      val lrs2_deps = prev_uops.map(p => p.valid && bypass.valid && lrs2_dep(p.bits, bypass.bits))
+      val lrd_deps  = prev_uops.map(p => p.valid && bypass.valid &&  bypass.bits.lrd_dep(p.bits))
+      val lrs1_deps = prev_uops.map(p => p.valid && bypass.valid && bypass.bits.lrs1_dep(p.bits))
+      val lrs2_deps = prev_uops.map(p => p.valid && bypass.valid && bypass.bits.lrs2_dep(p.bits))
 
       val lrd_dep_oh  = PriorityEncoderOH(Cat(lrd_deps .reverse))
       val lrs1_dep_oh = PriorityEncoderOH(Cat(lrs1_deps.reverse))
