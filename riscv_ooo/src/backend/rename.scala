@@ -311,9 +311,8 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     val rn1_uops_reg = Reg(Vec.fill(p.coreWidth)(Valid(UOp(p))))
     dontTouch(rn1_uops_reg)
 
-    val dec_alloc_reqs = io.dec_uops .map(u => (u.valid && u.bits.lrd_val).asUInt).reduce(_ +& _)
-    val rn1_alloc_reqs = rn1_uops_reg.map(u => (u.valid && u.bits.lrd_val).asUInt).reduce(_ +& _)
-    io.dec_ready := free_list.io.count > (dec_alloc_reqs +& rn1_alloc_reqs)
+    // TODO: proper backpressure
+    io.dec_ready := free_list.io.count >= (2*p.coreWidth).U
 
     // ------------------------------------------------------------------------
     // Rename 0

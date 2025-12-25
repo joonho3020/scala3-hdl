@@ -96,6 +96,7 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
         rob_entries(row)(bank).valid := req.valid
         rob_entries(row)(bank).done  := false.B
         rob_entries(row)(bank).uop   := req.bits
+        rob_entries(row)(bank).uop.rob_idx   := rob_idx
       }
     }
 

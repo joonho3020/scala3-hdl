@@ -126,15 +126,13 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val dec_stall = WireInit(false.B)
     val dec_uops = Reg(Vec.fill(coreWidth)(Valid(UOp(p))))
 
-    decoder.io.deq.zip(dec_uops).foreach((d, u) => {
-      when(!dec_stall) {
-        u.bits := d.bits
+    for (i <- 0 until coreWidth) {
+      decoder.io.deq(i).ready := !dec_stall
+      when (!dec_stall) {
+        dec_uops(i).valid := decoder.io.deq(i).valid
+        dec_uops(i).bits  := decoder.io.deq(i).bits
       }
-      u.valid := d.valid && !dec_stall
-      d.ready := !dec_stall
-    })
-
-    renamer.io.dec_uops := dec_uops
+    }
 
     when (!renamer.io.dec_ready) {
       dec_stall := true.B
@@ -151,6 +149,10 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val dis_uops = Reg(Vec.fill(coreWidth)(Valid(UOp(p))))
     val dis_uops_wire = Wire(Vec.fill(coreWidth)(Valid(UOp(p))))
 
+    for (i <- 0 until coreWidth) {
+      renamer.io.dec_uops(i).valid := dec_uops(i).valid && !dec_stall
+      renamer.io.dec_uops(i).bits  := dec_uops(i).bits
+    }
     renamer.io.dis_stall := dis_stall
 
     dis_stall := rob.io.full || !issue_queue.io.dis_ready
@@ -162,9 +164,10 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     dis_uops_wire <> dis_uops
 
-    rob.io.dispatch_req := dis_uops_wire
-
     for (i <- 0 until coreWidth) {
+      rob.io.dispatch_req(i).valid := dis_uops_wire(i).valid && !dis_stall
+      rob.io.dispatch_req(i).bits  := dis_uops_wire(i).bits
+
       issue_queue.io.dis_uops(i).valid := dis_uops_wire(i).valid && !dis_stall
       issue_queue.io.dis_uops(i).bits := dis_uops_wire(i).bits
       issue_queue.io.dis_uops(i).bits.rob_idx := rob.io.dispatch_rob_idxs(i)
