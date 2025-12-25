@@ -274,7 +274,7 @@ class BusyTable(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
 
 case class RenamerIO(
   dec_uops: Vec[Valid[UOp]],
-  dec_ready: Bool,
+  free_count: UInt,
 
   dis_stall: Bool,
 
@@ -290,7 +290,7 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
 
   val io = IO(RenamerIO(
     dec_uops  = Input(Vec.fill(p.coreWidth)(Valid(UOp(p)))),
-    dec_ready = Output(Bool()),
+    free_count = Output(UInt(p.pRegIdxBits.W)),
 
     dis_stall = Input(Bool()),
 
@@ -311,8 +311,7 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     val rn1_uops_reg = Reg(Vec.fill(p.coreWidth)(Valid(UOp(p))))
     dontTouch(rn1_uops_reg)
 
-    // TODO: proper backpressure
-    io.dec_ready := free_list.io.count >= (2*p.coreWidth).U
+    io.free_count := free_list.io.count
 
     // ------------------------------------------------------------------------
     // Rename 0
@@ -328,7 +327,7 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
       val dec = io.dec_uops(i).bits
       when (!io.dis_stall) {
         rn1_uops_reg(i) := io.dec_uops(i)
-        rn1_uops_reg(i).valid := io.dec_uops(i).valid && io.dec_ready
+// rn1_uops_reg(i).valid := io.dec_uops(i).valid
         rn1_uops_reg(i).bits.stale_prd := map_table.io.dec_resp(i).stale_prd
         rn1_uops_reg(i).bits.prs1      := map_table.io.dec_resp(i).prs1
         rn1_uops_reg(i).bits.prs2      := map_table.io.dec_resp(i).prs2
@@ -422,10 +421,6 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     busy_table.io.comm_prds <> io.comm_free_phys
     free_list.io.comm_prds  <> io.comm_free_phys
 
-    dontTouch(io.dec_uops)
-    dontTouch(io.dec_ready)
-    dontTouch(io.rn2_uops)
-
     val debug_bypass_rs1_val = Wire(Vec.fill(p.coreWidth)(Bool()))
     val debug_bypass_rs2_val = Wire(Vec.fill(p.coreWidth)(Bool()))
     val debug_bypass_rd_val  = Wire(Vec.fill(p.coreWidth)(Bool()))
@@ -434,8 +429,11 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     debug_bypass_rs2_val.zip(rn1_uops_bypass).foreach((d, u) => d := u.valid && u.bits.lrs2_val)
     debug_bypass_rd_val .zip(rn1_uops_bypass).foreach((d, u) => d := u.valid && u.bits.lrd_val)
 
+
+    dontTouch(io.dec_uops)
+    dontTouch(io.rn2_uops)
+
     dontTouch(debug_bypass_rs1_val)
     dontTouch(debug_bypass_rs2_val)
     dontTouch(debug_bypass_rd_val)
-
   }

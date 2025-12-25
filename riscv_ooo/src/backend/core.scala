@@ -106,89 +106,55 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val imm_gens = (0 until issueWidth).map(_ => Module(new ImmGen(XLEN)))
     val alus     = (0 until issueWidth).map(_ => Module(new ALU(ALUParams(XLEN))))
 
-    val wb_uops = Reg(Vec.fill(issueWidth)(Valid(UOp(p))))
+    val wb_uops = Wire(Vec.fill(issueWidth)(Valid(UOp(p))))
 
     // -----------------------------------------------------------------------
     // Decode
     // -----------------------------------------------------------------------
-    val fb_stall = WireInit(false.B)
-
     val decoder = Module(new Decoder(p))
-    decoder.io.enq.zip(io.fetch_uops).foreach((d, f) => {
-      d.valid := f.valid && !fb_stall
-      d.bits  := f.bits
-      f.ready := d.ready && !fb_stall
-    })
+    decoder.io.enq.zip(io.fetch_uops).foreach((d, f) => d <> f)
 
     // -----------------------------------------------------------------------
     // Rename 0 & 1
     // -----------------------------------------------------------------------
     val dec_stall = WireInit(false.B)
-    val dec_uops = Reg(Vec.fill(coreWidth)(Valid(UOp(p))))
 
     for (i <- 0 until coreWidth) {
-      decoder.io.deq(i).ready := !dec_stall
-      when (!dec_stall) {
-        dec_uops(i).valid := decoder.io.deq(i).valid
-        dec_uops(i).bits  := decoder.io.deq(i).bits
-      }
-    }
-
-    when (!renamer.io.dec_ready) {
-      dec_stall := true.B
-    }
-
-    when (dec_stall) {
-      fb_stall := true.B
+      val renamer_ready = !dec_stall && (i.U < renamer.io.free_count)
+      renamer.io.dec_uops(i).valid := decoder.io.deq(i).valid && renamer_ready
+      renamer.io.dec_uops(i).bits  := decoder.io.deq(i).bits
+      decoder.io.deq(i).ready := renamer_ready
     }
 
     // -----------------------------------------------------------------------
     // Dispatch (ROB & IssueQueue allocation)
     // -----------------------------------------------------------------------
     val dis_stall = Wire(Bool())
-    val dis_uops = Reg(Vec.fill(coreWidth)(Valid(UOp(p))))
-    val dis_uops_wire = Wire(Vec.fill(coreWidth)(Valid(UOp(p))))
+    val dis_uops  = Wire(Vec.fill(coreWidth)(Valid(UOp(p))))
 
     for (i <- 0 until coreWidth) {
-      renamer.io.dec_uops(i).valid := dec_uops(i).valid && !dec_stall
-      renamer.io.dec_uops(i).bits  := dec_uops(i).bits
+      dis_uops(i) := renamer.io.rn2_uops(i)
     }
-    renamer.io.dis_stall := dis_stall
 
     dis_stall := rob.io.full || !issue_queue.io.dis_ready
-    when (!dis_stall) {
-      for (i <- 0 until coreWidth) {
-        dis_uops(i) := renamer.io.rn2_uops(i)
-      }
-    }
-
-    dis_uops_wire <> dis_uops
+    renamer.io.dis_stall := dis_stall
 
     for (i <- 0 until coreWidth) {
-      rob.io.dispatch_req(i).valid := dis_uops_wire(i).valid && !dis_stall
-      rob.io.dispatch_req(i).bits  := dis_uops_wire(i).bits
+      rob.io.dispatch_req(i).valid := dis_uops(i).valid && !dis_stall
+      rob.io.dispatch_req(i).bits  := dis_uops(i).bits
 
-      issue_queue.io.dis_uops(i).valid := dis_uops_wire(i).valid && !dis_stall
-      issue_queue.io.dis_uops(i).bits := dis_uops_wire(i).bits
+      issue_queue.io.dis_uops(i).valid := dis_uops(i).valid && !dis_stall
+      issue_queue.io.dis_uops(i).bits := dis_uops(i).bits
       issue_queue.io.dis_uops(i).bits.rob_idx := rob.io.dispatch_rob_idxs(i)
-
-      val dis_uop = dis_uops_wire(i).bits
-      val lrs1_wakeup = wb_uops.map(w => w.valid && dis_uop.lrs1_dep(w.bits)).reduce(_ || _)
-      val lrs2_wakeup = wb_uops.map(w => w.valid && dis_uop.lrs2_dep(w.bits)).reduce(_ || _)
-      when (lrs1_wakeup) {
-        when (!dis_stall) {
-          issue_queue.io.dis_uops(i).bits.prs1_busy := false.B
-        } .otherwise {
-          dis_uops(i).bits.prs1_busy := false.B
-        }
-      }
-      when (lrs2_wakeup) {
-        when (!dis_stall) {
-          issue_queue.io.dis_uops(i).bits.prs2_busy := false.B
-        } .otherwise {
-          dis_uops(i).bits.prs2_busy := false.B
-        }
-      }
+// val dis_uop = dis_uops(i).bits
+// val lrs1_wakeup = wb_uops.map(w => w.valid && dis_uop.lrs1_dep(w.bits)).reduce(_ || _)
+// val lrs2_wakeup = wb_uops.map(w => w.valid && dis_uop.lrs2_dep(w.bits)).reduce(_ || _)
+// when (lrs1_wakeup) {
+// issue_queue.io.dis_uops(i).bits.prs1_busy := false.B
+// }
+// when (lrs2_wakeup) {
+// issue_queue.io.dis_uops(i).bits.prs2_busy := false.B
+// }
     }
 
     when (dis_stall) {
@@ -201,7 +167,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     // -----------------------------------------------------------------------
     // Issue & Read PRF
     // -----------------------------------------------------------------------
-    val iss_uops = Reg(Vec.fill(coreWidth)(Valid(UOp(p))))
+    val iss_uops = Wire(Vec.fill(coreWidth)(Valid(UOp(p))))
     iss_uops := di_compactor.io.deq
 
     for (i <- 0 until issueWidth) {
@@ -258,7 +224,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     // -----------------------------------------------------------------------
     // Writeback
     // -----------------------------------------------------------------------
-    val wb_data = Reg(Vec.fill(issueWidth)(UInt(XLEN.W)))
+    val wb_data = Wire(Vec.fill(issueWidth)(UInt(XLEN.W)))
 
     for (i <- 0 until issueWidth) {
       wb_uops(i) := exe_uops(i)
@@ -320,32 +286,21 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     // Reset
     // -----------------------------------------------------------------------
     when (reset.asBool) {
-      for (i <- 0 until coreWidth) {
-        dec_uops(i).valid := false.B
-        dis_uops(i).valid := false.B
-      }
       for (i <- 0 until issueWidth) {
         exe_uops(i).valid := false.B
-        wb_uops(i).valid := false.B
       }
     }
 
     io.debug_rn2_uops.map(_ := renamer.io.rn2_uops)
 
     dontTouch(dec_stall)
-    dontTouch(dec_uops)
-
     dontTouch(dis_stall)
     dontTouch(dis_uops)
-
     dontTouch(iss_uops)
-
     dontTouch(iss_uops)
     dontTouch(exe_uops)
     dontTouch(wb_uops)
     dontTouch(wb_data)
     dontTouch(comm_uops)
-
-
     dontTouch(io.redirect)
   }
