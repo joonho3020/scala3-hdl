@@ -66,22 +66,22 @@ class MapTable(p: CoreParams) extends Module with CoreCacheable(p):
       val lrs1_deps = io.rn1_update.map(p => p.valid && p.bits.lrd === req.lrs1)
       val lrs2_deps = io.rn1_update.map(p => p.valid && p.bits.lrd === req.lrs2)
 
-      val lrd_dep_oh  = PriorityEncoderOH(Cat(lrd_deps .reverse))
-      val lrs1_dep_oh = PriorityEncoderOH(Cat(lrs1_deps.reverse))
-      val lrs2_dep_oh = PriorityEncoderOH(Cat(lrs2_deps.reverse))
+      val lrd_dep_oh  = PriorityEncoderOH(Cat(lrd_deps ))
+      val lrs1_dep_oh = PriorityEncoderOH(Cat(lrs1_deps))
+      val lrs2_dep_oh = PriorityEncoderOH(Cat(lrs2_deps))
 
       io.dec_resp(i).prs1 := table(io.dec_req(i).lrs1)
       io.dec_resp(i).prs2 := table(io.dec_req(i).lrs2)
       io.dec_resp(i).stale_prd := table(io.dec_req(i).lrd)
 
       when (lrd_deps.reduce(_ || _)) {
-        io.dec_resp(i).stale_prd := MuxOneHot(lrd_dep_oh, io.rn1_update.map(_.bits.prd).toSeq)
+        io.dec_resp(i).stale_prd := MuxOneHot(lrd_dep_oh, io.rn1_update.map(_.bits.prd).reverse.toSeq)
       }
       when (lrs1_deps.reduce(_ || _)) {
-        io.dec_resp(i).prs1 := MuxOneHot(lrs1_dep_oh, io.rn1_update.map(_.bits.prd).toSeq)
+        io.dec_resp(i).prs1 := MuxOneHot(lrs1_dep_oh, io.rn1_update.map(_.bits.prd).reverse.toSeq)
       }
       when (lrs2_deps.reduce(_ || _)) {
-        io.dec_resp(i).prs2 := MuxOneHot(lrs2_dep_oh, io.rn1_update.map(_.bits.prd).toSeq)
+        io.dec_resp(i).prs2 := MuxOneHot(lrs2_dep_oh, io.rn1_update.map(_.bits.prd).reverse.toSeq)
       }
     }
 
@@ -218,12 +218,8 @@ case class BusyTableWBReq(
 case class BusyTableIO(
   rn1_req: Vec[BusyTableRN1Req],
   rn1_resp: Vec[BusyTableRN1Resp],
-
-  // Unset busy bit for prd that finished computing
   wb_req: Vec[BusyTableWBReq],
-
-  // Set busy bit for retired stale_rd
-  comm_prds: Vec[Valid[UInt]]
+  rn1_set: Vec[Valid[UInt]]
 ) extends Bundle[BusyTableIO]
 
 class BusyTable(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
@@ -240,7 +236,7 @@ class BusyTable(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
     wb_req = Input(Vec.fill(p.coreWidth)(BusyTableWBReq(
       prd = Valid(UInt(p.pRegIdxBits.W))
     ))),
-    comm_prds = Input(Vec.fill(p.retireWidth)(Valid(UInt(p.pRegIdxBits.W)))),
+    rn1_set = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.pRegIdxBits.W)))),
   ))
 
   body {
@@ -266,7 +262,7 @@ class BusyTable(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
 
     var mask = busy_table.data
     mask = busy_table.unset(mask, io.wb_req.map(_.prd.bits), io.wb_req.map(_.prd.valid))
-    mask = busy_table  .set(mask, io.comm_prds.map(_.bits), io.comm_prds.map(_.valid))
+    mask = busy_table  .set(mask, io.rn1_set.map(_.bits), io.rn1_set.map(_.valid))
     busy_table.data := mask
 
     val busy_count = PopCount(busy_table.data).asWire
@@ -346,7 +342,8 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     // - update renaming table & busy bit table
     // - bypass prd & update younger uop's stale_prd & prs1, prs2
     // ------------------------------------------------------------------------
-    val rn1_rd_wens = rn1_uops_reg.map(u => u.valid && u.bits.lrd_val)
+    val rn1_fire = !io.dis_stall
+    val rn1_rd_wens = rn1_uops_reg.map(u => rn1_fire && u.valid && u.bits.lrd_val)
 
     free_list.io.alloc_req.bits  := rn1_rd_wens.map(_.asUInt).reduce(_ +& _)
     free_list.io.alloc_req.valid := rn1_rd_wens.reduce(_ || _)
@@ -385,6 +382,9 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
 
       rn1_uops(i).bits.prs1_busy := busy_table.io.rn1_resp(i).prs1_busy
       rn1_uops(i).bits.prs2_busy := busy_table.io.rn1_resp(i).prs2_busy
+
+      busy_table.io.rn1_set(i).valid := rn1_rd_wens(i)
+      busy_table.io.rn1_set(i).bits  := rn1_uops(i).bits.prd
     }
 
     val rn1_uops_bypass = Wire(Vec.fill(p.coreWidth)(Valid(UOp(p))))
@@ -402,19 +402,19 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
       val lrs1_deps = prev_uops.map(p => p.valid && bypass.valid && bypass.bits.lrs1_dep(p.bits))
       val lrs2_deps = prev_uops.map(p => p.valid && bypass.valid && bypass.bits.lrs2_dep(p.bits))
 
-      val lrd_dep_oh  = PriorityEncoderOH(Cat(lrd_deps .reverse))
-      val lrs1_dep_oh = PriorityEncoderOH(Cat(lrs1_deps.reverse))
-      val lrs2_dep_oh = PriorityEncoderOH(Cat(lrs2_deps.reverse))
+      val lrd_dep_oh  = PriorityEncoderOH(Cat(lrd_deps ))
+      val lrs1_dep_oh = PriorityEncoderOH(Cat(lrs1_deps))
+      val lrs2_dep_oh = PriorityEncoderOH(Cat(lrs2_deps))
 
       when (lrd_deps.reduce(_ || _)) {
-        bypass.bits.stale_prd := MuxOneHot(lrd_dep_oh, prev_uops.map(_.bits.prd))
+        bypass.bits.stale_prd := MuxOneHot(lrd_dep_oh, prev_uops.map(_.bits.prd).reverse)
       }
       when (lrs1_deps.reduce(_ || _)) {
-        bypass.bits.prs1 := MuxOneHot(lrs1_dep_oh, prev_uops.map(_.bits.prd))
+        bypass.bits.prs1 := MuxOneHot(lrs1_dep_oh, prev_uops.map(_.bits.prd).reverse)
         bypass.bits.prs1_busy := true.B
       }
       when (lrs2_deps.reduce(_ || _)) {
-        bypass.bits.prs2 := MuxOneHot(lrs2_dep_oh, prev_uops.map(_.bits.prd))
+        bypass.bits.prs2 := MuxOneHot(lrs2_dep_oh, prev_uops.map(_.bits.prd).reverse)
         bypass.bits.prs2_busy := true.B
       }
     }
@@ -422,8 +422,6 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     io.rn2_uops <> rn1_uops_bypass
 
     busy_table.io.wb_req <> io.wb_wakeup
-
-    busy_table.io.comm_prds <> io.comm_free_phys
     free_list.io.comm_prds  <> io.comm_free_phys
 
     val debug_bypass_rs1_val = Wire(Vec.fill(p.coreWidth)(Bool()))
