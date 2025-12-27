@@ -6,6 +6,8 @@ case class BranchResolve(
   valid: Bool,
   tag: OneHot,
   mispredict: Bool,
+  taken: Bool,
+  target: UInt,
 ) extends Bundle[BranchResolve]
 
 object BranchResolve:
@@ -14,6 +16,8 @@ object BranchResolve:
       valid = Bool(),
       tag = OneHot(p.branchTagBits.W),
       mispredict = Bool(),
+      taken = Bool(),
+      target = UInt(p.pcBits.W),
     )
 
 case class BranchTagManagerIO(
@@ -24,7 +28,7 @@ case class BranchTagManagerIO(
   resp_mask: Vec[UInt],
   resp_tag:  Vec[OneHot],
 
-  resolve_tag: BranchResolve,
+  br_resolve: BranchResolve,
 ) extends Bundle[BranchTagManagerIO]
 
 class BranchTagManager(p: CoreParams) extends Module with CoreCacheable(p):
@@ -41,7 +45,7 @@ class BranchTagManager(p: CoreParams) extends Module with CoreCacheable(p):
     resp_mask = Output(Vec.fill(coreWidth)(UInt  (branchTagBits.W))),
     resp_tag  = Output(Vec.fill(coreWidth)(OneHot(branchTagBits.W))),
 
-    resolve_tag = Input(BranchResolve(p)),
+    br_resolve = Input(BranchResolve(p)),
   ))
 
   body {
@@ -77,12 +81,15 @@ class BranchTagManager(p: CoreParams) extends Module with CoreCacheable(p):
         next_mask_base(i) := next_mask_alloc(i-1)
         next_mask_alloc(i) := next_mask_alloc(i-1)
 
+      io.resp_mask(i) := next_mask_base(i)
+      io.resp_tag(i) := 0.U(branchTagBits.W).asOH
+
       when (io.req_valid(i) && io.req_cfi(i)) {
-        val tag_idx = PriorityEncoder(Reverse(free_tags))
+        val tag_idx = PriorityEncoder(Reverse(next_freetags_base(i)))
         val tag_oh  = UIntToOH(tag_idx)
 
-        next_mask_alloc(i) = next_mask_base(i) | tag_oh
-        next_freetags_alloc(i) = next_freetags_base(i) & ~tag_oh
+        next_mask_alloc(i)     := next_mask_base(i)     |  tag_oh
+        next_freetags_alloc(i) := next_freetags_base(i) & ~tag_oh
 
         mask_snapshots(tag_idx).valid := true.B
         mask_snapshots(tag_idx).bits  := next_mask_alloc(i)
@@ -91,33 +98,35 @@ class BranchTagManager(p: CoreParams) extends Module with CoreCacheable(p):
       }
     }
 
-    when (io.resolve_tag.valid) {
-      val tag_idx = PriorityEncoder(Reverse(io.resolve_tag.tag))
+    when (io.br_resolve.valid) {
+      val tag_idx = PriorityEncoder(Reverse(io.br_resolve.tag))
+      val snapshot_mask = mask_snapshots(tag_idx).bits
       mask_snapshots(tag_idx).valid := false.B
 
       val tags_to_return = Wire(Vec.fill(branchTagBits)(UInt(branchTagBits.W)))
+      tags_to_return.foreach(_ := 0.U)
       for (i <- 0 until branchTagBits) {
-        val mask_hit = mask_snapshots(i).valid && ((mask_snapshots(i).bits & io.resolve_tag.tag.asUInt) =/= 0.U)
+        val mask_hit = mask_snapshots(i).valid && ((mask_snapshots(i).bits & io.br_resolve.tag) =/= 0.U)
         when (mask_hit) {
-          mask_snapshots(i).bits := mask_snapshots(i).bits & ~io.resolve_tag.tag
-          when (io.resolve_tag.mispredict) {
+          mask_snapshots(i).bits := mask_snapshots(i).bits & ~io.br_resolve.tag
+          when (io.br_resolve.mispredict) {
             mask_snapshots(i).valid := false.B
-            tags_to_return(i) := 1.U << i
+            tags_to_return(i) := 1.U(branchTagBits.W) << i
           } .otherwise {
             tags_to_return(i) := 0.U
           }
         }
       }
 
-      when (io.resolve_tag.mispredict) {
+      when (io.br_resolve.mispredict) {
         Assert(!io.req_valid.reduce(_ || _),
           "BranchTagManager: Uops in the decode stage should be killed on a branch misprediction")
 
-        free_tags := free_tags | tags_to_return.reduce(_ | _)
-        cur_mask := mask_snapshots(tag_idx).bits & ~io.resolve_tag.tag.asUInt
+        free_tags := free_tags | tags_to_return.reduce(_ | _) | io.br_resolve.tag
+        cur_mask := snapshot_mask & ~io.br_resolve.tag
       } .otherwise {
-        free_tags := next_freetags_alloc(coreWidth-1) |  io.resolve_tag.tag.asUInt
-        cur_mask  :=     next_mask_alloc(coreWidth-1) & ~io.resolve_tag.tag.asUInt
+        free_tags := next_freetags_alloc(coreWidth-1) |  io.br_resolve.tag
+        cur_mask  :=     next_mask_alloc(coreWidth-1) & ~io.br_resolve.tag
       }
     } .otherwise {
       free_tags := next_freetags_alloc(coreWidth-1)

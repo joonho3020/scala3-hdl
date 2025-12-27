@@ -47,6 +47,7 @@ object RenameResp:
 case class RenameWrite(
   lrd: UInt,
   prd: UInt,
+  rd_wen: Bool,
   is_cfi: Bool,
   brtag: OneHot,
   brmask: UInt,
@@ -57,6 +58,7 @@ object RenameWrite:
     RenameWrite(
       lrd = UInt(5.W),
       prd = UInt(p.pRegIdxBits.W),
+      rd_wen = Bool(),
       is_cfi = Bool(),
       brtag = OneHot(p.br.inFlightBranches.W),
       brmask = UInt(p.br.inFlightBranches.W),
@@ -87,9 +89,9 @@ class MapTable(p: CoreParams) extends Module with CoreCacheable(p):
     for (i <- 0 until p.coreWidth) {
       val req = io.dec_req(i)
 
-      val lrd_deps  = io.rn1_update.map(p => p.valid && p.bits.lrd === req.lrd)
-      val lrs1_deps = io.rn1_update.map(p => p.valid && p.bits.lrd === req.lrs1)
-      val lrs2_deps = io.rn1_update.map(p => p.valid && p.bits.lrd === req.lrs2)
+      val lrd_deps  = io.rn1_update.map(p => p.valid && p.bits.rd_wen && p.bits.lrd === req.lrd)
+      val lrs1_deps = io.rn1_update.map(p => p.valid && p.bits.rd_wen && p.bits.lrd === req.lrs1)
+      val lrs2_deps = io.rn1_update.map(p => p.valid && p.bits.rd_wen && p.bits.lrd === req.lrs2)
 
       val lrd_dep_oh  = PriorityEncoderOH(Cat(lrd_deps ))
       val lrs1_dep_oh = PriorityEncoderOH(Cat(lrs1_deps))
@@ -113,21 +115,20 @@ class MapTable(p: CoreParams) extends Module with CoreCacheable(p):
     val next_table = Wire(Vec.fill(p.coreWidth)(Vec.fill(32)(0.U(p.pRegIdxBits.W))))
     for (i <- 0 until p.coreWidth) {
       if i == 0 then
-        next_table(i) := table(i)
+        next_table(i) := table
       else
         next_table(i) := next_table(i-1)
     }
 
     for (i <- 0 until p.coreWidth) {
-      when (io.rn1_update(i).valid) {
+      when (io.rn1_update(i).valid && io.rn1_update(i).bits.rd_wen) {
         next_table(i)(io.rn1_update(i).bits.lrd) := io.rn1_update(i).bits.prd
-
-        when (io.rn1_update(i).bits.is_cfi) {
-          val tag_idx = PriorityEncoder(Reverse(io.rn1_update(i).bits.brtag))
-          snapshots(tag_idx).valid := true.B
-          snapshots(tag_idx).brmask := io.rn1_update(i).bits.brmask
-          snapshots(tag_idx).table := next_table(i)
-        }
+      }
+      when (io.rn1_update(i).valid && io.rn1_update(i).bits.is_cfi) {
+        val tag_idx = PriorityEncoder(Reverse(io.rn1_update(i).bits.brtag))
+        snapshots(tag_idx).valid := true.B
+        snapshots(tag_idx).table := next_table(i)
+        Assert(!snapshots(tag_idx).valid, "MapTable: Using a valid snapshot table")
       }
     }
 
@@ -137,7 +138,7 @@ class MapTable(p: CoreParams) extends Module with CoreCacheable(p):
       val tag_idx = PriorityEncoder(Reverse(io.resolve_tag.tag))
       snapshots(tag_idx).valid := false.B
       when (io.resolve_tag.mispredict) {
-        table := snapshots(tag_idx)
+        table := snapshots(tag_idx).table
         Assert(!io.rn1_update.map(_.valid).reduce(_ || _),
           "MapTable: Uops in the rename stage should be killed on a branch misprediction")
       }
@@ -148,7 +149,7 @@ class MapTable(p: CoreParams) extends Module with CoreCacheable(p):
       for (i <- 0 until 32) {
         table(i) := i.U
       }
+      snapshots.foreach(_.valid := false.B)
     }
     dontTouch(io)
   }
-

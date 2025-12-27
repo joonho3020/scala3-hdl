@@ -178,15 +178,15 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
     when (io.branch_update.valid && io.branch_update.mispred) {
       for (c <- 0 until coreWidth) {
         for (r <- 0 until numRows) {
-          when (brupdate_b2_rob_clr_oh(r) ||
-                (brupdate_b2_rob_row_oh(r) && brupdate_b2_rob_bank_clr_oh(c))
+          when (brupdate_b2_rob_clr_oh(r).asBool ||
+                (brupdate_b2_rob_row_oh(r).asBool && brupdate_b2_rob_bank_clr_oh(c).asBool)
           ) {
             rob_entries(r)(c).valid := false.B
             rob_entries(r)(c).done  := false.B
           }
         }
       }
-      rob_tail := idx_offset(io.mispredict_rob_idx, 1)
+      rob_tail := idx_offset(io.branch_update.rob_idx, 1)
     }
 
     //////////////////////////////////////////////////////////////////////////

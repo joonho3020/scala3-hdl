@@ -12,7 +12,8 @@ case class RenamerIO(
 
   wb_wakeup: Vec[BusyTableWBReq],
 
-  comm_free_phys: Vec[Valid[UInt]]
+  comm_free_phys: Vec[Valid[UInt]],
+  br_resolve: BranchResolve
 ) extends Bundle[RenamerIO]
 
 class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
@@ -31,6 +32,7 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     ))),
 
     comm_free_phys = Input(Vec.fill(p.retireWidth)(Valid(UInt(p.pRegIdxBits.W)))),
+    br_resolve = Input(BranchResolve(p)),
   ))
 
   body {
@@ -43,7 +45,7 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
 
     // TODO: too pessimistic???
     val fc = free_list.io.count
-    val uc = rn1_uops_reg.map(_.valid.asUInt).reduce(_ + _)
+    val uc = rn1_uops_reg.map(u => (u.valid && u.bits.lrd_val).asUInt).reduce(_ + _)
     io.free_count := Mux(fc >= (uc + p.coreWidth.U), fc - uc - p.coreWidth.U, 0.U)
 
     // ------------------------------------------------------------------------
@@ -56,14 +58,19 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
       map_table.io.dec_req(i).lrd  := io.dec_uops(i).bits.lrd
     }
 
+    val kill_rename = io.br_resolve.valid && io.br_resolve.mispredict
+    val rn1_fire = !io.dis_stall && !kill_rename
     for (i <- 0 until p.coreWidth) {
       val dec = io.dec_uops(i).bits
-      when (!io.dis_stall) {
+      when (!io.dis_stall && !kill_rename) {
         rn1_uops_reg(i) := io.dec_uops(i)
         rn1_uops_reg(i).bits.stale_prd := map_table.io.dec_resp(i).stale_prd
         rn1_uops_reg(i).bits.prs1      := map_table.io.dec_resp(i).prs1
         rn1_uops_reg(i).bits.prs2      := map_table.io.dec_resp(i).prs2
         rn1_uops_reg(i).bits.prd       := 0.U
+      }
+      when (kill_rename) {
+        rn1_uops_reg(i).valid := false.B
       }
     }
 
@@ -73,16 +80,11 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     // - update renaming table & busy bit table
     // - bypass prd & update younger uop's stale_prd & prs1, prs2
     // ------------------------------------------------------------------------
-    val rn1_fire = !io.dis_stall
     val rn1_rd_wens = rn1_uops_reg.map(u => rn1_fire && u.valid && u.bits.lrd_val)
 
-    free_list.io.alloc_req.bits  := rn1_rd_wens.map(_.asUInt).reduce(_ +& _)
-    free_list.io.alloc_req.valid := rn1_rd_wens.reduce(_ || _)
-
-    val alloc_offsets = Wire(Vec.fill(p.coreWidth)(UInt(log2Ceil(p.coreWidth + 1).W)))
-    alloc_offsets(0) := 0.U
-    for (i <- 1 until p.coreWidth) {
-      alloc_offsets(i) := alloc_offsets(i - 1) + rn1_rd_wens(i - 1).asUInt
+    for (i <- 0 until p.coreWidth) {
+      free_list.io.alloc_reqs(i).valid := rn1_fire && rn1_uops_reg(i).valid
+      free_list.io.alloc_reqs(i).bits := rn1_uops_reg(i).bits
     }
 
     val rn1_uops = Wire(Vec.fill(p.coreWidth)(Valid(UOp(p))))
@@ -91,14 +93,18 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
 
     for (i <- 0 until p.coreWidth) {
       when (rn1_rd_wens(i)) {
-        rn1_uops(i).bits.prd := free_list.io.alloc_resp(alloc_offsets(i))
+        rn1_uops(i).bits.prd := free_list.io.alloc_resp(i)
       }
     }
 
     for (i <- 0 until p.coreWidth) {
-      map_table.io.rn1_update(i).valid := rn1_rd_wens(i)
+      map_table.io.rn1_update(i).valid := rn1_fire && rn1_uops(i).valid
       map_table.io.rn1_update(i).bits.lrd := rn1_uops(i).bits.lrd
       map_table.io.rn1_update(i).bits.prd := rn1_uops(i).bits.prd
+      map_table.io.rn1_update(i).bits.rd_wen := rn1_uops(i).bits.ctrl.rd_wen
+      map_table.io.rn1_update(i).bits.is_cfi := rn1_uops(i).bits.ctrl.is_cfi
+      map_table.io.rn1_update(i).bits.brtag := rn1_uops(i).bits.br_tag
+      map_table.io.rn1_update(i).bits.brmask := rn1_uops(i).bits.br_mask
     }
 
     val rn1_use_rs1 = rn1_uops_reg.map(u => u.valid && u.bits.lrs1_val)
@@ -154,6 +160,8 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
 
     busy_table.io.wb_req <> io.wb_wakeup
     free_list.io.comm_prds  <> io.comm_free_phys
+    free_list.io.resolve_tag := io.br_resolve
+    map_table.io.resolve_tag := io.br_resolve
 
     val debug_bypass_rs1_val = Wire(Vec.fill(p.coreWidth)(Bool()))
     val debug_bypass_rs2_val = Wire(Vec.fill(p.coreWidth)(Bool()))

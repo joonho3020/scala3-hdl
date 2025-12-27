@@ -22,8 +22,8 @@ case class UOp(
 
   rob_idx: UInt,
 
-  branch_tag:  OneHot,
-  branch_mask: UInt,
+  br_tag:  OneHot,
+  br_mask: UInt,
 
   taken: Bool,
   next_pc: Valid[UInt],
@@ -75,8 +75,8 @@ object UOp:
 
       rob_idx = UInt(p.robIdxBits.W),
 
-      branch_tag  = OneHot(p.branchTagBits.W),
-      branch_mask = UInt(p.branchTagBits.W),
+      br_tag  = OneHot(p.branchTagBits.W),
+      br_mask = UInt(p.branchTagBits.W),
 
       taken  = Bool(),
       next_pc = Valid(UInt(p.pcBits.W)),

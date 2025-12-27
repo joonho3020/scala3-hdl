@@ -12,7 +12,7 @@ object FetchBufferIO:
   def apply(p: CoreParams): FetchBufferIO =
     FetchBufferIO(
       enq = Flipped(Decoupled(FetchBundle(p))),
-      deq = Vec(Seq.fill(p.coreWidth)(Decoupled(UOp(p)))),
+      deq = Vec.fill(p.coreWidth)(Decoupled(UOp(p))),
       clear = Input(Bool())
     )
 

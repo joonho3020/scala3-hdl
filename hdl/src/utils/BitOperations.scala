@@ -74,7 +74,7 @@ object MuxOneHot:
       })
 
 object UIntToOH:
-  def apply(in: UInt)(using m: Module): OneHot = (1.U << in).asOH
+  def apply(in: UInt)(using m: Module): OneHot = (1.U(1.W) << in).asOH
 
 object MaskLower:
   def apply(in: OneHot)(using m: Module): UInt =

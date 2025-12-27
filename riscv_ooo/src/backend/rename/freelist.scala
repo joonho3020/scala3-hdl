@@ -26,13 +26,15 @@ case class FreeListIO(
 ) extends Bundle[FreeListIO]
 
 // Assumes allocation requests happen only when there is enough entries
-class FreeList(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
+class FreeList(p: CoreParams) extends Module with CoreCacheable(p):
   val maxInflight = p.br.inFlightBranches
   val coreWidth = p.coreWidth
+  val branchTagBits = p.branchTagBits
+  val retireWidth = p.retireWidth
 
   val io = IO(FreeListIO(
     alloc_reqs = Input(Vec.fill(coreWidth)(Valid(UOp(p)))),
-    alloc_resp = Output(Vec.fill(p.coreWidth)(UInt(p.pRegIdxBits.W))),
+    alloc_resp = Output(Vec.fill(coreWidth)(UInt(p.pRegIdxBits.W))),
     count      = Output(UInt(p.pRegIdxBits.W)),
     resolve_tag = Input(BranchResolve(p)), 
     comm_prds  = Input(Vec.fill(p.retireWidth)(Valid(UInt(p.pRegIdxBits.W))))
@@ -49,8 +51,8 @@ class FreeList(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
 
     io.count := PopCount(freelist)
 
-    val next_freelist_base = Wire(Vec.fill(p.coreWidth)(UInt(entries.W)))
-    val next_freelist_alloc = Wire(Vec.fill(p.coreWidth)(UInt(entries.W)))
+    val next_freelist_base = Wire(Vec.fill(coreWidth)(UInt(entries.W)))
+    val next_freelist_alloc = Wire(Vec.fill(coreWidth)(UInt(entries.W)))
 
     for (i <- 0 until coreWidth) {
       if i == 0 then
@@ -61,21 +63,22 @@ class FreeList(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
         next_freelist_alloc(i) := next_freelist_alloc(i-1)
 
       val req = io.alloc_reqs(i)
+      io.alloc_resp(i) := 0.U
       when (req.valid && req.bits.ctrl.rd_wen) {
-        val next_free_idx = PriorityEncoder(Reverse(next_freelist))
+        val next_free_idx = PriorityEncoder(Reverse(next_freelist_base(i)))
         io.alloc_resp(i) := next_free_idx
         next_freelist_alloc(i) := next_freelist_base(i) & ~UIntToOH(next_free_idx)
       }
       when (req.valid && req.bits.ctrl.is_cfi) {
-        val tag_idx = PriorityEncoder(Reverse(req.bits.branch_tag))
-        snapshots(tag_idx).brmask   := req.bits.branch_mask
+        val tag_idx = PriorityEncoder(Reverse(req.bits.br_tag))
+        snapshots(tag_idx).brmask   := req.bits.br_mask
         snapshots(tag_idx).freelist := next_freelist_alloc(i)
         snapshots(tag_idx).valid    := true.B
       }
     }
 
     val next_freelist_snapshot = Wire(UInt(entries.W))
-    next_freelist_snapshot := DontCare
+    next_freelist_snapshot := next_freelist_alloc(coreWidth - 1)
 
     when (io.resolve_tag.valid) {
       val tag_idx = PriorityEncoder(Reverse(io.resolve_tag.tag))
@@ -83,7 +86,7 @@ class FreeList(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
 
       for (i <- 0 until branchTagBits) {
         val ss = snapshots(i)
-        val mask_hit = ss.valid && ((ss.brmask & io.resolve_tag.tag.asUInt) =/= 0.U)
+        val mask_hit = ss.valid && ((ss.brmask & io.resolve_tag.tag) =/= 0.U)
         when (mask_hit) {
           ss.brmask := ss.brmask & ~io.resolve_tag.tag
           when (io.resolve_tag.mispredict) {
@@ -99,12 +102,9 @@ class FreeList(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
       }
     }
 
-    var next_freelist = Mux(io.resolve_tag.mispredict && io.resolve_tag.valid,
-                            next_freelist_snapshot,
-                            next_freelist_alloc(p.coreWidth-1))
-
+    var next_freelist = next_freelist_snapshot
     for (i <- 0 until retireWidth) {
-      next_freelist = next_free_list | Mux(io.comm_prds(i).valid, UIntToOH(io.comm_prds(i).bits), 0.U)
+      next_freelist = next_freelist | Mux(io.comm_prds(i).valid, UIntToOH(io.comm_prds(i).bits).asUInt, 0.U)
     }
     freelist := next_freelist
 

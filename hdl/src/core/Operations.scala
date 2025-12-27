@@ -90,6 +90,15 @@ extension (lhs: UInt)
   inline def ^(rhs: UInt)(using inline m: Module): UInt =
     ${ OperationMacros.uint2OpMaxWidth('lhs, 'rhs, '{ IR.PrimOp.Xor }, 'm) }
 
+  inline def &(rhs: OneHot)(using inline m: Module): UInt =
+    ${ OperationMacros.uintOnehot2OpMaxWidth('lhs, 'rhs, '{ IR.PrimOp.And }, 'm) }
+
+  inline def |(rhs: OneHot)(using inline m: Module): UInt =
+    ${ OperationMacros.uintOnehot2OpMaxWidth('lhs, 'rhs, '{ IR.PrimOp.Or }, 'm) }
+
+  inline def ^(rhs: OneHot)(using inline m: Module): UInt =
+    ${ OperationMacros.uintOnehot2OpMaxWidth('lhs, 'rhs, '{ IR.PrimOp.Xor }, 'm) }
+
   inline def head(n: Int)(using inline m: Module): UInt =
     ${ OperationMacros.uint1Op1ConstFixedWidth('lhs, 'n, '{ IR.PrimOp.Head }, 'm) }
 
@@ -281,6 +290,18 @@ extension (lhs: OneHot)
   def asUInt(using m: Module): UInt =
     ModuleOps.ohToUInt(lhs, m)
 
+  inline def &(rhs: UInt)(using inline m: Module): UInt =
+    ${ OperationMacros.onehotUInt2OpMaxWidth('lhs, 'rhs, '{ IR.PrimOp.And }, 'm) }
+
+  inline def |(rhs: UInt)(using inline m: Module): UInt =
+    ${ OperationMacros.onehotUInt2OpMaxWidth('lhs, 'rhs, '{ IR.PrimOp.Or }, 'm) }
+
+  inline def ^(rhs: UInt)(using inline m: Module): UInt =
+    ${ OperationMacros.onehotUInt2OpMaxWidth('lhs, 'rhs, '{ IR.PrimOp.Xor }, 'm) }
+
+  inline def unary_~(using inline m: Module): UInt =
+    ${ OperationMacros.onehot1OpSameWidth('lhs, '{ IR.PrimOp.Not }, 'm) }
+
   inline def ===(rhs: OneHot)(using inline m: Module): Bool =
     ${ OperationMacros.onehot2OpToBool('lhs, 'rhs, '{ IR.PrimOp.Eq }, 'm) }
 
@@ -288,12 +309,10 @@ extension (lhs: OneHot)
     ${ OperationMacros.onehot2OpToBool('lhs, 'rhs, '{ IR.PrimOp.Neq }, 'm) }
 
   inline def apply(hi: Int, lo: Int)(using inline m: Module): UInt =
-    val x = lhs.asUInt
-    ${ OperationMacros.uint1Op2ConstBits('x, 'hi, 'lo, '{ IR.PrimOp.Bits }, 'm) }
+    ${ OperationMacros.onehot1Op2ConstBits('lhs, 'hi, 'lo, '{ IR.PrimOp.Bits }, 'm) }
 
   inline def apply(idx: Int)(using inline m: Module): UInt =
-    val x = lhs.asUInt
-    ${ OperationMacros.uint1Op2ConstSingleBit('x, 'idx, '{ IR.PrimOp.Bits }, 'm) }
+    ${ OperationMacros.onehot1Op2ConstSingleBit('lhs, 'idx, '{ IR.PrimOp.Bits }, 'm) }
 
 object OperationMacros:
   def uint2OpMaxWidthPlus1(lhs: Expr[UInt], rhs: Expr[UInt], op: Expr[IR.PrimOp], mod: Expr[Module])(using Quotes): Expr[UInt] =
@@ -328,6 +347,29 @@ object OperationMacros:
     '{
       val w = $lhs.getWidth.max($rhs.getWidth)
       ModuleOps.prim2Op(UInt(w), $op, $lhs, $rhs, $mod, ${Expr(nameOpt)})
+    }
+
+  def uintOnehot2OpMaxWidth(lhs: Expr[UInt], rhs: Expr[OneHot], op: Expr[IR.PrimOp], mod: Expr[Module])(using Quotes): Expr[UInt] =
+    val nameOpt = MacroUtils.findEnclosingValName
+    '{
+      val rhsU = ModuleOps.ohToUInt($rhs, $mod)
+      val w = $lhs.getWidth.max($rhs.getWidth)
+      ModuleOps.prim2Op(UInt(w), $op, $lhs, rhsU, $mod, ${Expr(nameOpt)})
+    }
+
+  def onehotUInt2OpMaxWidth(lhs: Expr[OneHot], rhs: Expr[UInt], op: Expr[IR.PrimOp], mod: Expr[Module])(using Quotes): Expr[UInt] =
+    val nameOpt = MacroUtils.findEnclosingValName
+    '{
+      val lhsU = ModuleOps.ohToUInt($lhs, $mod)
+      val w = $lhs.getWidth.max($rhs.getWidth)
+      ModuleOps.prim2Op(UInt(w), $op, lhsU, $rhs, $mod, ${Expr(nameOpt)})
+    }
+
+  def onehot1OpSameWidth(lhs: Expr[OneHot], op: Expr[IR.PrimOp], mod: Expr[Module])(using Quotes): Expr[UInt] =
+    val nameOpt = MacroUtils.findEnclosingValName
+    '{
+      val x = ModuleOps.ohToUInt($lhs, $mod)
+      ModuleOps.prim1Op(UInt($lhs.getWidth), $op, x, $mod, ${Expr(nameOpt)})
     }
 
   def uint2OpToBool(lhs: Expr[UInt], rhs: Expr[UInt], op: Expr[IR.PrimOp], mod: Expr[Module])(using Quotes): Expr[Bool] =
@@ -572,6 +614,21 @@ object OperationMacros:
     val nameOpt = MacroUtils.findEnclosingValName
     '{
       ModuleOps.prim2Op(Bool(), $op, $lhs, $rhs, $mod, ${Expr(nameOpt)})
+    }
+
+  def onehot1Op2ConstBits(lhs: Expr[OneHot], hi: Expr[Int], lo: Expr[Int], op: Expr[IR.PrimOp], mod: Expr[Module])(using Quotes): Expr[UInt] =
+    val nameOpt = MacroUtils.findEnclosingValName
+    '{
+      val x = ModuleOps.ohToUInt($lhs, $mod)
+      val w = Width($hi - $lo + 1)
+      ModuleOps.prim1Op2Const(UInt(w), $op, x, $hi, $lo, $mod, ${Expr(nameOpt)})
+    }
+
+  def onehot1Op2ConstSingleBit(lhs: Expr[OneHot], idx: Expr[Int], op: Expr[IR.PrimOp], mod: Expr[Module])(using Quotes): Expr[UInt] =
+    val nameOpt = MacroUtils.findEnclosingValName
+    '{
+      val x = ModuleOps.ohToUInt($lhs, $mod)
+      ModuleOps.prim1Op2Const(UInt(Width(1)), $op, x, $idx, $idx, $mod, ${Expr(nameOpt)})
     }
 
   def asWireImpl[T <: HWData: Type](t: Expr[T], mod: Expr[Module])(using Quotes): Expr[T] =

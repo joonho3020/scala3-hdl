@@ -2,25 +2,6 @@ package riscv_ooo
 
 import hdl._
 
-object BitMask:
-  def unset(input: UInt, indices: Vec[UInt], valid: Vec[Bool])(using m: Module): UInt =
-    val mask = valid.zip(indices).map((v, idx) => {
-      Mux(v, 1.U << idx, 0.U)
-    }).reduce(_ | _)
-    val ret = Wire(UInt(n.W))
-    ret := input & ~mask
-    ret
-
-  def set(input: UInt, indices: Vec[UInt], valid: Vec[Bool])(using m: Module): UInt =
-    val mask = valid.zip(indices).map((v, idx) => {
-      Mux(v, 1.U << idx, 0.U)
-    }).reduce(_ | _)
-
-    val ret = Wire(UInt(n.W))
-    ret := input | mask
-    ret
-
-
 abstract class BitMaskModule extends Module:
   given Module = this
 
@@ -60,3 +41,18 @@ abstract class BitMaskModule extends Module:
       }
       ret
 
+    def unset(input: UInt, indices: Vec[UInt], valid: Vec[Bool]): UInt =
+      val mask = valid.zip(indices).map((v, idx) => {
+        Mux(v, 1.U << idx, 0.U)
+      }).reduce(_ | _)
+      val ret = Wire(UInt(n.W))
+      ret := input & ~mask
+      ret
+
+    def set(input: UInt, indices: Vec[UInt], valid: Vec[Bool]): UInt =
+      val mask = valid.zip(indices).map((v, idx) => {
+        Mux(v, 1.U << idx, 0.U)
+      }).reduce(_ | _)
+      val ret = Wire(UInt(n.W))
+      ret := input | mask
+      ret

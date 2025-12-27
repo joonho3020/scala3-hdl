@@ -19,8 +19,7 @@ case class IssueQueueIO(
   dis_ready: Bool,
   wakeup_idx: Vec[Valid[UInt]],
   issue_uops: Vec[Valid[UOp]],
-  mispredict: Valid[OneHot],
-  resolve_tag: Valid[OneHot]
+  br_resolve: BranchResolve
 ) extends Bundle[IssueQueueIO]
 
 class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
@@ -34,8 +33,7 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
     dis_ready   = Output(Bool()),
     wakeup_idx  = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.pRegIdxBits.W)))),
     issue_uops  = Output(Vec.fill(issueWidth)(Valid(UOp(p)))),
-    mispredict  = Input(Valid(OneHot(p.branchTagBits.W))),
-    resolve_tag = Input(Valid(OneHot(p.branchTagBits.W)))
+    br_resolve  = Input(BranchResolve(p))
   ))
 
   body {
@@ -64,25 +62,22 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
       }
     }
 
-    // -------------------------------------------------------------------------
-    // Kill Logic (on misprediction)
-    // -------------------------------------------------------------------------
-    when (io.mispredict.valid) {
-      for (e <- entries) {
-        when (e.valid && (e.uop.branch_mask & io.mispredict.bits.asUInt) =/= 0.U) {
-          e.valid := false.B
-        }
+    when (io.br_resolve.valid) {
+      // Kill Logic (on misprediction)
+      when (io.br_resolve.mispredict) {
+        entries.foreach(e => {
+          when (e.valid && (e.uop.br_mask & io.br_resolve.tag) =/= 0.U) {
+            e.valid := false.B
+          }
+        })
       }
-    }
-
-    // -------------------------------------------------------------------------
-    // Clear resolved branch tag from masks
-    // -------------------------------------------------------------------------
-    when (io.resolve_tag.valid && !io.mispredict.valid) {
-      for (e <- entries) {
-        when (e.valid) {
-          e.uop.branch_mask := e.uop.branch_mask & ~io.resolve_tag.bits.asUInt
-        }
+      // Clear resolved branch tag from masks
+      .otherwise {
+        entries.foreach(e => {
+          when (e.valid) {
+            e.uop.br_mask := e.uop.br_mask & ~io.br_resolve.tag
+          }
+        })
       }
     }
 

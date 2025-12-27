@@ -71,6 +71,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
   body {
     val bpu_pred_count = WireInit(0.U(p.xlenBits.W))
     val bpu_hit_count = WireInit(0.U(p.xlenBits.W))
+    val kill_on_mispred = Wire(Bool())
 
     io.redirect.valid := false.B
     io.redirect.target := 0.U
@@ -118,30 +119,21 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     // -----------------------------------------------------------------------
     // Branch Tag Allocation (between decode and rename)
     // -----------------------------------------------------------------------
-    val dec_has_cfi = decoder.io.deq.map(d => d.valid && d.bits.ctrl.is_cfi).reduce(_ || _)
-    val br_tag_stall = dec_has_cfi && !br_tag_mgr.io.alloc_resp.valid
-
-    br_tag_mgr.io.alloc_req := dec_has_cfi && !br_tag_stall
+    val dec_cfi_mask = decoder.io.deq.map(d => d.valid && d.bits.ctrl.is_cfi)
+    val dec_cfi_cnt = dec_cfi_mask.map(_.asUInt).reduce(_ +& _)
+    val br_tag_stall = dec_cfi_cnt > br_tag_mgr.io.count
 
     val dec_uops_with_branch = Wire(Vec.fill(coreWidth)(Valid(UOp(p))))
 
-    val first_cfi_idx = PriorityEncoder(Cat(decoder.io.deq.map(d => d.valid && d.bits.ctrl.is_cfi).reverse))
-    val current_branch_mask = br_tag_mgr.io.current_mask
-
     for (i <- 0 until coreWidth) {
+      val req_valid = decoder.io.deq(i).valid && !br_tag_stall && !kill_on_mispred
+      br_tag_mgr.io.req_valid(i) := req_valid
+      br_tag_mgr.io.req_cfi(i) := req_valid && decoder.io.deq(i).bits.ctrl.is_cfi
+
       dec_uops_with_branch(i).valid := decoder.io.deq(i).valid
       dec_uops_with_branch(i).bits := decoder.io.deq(i).bits
-
-      val is_cfi = decoder.io.deq(i).bits.ctrl.is_cfi
-      val is_first_cfi = is_cfi && (i.U === first_cfi_idx)
-
-      dec_uops_with_branch(i).bits.branch_tag := Mux(is_first_cfi, br_tag_mgr.io.alloc_resp.bits, 0.U)
-
-      val mask_before_this_cfi = current_branch_mask
-      val mask_after_this_cfi = current_branch_mask | br_tag_mgr.io.alloc_resp.bits
-
-      dec_uops_with_branch(i).bits.branch_mask := Mux(i.U >= first_cfi_idx && dec_has_cfi,
-        mask_after_this_cfi, mask_before_this_cfi)
+      dec_uops_with_branch(i).bits.br_tag := br_tag_mgr.io.resp_tag(i)
+      dec_uops_with_branch(i).bits.br_mask := br_tag_mgr.io.resp_mask(i)
     }
 
     // -----------------------------------------------------------------------
@@ -150,18 +142,11 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val dec_stall = WireInit(false.B)
 
     for (i <- 0 until coreWidth) {
-      val renamer_ready = !dec_stall && !br_tag_stall && (i.U < renamer.io.free_count)
+      val renamer_ready = !dec_stall && !br_tag_stall && !kill_on_mispred && (i.U < renamer.io.free_count)
       renamer.io.dec_uops(i).valid := dec_uops_with_branch(i).valid && renamer_ready
       renamer.io.dec_uops(i).bits  := dec_uops_with_branch(i).bits
       decoder.io.deq(i).ready := renamer_ready
     }
-
-    val first_cfi_uop_idx = PriorityEncoder(Cat(renamer.io.dec_uops.map(u => u.valid && u.bits.ctrl.is_cfi).reverse))
-    val take_snapshot = renamer.io.dec_uops.map(u => u.valid && u.bits.ctrl.is_cfi).reduce(_ || _) && !br_tag_stall
-
-    renamer.io.branch_mask := current_branch_mask
-    renamer.io.take_snapshot.valid := take_snapshot
-    renamer.io.take_snapshot.bits := br_tag_mgr.io.alloc_resp.bits
 
     // -----------------------------------------------------------------------
     // Dispatch (ROB & IssueQueue allocation)
@@ -211,7 +196,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val exe_rs2_data = (0 until issueWidth).map(i => prf.io.read_ports(i * 2 + 1).data)
 
     for (i <- 0 until issueWidth) {
-      exe_uops(i) := iss_uops(i)
+      exe_uops(i).valid := iss_uops(i).valid && !kill_on_mispred
+      exe_uops(i).bits := iss_uops(i).bits
 
       val uop = exe_uops(i).bits
       val ctrl = uop.ctrl
@@ -249,6 +235,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val exe_cfi_valid = exe_is_cfi.reduce(_ || _)
     val exe_cfi_idx = PriorityEncoder(Cat(exe_is_cfi.reverse))
     val cfi_uop = exe_uops(exe_cfi_idx)
+    val exe_cfi_cnt = exe_is_cfi.map(_.asUInt).reduce(_ +& _)
+    Assert(exe_cfi_cnt <= 1.U, s"Cannot issue more than one CFI, got ${exe_cfi_cnt}")
 
     val cfi_cmp_out = MuxOneHot(PriorityEncoderOH(Cat(exe_is_cfi.reverse)), alus.map(_.io.cmp_out).toSeq)
     val cfi_imm = MuxOneHot(PriorityEncoderOH(Cat(exe_is_cfi.reverse)), imm_gens.map(_.io.out).toSeq)
@@ -257,37 +245,40 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val branch_taken = cfi_uop.bits.ctrl.br && cfi_cmp_out
     val jump_taken = cfi_uop.bits.ctrl.jal || cfi_uop.bits.ctrl.jalr
 
-    val branch_target = (cfi_uop.bits.pc.asSInt + cfi_imm.asSInt).asUInt
-    val jump_target = cfi_alu_out
-    val cfi_target = Mux(cfi_uop.bits.ctrl.br, branch_target, jump_target)
+    val branch_target = cfi_uop.bits.pc + cfi_imm(p.pcBits-1, 0)
+    val jump_target = cfi_alu_out(p.pcBits-1, 0)
+    val cfi_target = Mux(cfi_uop.bits.ctrl.br, branch_target, jump_target)(p.pcBits-1, 0)
     val cfi_taken = branch_taken || jump_taken
 
-    val wrong_target = cfi_uop.bits.next_pc.bits =/= cfi_target(p.pcBits - 1, 0)
-    val mispred_taken = cfi_taken && (wrong_target || !cfi_uop.bits.next_pc.valid)
-    val mispred_not_taken = cfi_uop.bits.ctrl.br && !cfi_taken && cfi_uop.bits.next_pc.valid
-    val has_mispred = exe_cfi_valid && (mispred_taken || mispred_not_taken)
+    val wrong_next_pc = (cfi_uop.bits.next_pc.bits =/= cfi_target).asWire
+    val mispred_taken = (cfi_taken && (wrong_next_pc || !cfi_uop.bits.next_pc.valid)).asWire
+    val mispred_not_taken = (cfi_uop.bits.ctrl.br && !cfi_taken && cfi_uop.bits.next_pc.valid).asWire
+    val has_mispred = (exe_cfi_valid && (mispred_taken || mispred_not_taken)).asWire
 
-    val resolve_target = Mux(mispred_not_taken, cfi_uop.bits.pc + p.instBytes.U, cfi_target(p.pcBits - 1, 0))
+    dontTouch(wrong_next_pc)
+    dontTouch(mispred_taken)
+    dontTouch(mispred_not_taken)
+    dontTouch(has_mispred)
 
+    val resolve_target = Mux(mispred_not_taken, cfi_uop.bits.pc + p.instBytes.U, cfi_target)
     val resolve_info = Wire(BranchResolve(p))
-    resolve_info.tag := cfi_uop.bits.branch_tag
+    resolve_info.valid := exe_cfi_valid
+    resolve_info.tag := cfi_uop.bits.br_tag
     resolve_info.mispredict := has_mispred
     resolve_info.taken := cfi_taken
     resolve_info.target := resolve_target
 
-    br_tag_mgr.io.resolve.valid := exe_cfi_valid
-    br_tag_mgr.io.resolve.bits := resolve_info
+    dontTouch(resolve_info)
 
-    val mispredict_tag = br_tag_mgr.io.mispredict
+    br_tag_mgr.io.br_resolve  := resolve_info
+    renamer.io.br_resolve     := resolve_info
+    issue_queue.io.br_resolve := resolve_info
 
-    renamer.io.mispredict := mispredict_tag
+    rob.io.branch_update.valid   := resolve_info.valid
+    rob.io.branch_update.mispred := resolve_info.mispredict
+    rob.io.branch_update.rob_idx := cfi_uop.bits.rob_idx
 
-    issue_queue.io.mispredict := mispredict_tag
-    issue_queue.io.resolve_tag.valid := exe_cfi_valid && !has_mispred
-    issue_queue.io.resolve_tag.bits := cfi_uop.bits.branch_tag
-
-    rob.io.mispredict := mispredict_tag
-    rob.io.mispredict_rob_idx := cfi_uop.bits.rob_idx
+    kill_on_mispred := resolve_info.valid && resolve_info.mispredict
 
     io.redirect.valid := has_mispred
     io.redirect.target := resolve_target
