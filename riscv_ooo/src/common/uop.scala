@@ -22,6 +22,9 @@ case class UOp(
 
   rob_idx: UInt,
 
+  branch_tag:  OneHot,
+  branch_mask: UInt,
+
   taken: Bool,
   next_pc: Valid[UInt],
   ctrl: CtrlSignals,
@@ -71,6 +74,9 @@ object UOp:
       prs2_busy = Bool(),
 
       rob_idx = UInt(p.robIdxBits.W),
+
+      branch_tag  = OneHot(p.branchTagBits.W),
+      branch_mask = UInt(p.branchTagBits.W),
 
       taken  = Bool(),
       next_pc = Valid(UInt(p.pcBits.W)),

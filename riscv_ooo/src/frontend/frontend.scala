@@ -64,7 +64,6 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     val bpu = Module(new BranchPredictor(p))
 
 // bpu.io.flush := io.redirect.valid
-    bpu.io.flush := false.B
     bpu.io.update := io.bpu_update
     bpu.io.req.valid := false.B
     bpu.io.req.bits.pc := 0.U(p.pcBits.W)

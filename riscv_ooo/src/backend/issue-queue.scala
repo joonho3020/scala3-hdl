@@ -19,6 +19,8 @@ case class IssueQueueIO(
   dis_ready: Bool,
   wakeup_idx: Vec[Valid[UInt]],
   issue_uops: Vec[Valid[UOp]],
+  mispredict: Valid[OneHot],
+  resolve_tag: Valid[OneHot]
 ) extends Bundle[IssueQueueIO]
 
 class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
@@ -28,10 +30,12 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
   val issueWidth = p.issueWidth
 
   val io = IO(IssueQueueIO(
-    dis_uops   = Input(Vec.fill(p.coreWidth)(Valid(UOp(p)))),
-    dis_ready  = Output(Bool()),
-    wakeup_idx = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.pRegIdxBits.W)))),
-    issue_uops = Output(Vec.fill(issueWidth)(Valid(UOp(p)))),
+    dis_uops    = Input(Vec.fill(p.coreWidth)(Valid(UOp(p)))),
+    dis_ready   = Output(Bool()),
+    wakeup_idx  = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.pRegIdxBits.W)))),
+    issue_uops  = Output(Vec.fill(issueWidth)(Valid(UOp(p)))),
+    mispredict  = Input(Valid(OneHot(p.branchTagBits.W))),
+    resolve_tag = Input(Valid(OneHot(p.branchTagBits.W)))
   ))
 
   body {
@@ -56,6 +60,28 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
           when (e.uop.prs2_busy && e.uop.prs2 === wk.bits) {
             e.uop.prs2_busy := false.B
           }
+        }
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Kill Logic (on misprediction)
+    // -------------------------------------------------------------------------
+    when (io.mispredict.valid) {
+      for (e <- entries) {
+        when (e.valid && (e.uop.branch_mask & io.mispredict.bits.asUInt) =/= 0.U) {
+          e.valid := false.B
+        }
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Clear resolved branch tag from masks
+    // -------------------------------------------------------------------------
+    when (io.resolve_tag.valid && !io.mispredict.valid) {
+      for (e <- entries) {
+        when (e.valid) {
+          e.uop.branch_mask := e.uop.branch_mask & ~io.resolve_tag.bits.asUInt
         }
       }
     }
@@ -88,20 +114,32 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
     var remaining_ready = Cat(ready_mask.reverse)
     var remaining_oldest = Cat(oldest_mask.reverse)
 
+    var cfi_issued = WireInit(false.B)
+    val is_cfi_mask = entries.map(e => e.valid && e.uop.ctrl.is_cfi)
+
     for (i <- 0 until issueWidth) {
       val candidates = Wire(UInt(numEntries.W))
       val select_from = Wire(UInt(numEntries.W))
       dontTouch(candidates)
       dontTouch(select_from)
 
-      candidates := remaining_ready & remaining_oldest
-      select_from := Mux(candidates.orR, candidates, remaining_ready)
+      val cfi_mask_bits = Cat(is_cfi_mask.reverse)
+      val non_cfi_ready = remaining_ready & ~cfi_mask_bits
+      val cfi_ready = remaining_ready & cfi_mask_bits
+
+      val effective_ready = Mux(cfi_issued, non_cfi_ready, remaining_ready)
+
+      candidates := effective_ready & remaining_oldest
+      select_from := Mux(candidates.orR, candidates, effective_ready)
 
       val grant = PriorityEncoderOH(select_from)
       issue_grants(i) := grant.asUInt
 
       val grant_idx = PriorityEncoder(grant)
       remaining_ready = remaining_ready & ~grant.asUInt
+
+      val issued_is_cfi = (grant.asUInt & cfi_mask_bits).orR
+      cfi_issued = cfi_issued || issued_is_cfi
 
       val new_oldest = (0 until numEntries).map { j =>
         val dominated = (0 until numEntries).map { k =>

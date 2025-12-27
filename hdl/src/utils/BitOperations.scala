@@ -73,6 +73,19 @@ object MuxOneHot:
         Mux(y._1, in(y._2), acc)
       })
 
+object UIntToOH:
+  def apply(in: UInt)(using m: Module): OneHot = (1.U << in).asOH
+
+object MaskLower:
+  def apply(in: OneHot)(using m: Module): UInt =
+    val width = in.requireKnownWidth("MaskLower")
+    (0 until width).map(i => in.asUInt >> i.U).reduce(_|_)
+
+object MaskUpper:
+  def apply(in: OneHot)(using m: Module): UInt =
+    val width = in.requireKnownWidth("MaskUpper")
+    (0 until width).map(i => (in.asUInt << i.U)(width-1,0)).reduce(_|_)
+
 object Splice:
   def apply(x: UInt, widths: Seq[Int])(using m: Module): Vec[UInt] =
     val inputWidth = x.requireKnownWidth("Splice")

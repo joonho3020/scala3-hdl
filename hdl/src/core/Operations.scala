@@ -287,6 +287,14 @@ extension (lhs: OneHot)
   inline def =/=(rhs: OneHot)(using inline m: Module): Bool =
     ${ OperationMacros.onehot2OpToBool('lhs, 'rhs, '{ IR.PrimOp.Neq }, 'm) }
 
+  inline def apply(hi: Int, lo: Int)(using inline m: Module): UInt =
+    val x = lhs.asUInt
+    ${ OperationMacros.uint1Op2ConstBits('x, 'hi, 'lo, '{ IR.PrimOp.Bits }, 'm) }
+
+  inline def apply(idx: Int)(using inline m: Module): UInt =
+    val x = lhs.asUInt
+    ${ OperationMacros.uint1Op2ConstSingleBit('x, 'idx, '{ IR.PrimOp.Bits }, 'm) }
+
 object OperationMacros:
   def uint2OpMaxWidthPlus1(lhs: Expr[UInt], rhs: Expr[UInt], op: Expr[IR.PrimOp], mod: Expr[Module])(using Quotes): Expr[UInt] =
     val nameOpt = MacroUtils.findEnclosingValName

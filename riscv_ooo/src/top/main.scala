@@ -46,6 +46,7 @@ def runFirtool(firFile: String): (Int, String) =
     aluPipes = 2,
     lsu = LSUParams(),
     prf = PRFParams(numEntries = 64),
+    br = BranchParams(inFlightBranches = 4)
   )
 
   val top = new Tile(p)

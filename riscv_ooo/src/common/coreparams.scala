@@ -39,6 +39,10 @@ case class IssueQueueParams(
   numEntries: Int = 8,
 ) derives StableHash
 
+case class BranchParams(
+  inFlightBranches: Int = 4,
+) derives StableHash
+
 case class CoreParams(
   debug: Boolean,
   pcBits: Int,
@@ -58,6 +62,7 @@ case class CoreParams(
   rob: ROBParams = ROBParams(),
   prf: PRFParams = PRFParams(),
   isq: IssueQueueParams = IssueQueueParams(),
+  br: BranchParams = BranchParams(),
 ) derives StableHash:
   def xlenBytes: Int = xlenBits / 8
 
@@ -97,6 +102,9 @@ case class CoreParams(
   def robRowIdxBits: Int = log2Ceil(robRows)
 
   def nPhysicalRegs: Int = prf.numEntries
+
+  def numBranchTags: Int = br.inFlightBranches
+  def branchTagBits: Int = numBranchTags
 
   // TODO: need better uarching to prevent prfReadPort count from
   // increasing linearly w.r.t the core width.

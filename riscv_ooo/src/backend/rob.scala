@@ -18,6 +18,12 @@ object ROBEntry:
       wb_data = UInt(p.xlenBits.W)
     )
 
+case class ROBBranchUpdate(
+  valid: Bool,
+  mispred: Bool,
+  rob_idx: UInt,
+) extends Bundle[ROBBranchUpdate]
+
 case class ROBIO(
   dispatch_req: Vec[Valid[UOp]],
   dispatch_rob_idxs: Vec[UInt],
@@ -28,6 +34,7 @@ case class ROBIO(
   full:  Bool,
   empty: Bool,
   valid_entries: UInt,
+  branch_update: ROBBranchUpdate,
 ) extends Bundle[ROBIO]
 
 class ROB(p: CoreParams) extends Module with CoreCacheable(p):
@@ -42,6 +49,11 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
     full = Output(Bool()),
     empty = Output(Bool()),
     valid_entries = Output(UInt(log2Ceil(p.robEntries + 1).W)),
+    branch_update = Input(ROBBranchUpdate(
+      valid = Bool(),
+      mispred = Bool(),
+      rob_idx = UInt(p.robIdxBits.W))
+    ),
   ))
 
   body {
@@ -104,6 +116,9 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
       bump_ptr(rob_tail, dispatch_cnt)
     }
 
+    // -----------------------------------------------------------------------
+    // Writeback and commit logic
+    // -----------------------------------------------------------------------
     for (i <- 0 until p.issueWidth) {
       val req = io.wb_req(i)
       val rob_idx = req.bits.rob_idx
@@ -137,7 +152,7 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
 
     val commit_fire = commit_mask.reduce(_ || _)
     val commit_cnt  = commit_mask.map(_.asUInt).reduce(_ +& _)
-    when (commit_fire) {
+    when (commit_fire && !io.branch_update.valid) {
       for (i <- 0 until p.retireWidth) {
         when (commit_mask(i)) {
           val rob_idx = idx_offset(rob_head, i)
@@ -149,6 +164,29 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
       }
 
       bump_ptr(rob_head, commit_cnt)
+    }
+
+    // -----------------------------------------------------------------------
+    // Rollback Logic (on misprediction)
+    // -----------------------------------------------------------------------
+    val brupdate_b2_rob_row = robIdxToRow(io.branch_update.rob_idx)
+    val brupdate_b2_rob_row_oh = UIntToOH(brupdate_b2_rob_row)
+    val brupdate_b2_rob_clr_oh = IsYoungerMask(brupdate_b2_rob_row, rob_head, numRows)
+    val brupdate_b2_rob_bank_idx = robIdxToBank(io.branch_update.rob_idx)
+    val brupdate_b2_rob_bank_clr_oh = ~MaskLower(UIntToOH(brupdate_b2_rob_bank_idx))
+
+    when (io.branch_update.valid && io.branch_update.mispred) {
+      for (c <- 0 until coreWidth) {
+        for (r <- 0 until numRows) {
+          when (brupdate_b2_rob_clr_oh(r) ||
+                (brupdate_b2_rob_row_oh(r) && brupdate_b2_rob_bank_clr_oh(c))
+          ) {
+            rob_entries(r)(c).valid := false.B
+            rob_entries(r)(c).done  := false.B
+          }
+        }
+      }
+      rob_tail := idx_offset(io.mispredict_rob_idx, 1)
     }
 
     //////////////////////////////////////////////////////////////////////////
