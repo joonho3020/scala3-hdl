@@ -1,5 +1,6 @@
 package hdl
 
+/** Bit pattern with don't-care support for matching UInt values. */
 final class BitPat private (
   val width: Int,
   val value: BigInt,
@@ -14,11 +15,13 @@ final class BitPat private (
     u.setLitVal(v)
     u
 
+  /** Match a UInt against this pattern. */
   def ===(that: UInt)(using m: Module): Bool =
     val maskLit = createLiteral(mask, width)
     val valueLit = createLiteral(value, width)
     (that & maskLit) === valueLit
 
+  /** Negated match against this pattern. */
   def =/=(that: UInt)(using m: Module): Bool =
     !(this === that)
 
@@ -39,6 +42,7 @@ final class BitPat private (
     (width, value, mask).hashCode()
 
 object BitPat:
+  /** Parse a pattern string using 0, 1, and ? with optional b/0b prefix. */
   def apply(pattern: String): BitPat =
     val cleaned = pattern.trim
     val stripped = if cleaned.startsWith("b") then cleaned.drop(1)
@@ -65,8 +69,10 @@ object BitPat:
 
     new BitPat(width, value, mask)
 
+  /** Create a pattern with all bits set to don't-care. */
   def dontCare(width: Int): BitPat =
     new BitPat(width, BigInt(0), BigInt(0))
 
+  /** Create a fully specified pattern with no don't-care bits. */
   def literal(value: BigInt, width: Int): BitPat =
     new BitPat(width, value, (BigInt(1) << width) - 1)

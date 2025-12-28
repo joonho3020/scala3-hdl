@@ -9,9 +9,11 @@ import scala.util.NotGiven
 import scala.quoted.*
 import scala.reflect.Selectable.reflectiveSelectable
 
+/** Classification of hardware nodes during elaboration. */
 enum NodeKind:
   case Reg, Wire, IO, PrimOp, Lit, Unset
 
+/** Base trait for all hardware values in the DSL. */
 sealed trait HWData extends Cloneable:
   var dir: Direction = Direction.Default
   def flip: Unit =
@@ -46,14 +48,17 @@ sealed trait HWData extends Cloneable:
     ret.irExpr = None
     ret
 
+/** Marker trait for aggregate hardware values such as Vec and Bundle. */
 sealed trait AggregateHWData extends HWData
 
+/** Marker trait for bit-level hardware types. */
 sealed trait Bits extends HWData:
   def requireKnownWidth(opName: String): Int =
     getWidth match
       case KnownWidth(v) => v
       case _ => throw new IllegalArgumentException(s"$opName requires known width")
 
+/** Unsigned integer hardware value. */
 sealed class UInt extends Bits:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[UInt]])
@@ -66,14 +71,17 @@ sealed class UInt extends Bits:
   override def toString(): String = s"UInt($getWidth, $dir)"
 
 object UInt:
+  /** Create a UInt with a specific width. */
   def apply(w: Width): UInt =
     var ret = new UInt
     ret.setWidth(w)
     ret
 
+  /** Create a UInt with unknown width. */
   def apply(): UInt =
     new UInt
 
+/** Signed integer hardware value. */
 sealed class SInt extends Bits:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[SInt]])
@@ -86,14 +94,17 @@ sealed class SInt extends Bits:
   override def toString(): String = s"SInt($getWidth, $dir)"
 
 object SInt:
+  /** Create a SInt with a specific width. */
   def apply(w: Width): SInt =
     var ret = new SInt
     ret.setWidth(w)
     ret
 
+  /** Create a SInt with unknown width. */
   def apply(): SInt =
     new SInt
 
+/** Single-bit boolean hardware value. */
 sealed class Bool extends HWData:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[Bool]])
@@ -108,9 +119,12 @@ sealed class Bool extends HWData:
   override def toString(): String = s"Bool($dir)"
 
 object Bool:
+  /** Create a Bool with default direction. */
   def apply(): Bool = new Bool
+  /** Alternate constructor used for Bool(). */
   def apply(u: Unit): Bool = new Bool
 
+/** Clock signal. */
 sealed class Clock extends HWData:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[Clock]])
@@ -125,8 +139,10 @@ sealed class Clock extends HWData:
   override def toString(): String = s"Clock($dir)"
 
 object Clock:
+  /** Create a Clock. */
   def apply(): Clock = new Clock
 
+/** Reset signal. */
 sealed class Reset extends HWData:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[Reset]])
@@ -141,8 +157,10 @@ sealed class Reset extends HWData:
   override def toString(): String = s"Reset($dir)"
 
 object Reset:
+  /** Create a Reset. */
   def apply(): Reset = new Reset
 
+/** One-hot encoded value. */
 sealed class OneHot extends Bits:
   def setLitVal(payload: Any): Unit =
     this.literal = Some(payload.asInstanceOf[HostTypeOf[OneHot]])
@@ -155,14 +173,17 @@ sealed class OneHot extends Bits:
   override def toString(): String = s"OneHot($getWidth, $dir)"
 
 object OneHot:
+  /** Create a OneHot with a specific width. */
   def apply(w: Width): OneHot =
     var ret = new OneHot()
     ret.setWidth(w)
     ret
 
+  /** Create a OneHot with unknown width. */
   def apply(): OneHot =
     OneHot(Width())
 
+/** Hardware enum value backed by a Scala enum. */
 class HWEnum[E <: scala.reflect.Enum](
   val enumObj: { def values: Array[E] }
 ) extends HWData with Bits:
@@ -175,6 +196,7 @@ class HWEnum[E <: scala.reflect.Enum](
   this.width = Width(log2Ceil(math.max(1, enumObj.values.length)))
 
 extension [E <: scala.reflect.Enum](payload: E)
+  /** Convert a Scala enum value to a literal HWEnum. */
   inline def EN: HWEnum[E] =
     ${ HWEnumMacros.toHWEnumImpl[E]('payload) }
 
@@ -203,19 +225,24 @@ object HWEnumMacros:
       e
     }
 
+/** Placeholder for unconnected hardware values. */
 object DontCare extends HWData:
   def setLitVal(payload: Any): Unit = ()
   def getLitVal: Any =
     throw new NoSuchElementException("DontCare does not carry a literal value")
   override def toString(): String = "DontCare"
 
+/** Hardware vector with Scala-like collection operations. */
 sealed class Vec[T <: HWData](val elems: Seq[T]) extends AggregateHWData with IterableOnce[T]:
   def iterator: Iterator[T] = elems.iterator
 
+  /** Number of elements in the vector. */
   def length: Int = elems.length
 
+  /** Index with a constant integer. */
   def apply(i: Int): T = elems(i)
 
+  /** Index with a hardware UInt, producing a dynamically selected element. */
   def apply(i: UInt)(using m: Module): T =
     val proto = elems.headOption.getOrElse(
       throw new IllegalArgumentException("Cannot index empty Vec"))
@@ -238,21 +265,27 @@ sealed class Vec[T <: HWData](val elems: Seq[T]) extends AggregateHWData with It
 
   override def toString(): String = s"Vec(${elems.mkString(",")}, $dir)"
 
+  /** Map over elements and return a new Vec. */
   def map[U <: HWData](f: T => U): Vec[U] =
     Vec(elems.map(f))
 
+  /** FlatMap over elements and return a new Vec. */
   def flatMap[U <: HWData](f: T => IterableOnce[U]): Vec[U] =
     Vec(elems.iterator.flatMap(f).toSeq)
 
+  /** Filter elements and return a new Vec. */
   def filter(p: T => Boolean): Vec[T] =
     Vec(elems.filter(p))
 
+  /** Reduce elements with a binary operator. */
   def reduce(op: (T, T) => T): T =
     elems.reduce(op)
 
+  /** Reduce elements with a binary operator and return an Option. */
   def reduceOption(op: (T, T) => T): Option[T] =
     elems.reduceOption(op)
 
+  /** Reverse element order. */
   def reverse: Vec[T] =
     Vec(elems.reverse)
 
@@ -264,10 +297,14 @@ sealed class Vec[T <: HWData](val elems: Seq[T]) extends AggregateHWData with It
   this.width = if elems.nonEmpty then elems.map(_.getWidth).reduce(_ + _) else Width()
 
 object Vec:
+  /** Create a Vec from a sequence of elements. */
   def apply[T <: HWData](elems: Seq[T]): Vec[T] = new Vec[T](elems)
+  /** Tabulate a Vec with an index-based generator. */
   def tabulate[T <: HWData](n: Int)(gen: Int => T): Vec[T] = Vec(Seq.tabulate(n)(gen))
+  /** Fill a Vec by repeating a generator. */
   def fill[T <: HWData](n: Int)(gen: => T): Vec[T] = Vec(Seq.fill(n)(gen))
 
+/** Host-side literal type for a hardware type. */
 type HostTypeOf[T] = T match
   case UInt   => BigInt
   case SInt   => BigInt
@@ -281,24 +318,28 @@ type HostTypeOf[T] = T match
     NamedTuple.Map[NamedTuple.From[T], [X] =>> HostTypeOf[X]]
 
 extension (x: Int)
+  /** Create a UInt literal from an Int. */
   def U: UInt =
     val u = UInt()
     u.setNodeKind(NodeKind.Lit)
     u.setLitVal(BigInt(x))
     u
 
+  /** Create a UInt literal from an Int with a specific width. */
   def U(width: Width): UInt =
     val u = UInt(width)
     u.setNodeKind(NodeKind.Lit)
     u.setLitVal(BigInt(x))
     u
 
+  /** Create a SInt literal from an Int. */
   def S: SInt =
     val s = SInt()
     s.setNodeKind(NodeKind.Lit)
     s.setLitVal(BigInt(x))
     s
 
+  /** Create a SInt literal from an Int with a specific width. */
   def S(width: Width): SInt =
     val s = SInt(width)
     s.setNodeKind(NodeKind.Lit)
@@ -306,6 +347,7 @@ extension (x: Int)
     s
 
 extension (x: Boolean)
+  /** Create a Bool literal from a Boolean. */
   def B: Bool =
     val b = Bool()
     b.setNodeKind(NodeKind.Lit)
@@ -317,8 +359,9 @@ type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] = (Labels,
   case (_ *: lt, _ *: et)  => FieldTypeFromTuple[lt, et, L]
   case _                   => Nothing
 
-// NOTE: Literals assume that the BundleIf is pure. That is, all fields are of HWData
-// and there is no mixing with Scala's library types such as Option, Seq, List
+/** Base trait for case-class bundles used as aggregates in the DSL.
+ *  NOTE: Literals assume that the BundleIf is pure. That is, all fields are of HWData
+ * and there is no mixing with Scala's library types such as Option, Seq, List */
 trait Bundle[T] extends Selectable with AggregateHWData { self: T =>
   type FieldToNode[X] = X match
     case _           => X
@@ -363,15 +406,18 @@ trait Bundle[T] extends Selectable with AggregateHWData { self: T =>
       case None    => throw new NoSuchElementException("Node does not carry a literal value")
 }
 
+/** Mark a value as an input. */
 object Input:
   def apply[T <: HWData](t: T): T =
     t.flip
     t
 
+/** Mark a value as an output. */
 object Output:
   def apply[T <: HWData](t: T): T =
     t
 
+/** Flip the direction of a value. */
 object Flipped:
   def apply[T <: HWData](t: T): T =
     Input(t)

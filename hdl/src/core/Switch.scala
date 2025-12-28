@@ -1,13 +1,16 @@
 package hdl
 
 extension [S, C](selector: S)
+  /** Start a switch builder for the selector. */
   inline infix def switch(inline body: SwitchBuilder[S, C] ?=> Unit)(using m: Module, c: SwitchCond[S, C]): Unit =
     given SwitchBuilder[S, C] = new SwitchBuilder(selector, summon[Module])
     body
 
+/** Add a case to the current switch builder. */
 def is[S, C](value: C)(block: => Unit)(using builder: SwitchBuilder[S, C]): Unit =
   builder.addCase(value)(block)
 
+/** Add a default case to the current switch builder. */
 def default(block: => Unit)(using builder: SwitchBuilder[?, ?]): Unit =
   builder.addDefault(block)
 

@@ -1,20 +1,24 @@
 package hdl
 
+/** Handle for an SRAM read port. */
 final class SRAMReadPortHandle[T <: HWData](
   val enable: Bool,
   val address: UInt,
   val data: T
 )(using Module):
+  /** Read from the given address with enable asserted. */
   def read(addr: UInt): T =
     enable := true.B
     address := addr
     data
 
+  /** Read from the given address with an explicit enable. */
   def read(addr: UInt, en: Bool): T =
     enable := en
     address := addr
     data
 
+/** Handle for an SRAM write port. */
 final class SRAMWritePortHandle[T <: HWData](
   val enable: Bool,
   val address: UInt,
@@ -29,24 +33,28 @@ final class SRAMWritePortHandle[T <: HWData](
         i += 1
     }
 
+  /** Write payload to address with enable asserted. */
   def write(addr: UInt, payload: T): Unit =
     enable := true.B
     address := addr
     data := payload
     fillMask(true)
 
+  /** Write payload to address with explicit enable. */
   def write(addr: UInt, payload: T, en: Bool): Unit =
     enable := en
     address := addr
     data := payload
     fillMask(true)
 
+  /** Write payload to address with explicit mask. */
   def write(addr: UInt, payload: T, maskValue: Vec[Bool]): Unit =
     enable := true.B
     address := addr
     data := payload
     mask.foreach(m => ModuleOps.connect(m, maskValue, summon[Module]))
 
+/** Handle for an SRAM read-write port. */
 final class SRAMReadWritePortHandle[T <: HWData](
   val enable: Bool,
   val address: UInt,
@@ -63,6 +71,7 @@ final class SRAMReadWritePortHandle[T <: HWData](
         i += 1
     }
 
+  /** Write payload to address with enable asserted. */
   def write(addr: UInt, payload: T): Unit =
     enable := true.B
     isWrite := true.B
@@ -70,6 +79,7 @@ final class SRAMReadWritePortHandle[T <: HWData](
     writeData := payload
     fillMask(true)
 
+  /** Write payload to address with explicit enable. */
   def write(addr: UInt, payload: T, en: Bool): Unit =
     enable := en
     isWrite := true.B
@@ -77,6 +87,7 @@ final class SRAMReadWritePortHandle[T <: HWData](
     writeData := payload
     fillMask(true)
 
+  /** Write payload to address with explicit mask. */
   def write(addr: UInt, payload: T, maskValue: Vec[Bool]): Unit =
     enable := true.B
     isWrite := true.B
@@ -84,6 +95,7 @@ final class SRAMReadWritePortHandle[T <: HWData](
     writeData := payload
     mask.foreach(m => ModuleOps.connect(m, maskValue, summon[Module]))
 
+  /** Read from the given address with enable asserted. */
   def read(addr: UInt): T =
     enable := true.B
     isWrite := false.B
@@ -91,6 +103,7 @@ final class SRAMReadWritePortHandle[T <: HWData](
     fillMask(true)
     readData
 
+  /** Read from the given address with explicit enable. */
   def read(addr: UInt, en: Bool): T =
     enable := en
     isWrite := false.B
@@ -98,23 +111,28 @@ final class SRAMReadWritePortHandle[T <: HWData](
     fillMask(true)
     readData
 
+/** Collection of SRAM read ports. */
 final class SRAMReadPorts[T <: HWData](
   en: Vec[Bool],
   addr: Vec[UInt],
   data: Vec[T]
 )(using Module):
+  /** Select a read port by constant index. */
   def apply(idx: Int): SRAMReadPortHandle[T] =
     SRAMReadPortHandle(en(idx), addr(idx), data(idx))
 
+  /** Select a read port by dynamic index. */
   def apply(idx: UInt): SRAMReadPortHandle[T] =
     SRAMReadPortHandle(en(idx), addr(idx), data(idx))
 
+/** Collection of SRAM write ports. */
 final class SRAMWritePorts[T <: HWData](
   en: Vec[Bool],
   addr: Vec[UInt],
   data: Vec[T],
   mask: Option[Vec[Vec[Bool]]]
 )(using Module):
+  /** Select a write port by constant index. */
   def apply(idx: Int): SRAMWritePortHandle[T] =
     SRAMWritePortHandle(
       en(idx),
@@ -122,6 +140,7 @@ final class SRAMWritePorts[T <: HWData](
       data(idx),
       mask.map(_(idx)))
 
+  /** Select a write port by dynamic index. */
   def apply(idx: UInt): SRAMWritePortHandle[T] =
     SRAMWritePortHandle(
       en(idx),
@@ -129,6 +148,7 @@ final class SRAMWritePorts[T <: HWData](
       data(idx),
       mask.map(_(idx)))
 
+/** Collection of SRAM read-write ports. */
 final class SRAMReadWritePorts[T <: HWData](
   en: Vec[Bool],
   addr: Vec[UInt],
@@ -137,6 +157,7 @@ final class SRAMReadWritePorts[T <: HWData](
   rdata: Vec[T],
   mask: Option[Vec[Vec[Bool]]]
 )(using Module):
+  /** Select a read-write port by constant index. */
   def apply(idx: Int): SRAMReadWritePortHandle[T] =
     SRAMReadWritePortHandle(
       en(idx),
@@ -146,6 +167,7 @@ final class SRAMReadWritePorts[T <: HWData](
       rdata(idx),
       mask.map(_(idx)))
 
+  /** Select a read-write port by dynamic index. */
   def apply(idx: UInt): SRAMReadWritePortHandle[T] =
     SRAMReadWritePortHandle(
       en(idx),
@@ -155,6 +177,7 @@ final class SRAMReadWritePorts[T <: HWData](
       rdata(idx),
       mask.map(_(idx)))
 
+/** Structural SRAM wrapper with explicit read, write, and read-write ports. */
 final class SRAM[T <: HWData](
   data: T,
   depth: Int,
@@ -348,6 +371,7 @@ final class SRAM[T <: HWData](
                                           readWriteMaskVec)
 
 object SRAM:
+  /** Create an SRAM with explicit port counts. */
   def apply[T <: HWData](
     data: T, depth: Int
   )(

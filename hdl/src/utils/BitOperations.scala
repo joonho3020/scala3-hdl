@@ -1,17 +1,27 @@
 package hdl
 
 object Fill:
+  /** Replicate a Bool n times to build a UInt.
+    * Example: Fill(4, true.B) => 0b1111
+    * Example: Fill(3, false.B) => 0b000
+    */
   def apply(n: Int, x: Bool)(using m: Module): UInt =
     if n <= 0 then
       throw new IllegalArgumentException("Fill requires n > 0")
     Seq.fill(n)(x.asUInt).Cat
 
+  /** Replicate a UInt n times by concatenation.
+    * Example: Fill(3, 2.U(2.W)) => 0b10_10_10
+    */
   def apply(n: Int, x: UInt)(using m: Module): UInt =
     if n <= 0 then
       throw new IllegalArgumentException("Fill requires n > 0")
     Seq.fill(n)(x).Cat
 
 object Reverse:
+  /** Reverse the bit order of a value.
+    * Example: Reverse(0b1100) => 0b0011
+    */
   def apply(x: Bits)(using m: Module): UInt =
     val width = x.requireKnownWidth("Reverse")
     if width < 2 then
@@ -28,9 +38,15 @@ object Reverse:
     acc
 
 object PopCount:
+  /** Count the number of set bits in a Bool Vec.
+    * Example: PopCount(Vec(false.B, true.B, true.B)) => 2
+    */
   def apply(x: Vec[Bool])(using m: Module): UInt =
     x.map(_.asUInt).reduce(_ +& _)
 
+  /** Count the number of set bits in a Bits value.
+    * Example: PopCount(0b10110) => 3
+    */
   def apply(x: Bits)(using m: Module): UInt =
     val width = x.requireKnownWidth("PopCount")
     val u = x match
@@ -40,6 +56,9 @@ object PopCount:
     bits.reduce(_ +& _)
 
 object PriorityEncoder:
+  /** Return the index of the highest set bit (LSB = 0).
+    * Example: PriorityEncoder(0b010100) => 4
+    */
   def apply(x: Bits)(using m: Module): UInt =
     val width = x.requireKnownWidth("PriorityEncoder")
     val u = x match
@@ -51,6 +70,9 @@ object PriorityEncoder:
     })
 
 object PriorityEncoderOH:
+  /** Return a one-hot for the highest set bit (LSB = 0).
+    * Example: PriorityEncoderOH(0b010100) => 0b010000
+    */
   def apply(x: Bits)(using m: Module): OneHot =
     val width = x.requireKnownWidth("PriorityEncoderOH")
     val u = x match
@@ -63,6 +85,9 @@ object PriorityEncoderOH:
     }).asOH
 
 object MuxOneHot:
+  /** Select from inputs using a one-hot selector.
+    * Example: sel=0b0100, in=Seq(a,b,c,d) => c
+    */
   def apply[T <: HWData](sel: OneHot, in: Seq[T])(using m: Module): T =
     val sel_uint = sel.asUInt
     val width = sel.requireKnownWidth("MuxOneHot")
@@ -74,19 +99,31 @@ object MuxOneHot:
       })
 
 object UIntToOH:
+  /** Convert a UInt index to one-hot.
+    * Example: UIntToOH(3.U) => 0b1000
+    */
   def apply(in: UInt)(using m: Module): OneHot = (1.U(1.W) << in).asOH
 
 object MaskLower:
+  /** Create a mask with all bits at or below the one-hot position set.
+    * Example: MaskLower(0b001000) => 0b001111
+    */
   def apply(in: OneHot)(using m: Module): UInt =
     val width = in.requireKnownWidth("MaskLower")
     (0 until width).map(i => in.asUInt >> i.U).reduce(_|_)
 
 object MaskUpper:
+  /** Create a mask with all bits at or above the one-hot position set.
+    * Example: MaskUpper(0b001000) => 0b111000
+    */
   def apply(in: OneHot)(using m: Module): UInt =
     val width = in.requireKnownWidth("MaskUpper")
     (0 until width).map(i => (in.asUInt << i.U)(width-1,0)).reduce(_|_)
 
 object Splice:
+  /** Split a UInt into slices with explicit widths (low bits first).
+    * Example: Splice(0b11010110, Seq(3, 5)) => Vec(0b110, 0b11010)
+    */
   def apply(x: UInt, widths: Seq[Int])(using m: Module): Vec[UInt] =
     val inputWidth = x.requireKnownWidth("Splice")
     val totalWidth = widths.sum
@@ -104,6 +141,9 @@ object Splice:
     }
     Vec(elems.toSeq)
 
+  /** Split a UInt into equal-width slices (low bits first).
+    * Example: Splice(0b11010110, 4) => Vec(0b0110, 0b1101)
+    */
   def apply(x: UInt, width: Int)(using m: Module): Vec[UInt] =
     val inputWidth = x.requireKnownWidth("Splice")
     val count = inputWidth / width
@@ -119,6 +159,9 @@ object Splice:
     }
     Vec(elems.toSeq)
 
+  /** Split a SInt into slices with explicit widths (low bits first).
+    * Example: Splice(0b11010110.S, Seq(3, 5)) => Vec(0b110.S, 0b11010.S)
+    */
   def apply(x: SInt, widths: Seq[Int])(using m: Module): Vec[SInt] =
     val inputWidth = x.requireKnownWidth("Splice")
     val totalWidth = widths.sum

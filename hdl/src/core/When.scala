@@ -10,7 +10,9 @@ object WhenOps:
     mod.getBuilder.addRaw(raw)
     new WhenDSL(mod, raw)
 
+/** Builder returned from when for chaining elsewhen/otherwise. */
 final class WhenDSL(private val mod: Module, private val current: RawWhen):
+  /** Add a conditional branch to the current when chain. */
   def elsewhen(cond: Bool)(block: => Unit): WhenDSL =
     val body = mod.getBuilder.captureBody {
       block
@@ -19,6 +21,7 @@ final class WhenDSL(private val mod: Module, private val current: RawWhen):
     current.alt = Seq(nested)
     new WhenDSL(mod, nested)
 
+  /** Add a default branch to the current when chain. */
   def otherwise(block: => Unit): Unit =
     current.alt = mod.getBuilder.captureBody {
       block

@@ -2,6 +2,7 @@ package hdl
 
 import scala.collection.mutable
 
+/** Base class for all hardware modules. */
 abstract class Module:
   private val _builder = new ModuleBuilder(moduleName)
   private val _children = mutable.ArrayBuffer.empty[Module]
@@ -25,6 +26,7 @@ abstract class Module:
     this.getBuilder.addPort(IR.Port(IR.Identifier(name), Direction.In, IR.ResetType))
     reset
 
+  /** Name used for module definition in emitted IR. */
   def moduleName: String = getClass.getSimpleName.stripSuffix("$")
   private[hdl] def setInstanceName(n: String): Unit = _instanceName = Some(n)
   private[hdl] def instanceName: Option[String] = _instanceName
@@ -37,10 +39,9 @@ abstract class Module:
   private[hdl] def getImplicitClock: Clock = _implicitClock
   private[hdl] def getImplicitReset: Reset = _implicitReset
 
-  // Storing the module body as a thunk is required in order to achieve
-  // lazy elaboration.
-  // If the module body is elaborated eagerly, there is no point in
-  // incremental elaboration and caching.
+  /** Registers the module body for lazy elaboration.
+   * Storing the module body as a thunk is required in order to achieve lazy elaboration.
+   * If the module body is elaborated eagerly, there is no point in incremental elaboration and caching. */
   protected final def body(f: Module ?=> Unit): Unit =
     _bodyFn = Some(f)
 
@@ -50,42 +51,54 @@ abstract class Module:
       _bodyFn.foreach(fn => fn(using summon[Module]))
       _bodyRan = true
 
+  /** Declare a module IO port. */
   protected inline def IO[T <: HWData](inline t: T): T =
     ${ ModuleMacros.ioImpl('t, 'this) }
 
+  /** Declare a wire. */
   protected inline def Wire[T <: HWData](inline t: T): T =
     ${ ModuleMacros.wireImpl('t, 'this) }
 
+  /** Declare a register. */
   protected inline def Reg[T <: HWData](inline t: T): T =
     ${ ModuleMacros.regImpl('t, 'this) }
 
+  /** Declare a register connected to the next value. */
   protected inline def RegNext[T <: HWData](inline t: T): T =
     ${ ModuleMacros.regNextImpl('t, 'this) }
 
+  /** Declare a register with an explicit reset value. */
   protected inline def RegInit[T <: HWData](inline t: T): T =
     ${ ModuleMacros.regInitImpl('t, 'this) }
 
+  /** Declare a wire with an explicit default value. */
   protected inline def WireInit[T <: HWData](inline t: T): T =
     ${ ModuleMacros.wireInitImpl('t, 'this) }
 
+  /** Create a literal hardware value. */
   protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T]): T =
     ${ ModuleMacros.litImpl('t, 'payload, 'this) }
 
+  /** Conditional hardware construction. */
   protected inline def when(cond: Bool)(block: => Unit)(using m: Module): WhenDSL =
     ModuleOps.when(cond, summon[Module]) {
       block
     }
 
+  /** Emit a formatted print statement. */
   protected inline def Printf(inline format: String, inline args: HWData*): Unit =
     ${ ModuleMacros.printfImpl('format, 'args, 'this) }
 
+  /** Emit a runtime assertion. */
   protected inline def Assert(inline cond: Bool, inline message: String = ""): Unit =
     ${ ModuleMacros.assertImpl('cond, 'message, 'this) }
 
 object Module:
+  /** Instantiate a child module with a name inferred from the enclosing val. */
   inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
     ${ ModuleMacros.moduleInstImpl('gen, 'parent) }
 
+  /** Instantiate a child module with an optional explicit name hint. */
   def instantiate[M <: hdl.Module](gen: => M, parent: hdl.Module, name: Option[String]): M =
     val sub = gen
     val instName = parent.getBuilder.allocateName(name, "inst")

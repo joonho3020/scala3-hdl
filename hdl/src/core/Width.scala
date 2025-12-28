@@ -1,7 +1,10 @@
 package hdl
 
+/** Constructors for width values. */
 object Width {
+  /** Create a known width. */
   def apply(x: Int): Width = KnownWidth(x)
+  /** Create an unknown width. */
   def apply(): Width = UnknownWidth()
 }
 
@@ -35,9 +38,11 @@ sealed case class KnownWidth(value: Int) extends Width:
   }
   override def toString: String = s"<${value.toString}>"
 
+/** Returns ceil(log2(x)) for x >= 0 with log2Ceil(0) == 0 and log2Ceil(1) == 0. */
 def log2Ceil(x: Int): Int =
   if x <= 1 then 0 else 32 - Integer.numberOfLeadingZeros(x - 1)
 
+/** Returns the number of bits required to encode x, with log2Up(0) == 1. */
 def log2Up(x: Int): Int =
   if x < 0 then throw new IllegalArgumentException("log2Up requires x >= 0")
   math.max(1, (BigInt(x) - 1).bitLength)
