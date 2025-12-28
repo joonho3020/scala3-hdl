@@ -11,3 +11,4 @@ test-outputs
 sim/target
 **/obj_dir
 *.so
+**/.ooo-verilog-stamp

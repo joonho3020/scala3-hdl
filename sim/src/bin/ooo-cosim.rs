@@ -265,12 +265,12 @@ fn main() {
 
     dut.poke_io_mem_req_ready(1);
 
-    for cycle in 0..10000 {
+    for cycle in 0..100000 {
         let mut halt_detected = false;
         for lane in 0..RETIRE_WIDTH {
             let retire = get_retire_info(&dut, lane);
             if retire.valid {
-                println!("retire_{} PC: 0x{:x}", lane, retire.pc);
+// println!("retire_{} PC: 0x{:x}", lane, retire.pc);
                 if process_retire(
                     &retire,
                     lane,

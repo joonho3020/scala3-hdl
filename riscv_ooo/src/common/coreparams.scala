@@ -36,7 +36,7 @@ case class PRFParams(
 ) derives StableHash
 
 case class IssueQueueParams(
-  numEntries: Int = 8,
+  numEntries: Int = 12,
 ) derives StableHash
 
 case class BranchParams(
