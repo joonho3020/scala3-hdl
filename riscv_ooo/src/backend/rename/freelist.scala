@@ -36,7 +36,7 @@ class FreeList(p: CoreParams) extends Module with CoreCacheable(p):
     alloc_reqs = Input(Vec.fill(coreWidth)(Valid(UOp(p)))),
     alloc_resp = Output(Vec.fill(coreWidth)(UInt(p.pRegIdxBits.W))),
     count      = Output(UInt(p.pRegIdxBits.W)),
-    resolve_tag = Input(BranchResolve(p)), 
+    resolve_tag = Input(BranchResolve(p)),
     comm_prds  = Input(Vec.fill(p.retireWidth)(Valid(UInt(p.pRegIdxBits.W))))
   ))
 
@@ -50,6 +50,8 @@ class FreeList(p: CoreParams) extends Module with CoreCacheable(p):
     val freelist  = RegInit(Lit(UInt(entries.W))(init))
 
     io.count := PopCount(freelist)
+
+    val comm_frees_mask = io.comm_prds.map(p => Mux(p.valid, UIntToOH(p.bits).asUInt, 0.U)).reduce(_ | _)
 
     val next_freelist_base = Wire(Vec.fill(coreWidth)(UInt(entries.W)))
     val next_freelist_alloc = Wire(Vec.fill(coreWidth)(UInt(entries.W)))
@@ -72,8 +74,14 @@ class FreeList(p: CoreParams) extends Module with CoreCacheable(p):
       when (req.valid && req.bits.ctrl.is_cfi) {
         val tag_idx = PriorityEncoder(Reverse(req.bits.br_tag))
         snapshots(tag_idx).brmask   := req.bits.br_mask
-        snapshots(tag_idx).freelist := next_freelist_alloc(i)
+        snapshots(tag_idx).freelist := next_freelist_alloc(i) | comm_frees_mask
         snapshots(tag_idx).valid    := true.B
+      }
+    }
+
+    for (i <- 0 until maxInflight) {
+      when (snapshots(i).valid) {
+        snapshots(i).freelist := snapshots(i).freelist | comm_frees_mask
       }
     }
 
@@ -102,11 +110,7 @@ class FreeList(p: CoreParams) extends Module with CoreCacheable(p):
       }
     }
 
-    var next_freelist = next_freelist_snapshot
-    for (i <- 0 until retireWidth) {
-      next_freelist = next_freelist | Mux(io.comm_prds(i).valid, UIntToOH(io.comm_prds(i).bits).asUInt, 0.U)
-    }
-    freelist := next_freelist
+    freelist := next_freelist_snapshot | comm_frees_mask
 
     when (reset.asBool) {
       snapshots.foreach(_.valid := false.B)
