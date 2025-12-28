@@ -12,3 +12,4 @@ sim/target
 **/obj_dir
 *.so
 **/.ooo-verilog-stamp
+**/.inorder-verilog-stamp
