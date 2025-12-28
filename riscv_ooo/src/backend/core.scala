@@ -69,8 +69,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
   val retireWidth = p.retireWidth
 
   body {
-    val bpu_pred_count = WireInit(0.U(p.xlenBits.W))
-    val bpu_hit_count = WireInit(0.U(p.xlenBits.W))
+    val bpu_pred_count = RegInit(0.U(p.xlenBits.W))
+    val bpu_hit_count = RegInit(0.U(p.xlenBits.W))
     val kill_on_mispred = Wire(Bool())
 
     io.redirect.valid := false.B
@@ -117,35 +117,26 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     decoder.io.enq.zip(io.fetch_uops).foreach((d, f) => d <> f)
 
     // -----------------------------------------------------------------------
-    // Branch Tag Allocation (between decode and rename)
+    // BranchTag Allocation & Rename 0 & 1
     // -----------------------------------------------------------------------
     val dec_cfi_mask = decoder.io.deq.map(d => d.valid && d.bits.ctrl.is_cfi)
     val dec_cfi_cnt = dec_cfi_mask.map(_.asUInt).reduce(_ +& _)
-    val br_tag_stall = dec_cfi_cnt > br_tag_mgr.io.count
-
-    val dec_uops_with_branch = Wire(Vec.fill(coreWidth)(Valid(UOp(p))))
-
-    for (i <- 0 until coreWidth) {
-      val req_valid = decoder.io.deq(i).valid && !br_tag_stall && !kill_on_mispred
-      br_tag_mgr.io.req_valid(i) := req_valid
-      br_tag_mgr.io.req_cfi(i) := req_valid && decoder.io.deq(i).bits.ctrl.is_cfi
-
-      dec_uops_with_branch(i).valid := decoder.io.deq(i).valid
-      dec_uops_with_branch(i).bits := decoder.io.deq(i).bits
-      dec_uops_with_branch(i).bits.br_tag := br_tag_mgr.io.resp_tag(i)
-      dec_uops_with_branch(i).bits.br_mask := br_tag_mgr.io.resp_mask(i)
-    }
-
-    // -----------------------------------------------------------------------
-    // Rename 0 & 1
-    // -----------------------------------------------------------------------
     val dec_stall = WireInit(false.B)
+    val br_tag_stall = (dec_cfi_cnt > br_tag_mgr.io.count).asWire
+    dontTouch(br_tag_stall)
 
     for (i <- 0 until coreWidth) {
       val renamer_ready = !dec_stall && !br_tag_stall && !kill_on_mispred && (i.U < renamer.io.free_count)
-      renamer.io.dec_uops(i).valid := dec_uops_with_branch(i).valid && renamer_ready
-      renamer.io.dec_uops(i).bits  := dec_uops_with_branch(i).bits
+
       decoder.io.deq(i).ready := renamer_ready
+
+      br_tag_mgr.io.req_valid(i) := decoder.io.deq(i).valid && renamer_ready
+      br_tag_mgr.io.req_cfi(i) := renamer_ready && decoder.io.deq(i).bits.ctrl.is_cfi
+
+      renamer.io.dec_uops(i).valid := decoder.io.deq(i).valid && renamer_ready
+      renamer.io.dec_uops(i).bits  := decoder.io.deq(i).bits
+      renamer.io.dec_uops(i).bits.br_tag  := br_tag_mgr.io.resp_tag(i)
+      renamer.io.dec_uops(i).bits.br_mask := br_tag_mgr.io.resp_mask(i)
     }
 
     // -----------------------------------------------------------------------
@@ -294,6 +285,13 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     io.bpu_update.bits.taken := exe_cfi_taken
     io.bpu_update.bits.is_call := (cfi_uop.bits.ctrl.jal || cfi_uop.bits.ctrl.jalr) && cfi_uop.bits.lrd === 1.U
     io.bpu_update.bits.is_ret := cfi_uop.bits.ctrl.jalr && cfi_uop.bits.lrs1 === 1.U && cfi_uop.bits.lrd === 0.U
+
+    when (exe_cfi_valid) {
+      bpu_pred_count := bpu_pred_count + 1.U
+      when (!has_mispred) {
+        bpu_hit_count := bpu_hit_count + 1.U
+      }
+    }
 
     for (i <- 0 until issueWidth) {
       val is_link = exe_uops(i).bits.ctrl.jal || exe_uops(i).bits.ctrl.jalr
