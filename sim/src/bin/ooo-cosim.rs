@@ -2,7 +2,7 @@ use hdl_sim::asm_parser::parse_asm_file;
 use hdl_sim::Dut;
 use riscv_sim::RefCore;
 use rvdasm::disassembler::Disassembler;
-use std::{collections::HashMap, collections::HashSet, env};
+use std::{collections::HashMap, collections::HashSet, collections::VecDeque, env};
 
 const RESET_PC: u64 = 0x80000000;
 const CACHE_LINE_WORDS: usize = 16;
@@ -11,6 +11,8 @@ const HALT_OPCODE: u32 = 0x0000006f;
 const PAGE_SIZE: usize = 4096;
 const MEM_TYPE_WRITE: u64 = 1;
 const RETIRE_WIDTH: usize = 2;
+const MAX_MISMATCHES: usize = 10;
+const PC_HISTORY_SIZE: usize = 20;
 
 struct SparseMemory {
     pages: HashMap<u64, Box<[u8; PAGE_SIZE]>>,
@@ -157,18 +159,47 @@ fn process_retire(
     retired_count: &mut usize,
     coverage: &mut HashSet<usize>,
     instructions_len: usize,
+    pc_history: &mut VecDeque<u64>,
+    dut: &mut Dut,
 ) -> bool {
     let pipe_label = format!("pipe {}", pipe_idx);
     let ref_result = ref_core.step();
-    if let Some(mismatch) = compare_retire_with_ref(retire, &ref_result) {
+    let mismatch_opt = compare_retire_with_ref(retire, &ref_result);
+    let has_mismatch = mismatch_opt.is_some();
+    if let Some(mismatch) = mismatch_opt {
         println!("Cycle: {} {:?} {}", cycle, mismatch, pipe_label);
         println!("- RefCore {:x?}", ref_result);
         println!("- RTL     {:x?}", retire);
         log_decoded_instruction(&pipe_label, memory, ref_result.pc, disasm);
         ref_core.dump_state();
+        println!("- Previous {} PCs:", pc_history.len());
+        for (i, pc) in pc_history.iter().enumerate() {
+            print!("  0x{:x}", pc);
+            if (i + 1) % 5 == 0 {
+                println!();
+            }
+        }
+        if pc_history.len() % 5 != 0 {
+            println!();
+        }
         println!();
         *mismatch_count += 1;
     }
+    poke_cosim_info(
+        dut,
+        pipe_idx,
+        true,
+        ref_result.pc,
+        ref_result.next_pc,
+        ref_result.wb_valid,
+        ref_result.wb_data,
+        ref_result.wb_rd,
+        has_mismatch,
+    );
+    if pc_history.len() >= PC_HISTORY_SIZE {
+        pc_history.pop_front();
+    }
+    pc_history.push_back(retire.pc);
     *retired_count += 1;
     record_coverage(retire.pc, instructions_len, coverage);
     get_word_at_addr(memory, retire.pc) == HALT_OPCODE
@@ -212,6 +243,40 @@ fn poke_mem_resp_data(dut: &mut Dut, data: &[u64; CACHE_LINE_WORDS]) {
     dut.poke_io_mem_resp_bits_lineWords_13(data[13]);
     dut.poke_io_mem_resp_bits_lineWords_14(data[14]);
     dut.poke_io_mem_resp_bits_lineWords_15(data[15]);
+}
+
+fn poke_cosim_info(
+    dut: &mut Dut,
+    idx: usize,
+    valid: bool,
+    pc: u64,
+    next_pc: u64,
+    wb_valid: bool,
+    wb_data: u64,
+    wb_rd: u64,
+    mismatch: bool,
+) {
+    match idx {
+        0 => {
+            dut.poke_io_cosim_info_0_valid(valid as u64);
+            dut.poke_io_cosim_info_0_pc(pc);
+            dut.poke_io_cosim_info_0_next_pc(next_pc);
+            dut.poke_io_cosim_info_0_wb_valid(wb_valid as u64);
+            dut.poke_io_cosim_info_0_wb_data(wb_data);
+            dut.poke_io_cosim_info_0_wb_rd(wb_rd);
+            dut.poke_io_cosim_info_0_mismatch(mismatch as u64);
+        }
+        1 => {
+            dut.poke_io_cosim_info_1_valid(valid as u64);
+            dut.poke_io_cosim_info_1_pc(pc);
+            dut.poke_io_cosim_info_1_next_pc(next_pc);
+            dut.poke_io_cosim_info_1_wb_valid(wb_valid as u64);
+            dut.poke_io_cosim_info_1_wb_data(wb_data);
+            dut.poke_io_cosim_info_1_wb_rd(wb_rd);
+            dut.poke_io_cosim_info_1_mismatch(mismatch as u64);
+        }
+        _ => panic!("invalid cosim_info index {}", idx),
+    }
 }
 
 fn main() {
@@ -260,6 +325,7 @@ fn main() {
     let mut coverage = HashSet::new();
     let target_coverage = instructions_len;
     let mut stop_reason: Option<String> = None;
+    let mut pc_history: VecDeque<u64> = VecDeque::with_capacity(PC_HISTORY_SIZE);
 
     let disasm = Disassembler::new(rvdasm::disassembler::Xlen::XLEN64);
 
@@ -270,7 +336,6 @@ fn main() {
         for lane in 0..RETIRE_WIDTH {
             let retire = get_retire_info(&dut, lane);
             if retire.valid {
-// println!("retire_{} PC: 0x{:x}", lane, retire.pc);
                 if process_retire(
                     &retire,
                     lane,
@@ -282,9 +347,13 @@ fn main() {
                     &mut retired_count,
                     &mut coverage,
                     instructions_len,
+                    &mut pc_history,
+                    &mut dut,
                 ) {
                     halt_detected = true;
                 }
+            } else {
+                poke_cosim_info(&mut dut, lane, false, 0, 0, false, 0, 0, false);
             }
         }
 
@@ -335,7 +404,9 @@ fn main() {
         }
 
         let coverage_complete = coverage.len() >= target_coverage;
-        if halt_detected {
+        if mismatch_count >= MAX_MISMATCHES {
+            stop_reason = Some(format!("reached {} mismatches at cycle {}", MAX_MISMATCHES, cycle));
+        } else if halt_detected {
             stop_reason = Some(format!("halt instruction retired at cycle {}", cycle));
         } else if coverage_complete {
             stop_reason = Some(format!("retired all {} instructions by cycle {}", target_coverage, cycle));

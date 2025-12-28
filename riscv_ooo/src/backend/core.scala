@@ -39,13 +39,36 @@ object RetireInfoIf:
       bpu_hits = Output(UInt(p.xlenBits.W))
     )
 
+case class CoSimInfoIf(
+  valid: Bool,
+  pc:    UInt,
+  next_pc: UInt,
+  wb_valid: Bool,
+  wb_data: UInt,
+  wb_rd:   UInt,
+  mismatch: Bool
+) extends Bundle[CoSimInfoIf]
+
+object CoSimInfoIf:
+  def apply(p: CoreParams): CoSimInfoIf =
+    CoSimInfoIf(
+      valid    = Input(Bool()),
+      pc       = Input(UInt(p.pcBits.W)),
+      next_pc  = Input(UInt(p.pcBits.W)),
+      wb_valid = Input(Bool()),
+      wb_data  = Input(UInt(p.xlenBits.W)),
+      wb_rd    = Input(UInt(p.xlenBits.W)),
+      mismatch = Input(Bool())
+    )
+
 case class CoreIf(
   fetch_uops: Vec[Decoupled[UOp]],
   redirect: RedirectIf,
   retire_info: Vec[RetireInfoIf],
   debug_rn2_uops: Option[Vec[Valid[UOp]]],
   bpu_update: Valid[BPUUpdate],
-  mem: MagicMemIf
+  mem: MagicMemIf,
+  cosim_info: Vec[CoSimInfoIf]
 ) extends Bundle[CoreIf]
 
 object CoreIf:
@@ -56,7 +79,8 @@ object CoreIf:
       retire_info    = Vec.fill(p.coreWidth)(RetireInfoIf(p)),
       debug_rn2_uops = if p.debug then Some(Output(Vec.fill(p.coreWidth)(Valid(UOp(p))))) else None,
       bpu_update     = Valid(BPUUpdate(p)),
-      mem            = MagicMemIf(p)
+      mem            = MagicMemIf(p),
+      cosim_info     = Vec.fill(p.coreWidth)(CoSimInfoIf(p))
     )
 
 class Core(p: CoreParams) extends Module with CoreCacheable(p):
@@ -371,6 +395,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     io.debug_rn2_uops.map(_ := renamer.io.rn2_uops)
 
+    dontTouch(io.cosim_info)
     dontTouch(dec_stall)
     dontTouch(dis_stall)
     dontTouch(dis_uops)

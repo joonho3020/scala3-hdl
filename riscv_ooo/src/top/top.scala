@@ -5,7 +5,8 @@ import hdl._
 case class TileIO(
   mem: MagicMemIf,
   retire_info: Vec[RetireInfoIf],
-  rn2_uops: Option[Vec[Valid[UOp]]]
+  rn2_uops: Option[Vec[Valid[UOp]]],
+  cosim_info: Vec[CoSimInfoIf]
 ) extends Bundle[TileIO]
 
 object TileIO:
@@ -13,7 +14,8 @@ object TileIO:
     TileIO(
       mem = MagicMemIf(p),
       retire_info = Vec.fill(p.coreWidth)(RetireInfoIf(p)),
-      rn2_uops = if p.debug then Some(Output(Vec.fill(p.coreWidth)(Valid(UOp(p))))) else None
+      rn2_uops = if p.debug then Some(Output(Vec.fill(p.coreWidth)(Valid(UOp(p))))) else None,
+      cosim_info = Vec.fill(p.coreWidth)(CoSimInfoIf(p))
     )
 
 class Tile(p: CoreParams) extends Module:
@@ -35,4 +37,5 @@ class Tile(p: CoreParams) extends Module:
 
     io.retire_info <> core.io.retire_info
     io.rn2_uops.zip(core.io.debug_rn2_uops).foreach(_ <> _)
+    io.cosim_info <> core.io.cosim_info
   }

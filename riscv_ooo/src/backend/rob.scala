@@ -70,15 +70,14 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
     val full  = (rob_head === rob_tail) && maybe_full
     val empty = (rob_head === rob_tail) && !maybe_full
 
-    io.full := full
-    io.empty := empty
-
     val valid_entries = Wire(UInt(log2Ceil(entries + 1).W))
     valid_entries := Mux(rob_tail >= rob_head,
                             rob_tail - rob_head,
                             entries.U - (rob_head - rob_tail))
 
     io.valid_entries := valid_entries
+    io.full := (p.rob.numEntries.U - valid_entries) < coreWidth.U
+    io.empty := empty
 
     def robIdxToRow(idx: UInt): UInt = idx >> log2Ceil(coreWidth)
     def robIdxToBank(idx: UInt): UInt = idx(log2Ceil(coreWidth)-1, 0)

@@ -2,7 +2,7 @@ use hdl_sim::asm_parser::parse_asm_file;
 use hdl_sim::Dut;
 use riscv_sim::RefCore;
 use rvdasm::disassembler::Disassembler;
-use std::{collections::HashMap, collections::HashSet, env};
+use std::{collections::HashMap, collections::HashSet, collections::VecDeque, env};
 
 const RESET_PC: u64 = 0x80000000;
 const CACHE_LINE_WORDS: usize = 16;
@@ -10,6 +10,8 @@ const WORD_SIZE: u64 = 4;
 const HALT_OPCODE: u32 = 0x0000006f;
 const PAGE_SIZE: usize = 4096;
 const MEM_TYPE_WRITE: u64 = 1;
+const MAX_MISMATCHES: usize = 10;
+const PC_HISTORY_SIZE: usize = 20;
 
 struct SparseMemory {
     pages: HashMap<u64, Box<[u8; PAGE_SIZE]>>,
@@ -159,6 +161,7 @@ fn process_retire(
     retired_count: &mut usize,
     coverage: &mut HashSet<usize>,
     instructions_len: usize,
+    pc_history: &mut VecDeque<u64>,
 ) -> bool {
     let ref_result = ref_core.step();
     if let Some(mismatch) = compare_retire_with_ref(retire, &ref_result) {
@@ -167,9 +170,23 @@ fn process_retire(
         println!("- RTL     {:x?}", retire);
         log_decoded_instruction("-", memory, ref_result.pc, disasm);
         ref_core.dump_state();
+        println!("- Previous {} PCs:", pc_history.len());
+        for (i, pc) in pc_history.iter().enumerate() {
+            print!("  0x{:x}", pc);
+            if (i + 1) % 5 == 0 {
+                println!();
+            }
+        }
+        if pc_history.len() % 5 != 0 {
+            println!();
+        }
         println!();
         *mismatch_count += 1;
     }
+    if pc_history.len() >= PC_HISTORY_SIZE {
+        pc_history.pop_front();
+    }
+    pc_history.push_back(retire.pc);
     *retired_count += 1;
     record_coverage(retire.pc, instructions_len, coverage);
     get_word_at_addr(memory, retire.pc) == HALT_OPCODE
@@ -261,6 +278,7 @@ fn main() {
     let mut coverage = HashSet::new();
     let target_coverage = instructions_len;
     let mut stop_reason: Option<String> = None;
+    let mut pc_history: VecDeque<u64> = VecDeque::with_capacity(PC_HISTORY_SIZE);
 
     let disasm = Disassembler::new(rvdasm::disassembler::Xlen::XLEN64);
 
@@ -291,6 +309,7 @@ fn main() {
                 &mut retired_count,
                 &mut coverage,
                 instructions_len,
+                &mut pc_history,
             ) {
                 halt_detected = true;
             }
@@ -308,6 +327,7 @@ fn main() {
                 &mut retired_count,
                 &mut coverage,
                 instructions_len,
+                &mut pc_history,
             ) {
                 halt_detected = true;
             }
@@ -362,7 +382,9 @@ fn main() {
         }
 
         let coverage_complete = coverage.len() >= target_coverage;
-        if halt_detected {
+        if mismatch_count >= MAX_MISMATCHES {
+            stop_reason = Some(format!("reached {} mismatches at cycle {}", MAX_MISMATCHES, cycle));
+        } else if halt_detected {
             stop_reason = Some(format!("halt instruction retired at cycle {}", cycle));
         } else if coverage_complete {
             stop_reason = Some(format!(
