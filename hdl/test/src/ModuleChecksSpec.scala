@@ -1600,7 +1600,19 @@ def mux_and_concat_check(): Unit =
   assertDesigns("Mux and Concat Check", d, expected)
   println("=" * 50)
 
-def sram_check(): Unit =
+/**
+ * Example demonstrating SRAM API usage.
+ *
+ * SRAMs are explicitly instantiated (not inferred) but provide behavioral
+ * read/write APIs. This example shows:
+ * - Creating an SRAM with read, write, and read-write ports
+ * - Using readPorts for read-only access
+ * - Using writePorts for write-only access
+ * - Using readwritePorts for combined read/write access
+ *
+ * @return A Module instance demonstrating SRAM operations
+ */
+def sramExample(): Module =
   final case class SramIO(rData: UInt, rwData: UInt) extends Bundle[SramIO]
   class SramModule extends Module:
     given Module = this
@@ -1615,9 +1627,12 @@ def sram_check(): Unit =
     val rw = mem.readwritePorts(0).read(3.U(Width(2)))
     mem.readwritePorts(0).writeData := 0.U(Width(8))
     io.rwData := rw
+  new SramModule
 
+def sram_check(): Unit =
+  final case class SramIO(rData: UInt, rwData: UInt) extends Bundle[SramIO]
   val elaborator = new Elaborator
-  val m = new SramModule
+  val m = sramExample()
   val d = elaborator.elaborate(m)
   val rendered = elaborator.emitAll(d)
   val expected = Seq(
@@ -1680,10 +1695,20 @@ def sram_check(): Unit =
 enum TestEnumOpcode:
   case Idle, Run, Wait
 
-def enum_basic_check(): Unit =
+/**
+ * Example demonstrating basic hardware enum usage.
+ *
+ * Shows how to:
+ * - Define a Scala enum (TestEnumOpcode)
+ * - Use HWEnum[T] to create hardware enum types
+ * - Use .EN to get the hardware enum value from a Scala enum case
+ * - Compare and assign enum values
+ * - Use enums in when() conditional blocks
+ *
+ * @return A Module instance demonstrating basic enum operations
+ */
+def enumBasicExample(): Module =
   final case class EnumIO(in: HWEnum[TestEnumOpcode], out: HWEnum[TestEnumOpcode]) extends Bundle[EnumIO]
-
-  TestEnumOpcode.values.foreach(x => println(x))
 
   class EnumModule extends Module:
     given Module = this
@@ -1694,8 +1719,15 @@ def enum_basic_check(): Unit =
     }
     io.out := reg
 
+  new EnumModule
+
+def enum_basic_check(): Unit =
+  final case class EnumIO(in: HWEnum[TestEnumOpcode], out: HWEnum[TestEnumOpcode]) extends Bundle[EnumIO]
+
+  TestEnumOpcode.values.foreach(x => println(x))
+
   val elaborator = new Elaborator
-  val mod = new EnumModule
+  val mod = enumBasicExample()
   val designs = elaborator.elaborate(mod)
   val expected = Seq(
     module(
@@ -1729,6 +1761,32 @@ def enum_basic_check(): Unit =
   println(rendered)
   assertDesigns("Enum Check", designs, expected)
 
+/**
+ * Example demonstrating switch statement usage with hardware enums.
+ *
+ * Shows how enums work seamlessly with switch/is statements,
+ * similar to Scala's pattern matching. The switch statement provides
+ * cleaner syntax compared to nested when/elsewhen blocks for
+ * multi-way branches.
+ *
+ * @return A Module instance demonstrating enum switch statements
+ */
+def enumSwitchExample(): Module =
+  final case class SwitchEnumIO(in: HWEnum[TestEnumOpcode], out: HWEnum[TestEnumOpcode]) extends Bundle[SwitchEnumIO]
+
+  class SwitchEnum extends Module:
+    given Module = this
+    val io = IO(SwitchEnumIO(Input(HWEnum(TestEnumOpcode)), Output(HWEnum(TestEnumOpcode))))
+    val reg = RegInit(TestEnumOpcode.Idle.EN)
+    reg switch {
+      is(TestEnumOpcode.Idle.EN) { reg := TestEnumOpcode.Run.EN }
+      is(TestEnumOpcode.Run.EN) { reg := TestEnumOpcode.Wait.EN }
+      default { reg := TestEnumOpcode.Idle.EN }
+    }
+    io.out := reg
+
+  new SwitchEnum
+
 def switch_check(): Unit =
   final case class SwitchIO(sel: UInt, out: UInt) extends Bundle[SwitchIO]
   final case class SwitchEnumIO(in: HWEnum[TestEnumOpcode], out: HWEnum[TestEnumOpcode]) extends Bundle[SwitchEnumIO]
@@ -1744,17 +1802,6 @@ def switch_check(): Unit =
       is(1.U(Width(2))) { out := 2.U(Width(4)) }
       default { out := 3.U(Width(4)) }
     }
-
-  class SwitchEnum extends Module:
-    given Module = this
-    val io = IO(SwitchEnumIO(Input(HWEnum(TestEnumOpcode)), Output(HWEnum(TestEnumOpcode))))
-    val reg = RegInit(TestEnumOpcode.Idle.EN)
-    reg switch {
-      is(TestEnumOpcode.Idle.EN) { reg := TestEnumOpcode.Run.EN }
-      is(TestEnumOpcode.Run.EN) { reg := TestEnumOpcode.Wait.EN }
-      default { reg := TestEnumOpcode.Idle.EN }
-    }
-    io.out := reg
 
   val elaborator = new Elaborator
   val modUInt = new SwitchUInt
@@ -1799,7 +1846,7 @@ def switch_check(): Unit =
   assertDesigns("Switch UInt Check", designsUInt, expectedUInt)
 
   val elaborator2 = new Elaborator
-  val modEnum = new SwitchEnum
+  val modEnum = enumSwitchExample()
   val designsEnum = elaborator2.elaborate(modEnum)
   val expectedEnum = Seq(
     module(
