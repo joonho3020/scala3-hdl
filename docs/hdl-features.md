@@ -20,12 +20,44 @@ Furthermore, this enables the library users to reuse the Bundle schema to define
 We can directly create hardware enum types from Scala enums.
 This integrates nicely with the switch statements.
 
-See `enumBasicExample()` in hdl/test/src/ModuleChecksSpec.scala:1710 for a complete example demonstrating:
-- Defining Scala enums and using them as hardware types with `HWEnum[T]`
-- Using `.EN` to get hardware enum values from Scala enum cases
-- Comparing and assigning enum values in conditional blocks
+```scala
+// Source: enumBasicExample() in hdl/test/src/ModuleChecksSpec.scala:1710
+// This example demonstrates:
+// - Defining Scala enums and using them as hardware types with HWEnum[T]
+// - Using .EN to get hardware enum values from Scala enum cases
+// - Comparing and assigning enum values in conditional blocks
 
-Enums work seamlessly with switch statements. See `enumSwitchExample()` in hdl/test/src/ModuleChecksSpec.scala:1774 for an example showing how switch/is provides cleaner syntax for multi-way branches with enums.
+enum TestEnumOpcode:
+  case Idle, Run, Wait
+
+final case class EnumIO(in: HWEnum[TestEnumOpcode], out: HWEnum[TestEnumOpcode]) extends Bundle[EnumIO]
+
+class EnumModule extends Module:
+  given Module = this
+  val io = IO(EnumIO(Input(HWEnum(TestEnumOpcode)), Output(HWEnum(TestEnumOpcode))))
+  val reg = RegInit(TestEnumOpcode.Idle.EN)
+  when(io.in.asUInt === TestEnumOpcode.Run.EN.asUInt) {
+    reg := TestEnumOpcode.Wait.EN
+  }
+  io.out := reg
+```
+
+Enums work seamlessly with switch statements:
+
+```scala
+// Source: enumSwitchExample() in hdl/test/src/ModuleChecksSpec.scala:1774
+
+class SwitchEnum extends Module:
+  given Module = this
+  val io = IO(SwitchEnumIO(Input(HWEnum(TestEnumOpcode)), Output(HWEnum(TestEnumOpcode))))
+  val reg = RegInit(TestEnumOpcode.Idle.EN)
+  reg switch {
+    is(TestEnumOpcode.Idle.EN) { reg := TestEnumOpcode.Run.EN }
+    is(TestEnumOpcode.Run.EN) { reg := TestEnumOpcode.Wait.EN }
+    default { reg := TestEnumOpcode.Idle.EN }
+  }
+  io.out := reg
+```
 
 Using typeclass derivation, switch statements can also accept tuples as well, similar to how Scala3's match accepts tuples.
 For example, we can do this:
@@ -51,8 +83,27 @@ switch ((funct3, funct7)) {
 SRAM ports are not inferred by the compiler.
 However, it still provides behavioral APIs to perform read/writes.
 
-See `sramExample()` in hdl/test/src/ModuleChecksSpec.scala:1615 for a complete example demonstrating:
-- Creating an SRAM with read, write, and read-write ports
-- Using `readPorts` for read-only access
-- Using `writePorts` for write-only access
-- Using `readwritePorts` for combined read/write access
+```scala
+// Source: sramExample() in hdl/test/src/ModuleChecksSpec.scala:1615
+// This example demonstrates:
+// - Creating an SRAM with read, write, and read-write ports
+// - Using readPorts for read-only access
+// - Using writePorts for write-only access
+// - Using readwritePorts for combined read/write access
+
+final case class SramIO(rData: UInt, rwData: UInt) extends Bundle[SramIO]
+
+class SramModule extends Module:
+  given Module = this
+  val io = IO(SramIO(
+    rData = Output(UInt(Width(8))),
+    rwData = Output(UInt(Width(8)))
+  ))
+  val mem = SRAM(UInt(Width(8)), 4)(1, 1, 1)
+  val r = mem.readPorts(0).read(1.U(Width(2)))
+  io.rData := r
+  mem.writePorts(0).write(2.U(Width(2)), 5.U(Width(8)))
+  val rw = mem.readwritePorts(0).read(3.U(Width(2)))
+  mem.readwritePorts(0).writeData := 0.U(Width(8))
+  io.rwData := rw
+```
