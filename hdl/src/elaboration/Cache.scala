@@ -18,6 +18,48 @@ trait CacheableModule:
   given stableHashElabParams: StableHash[ElabParams]
   def elabParams: ElabParams
 
+// =============================================================================
+// Bytecode-Based Dependency Tracking for Cache Invalidation
+// =============================================================================
+//
+// This module computes a stable hash of a Module's code and all its transitive dependencies.
+// When any dependent class changes, the hash changes, causing a cache miss and re-elaboration.
+//
+// Background: JVM Classfile Structure
+// ------------------------------------
+// A compiled .class file contains:
+//   1. Magic number (0xCAFEBABE) and version info
+//   2. Constant Pool - a table of constants including:
+//      - Class references (CONSTANT_Class, tag 7)
+//      - Field/Method references with type descriptors
+//      - String literals, numbers, etc.
+//   3. Class metadata (access flags, superclass, interfaces)
+//   4. Fields and Methods with their bytecode
+//
+// Why ASM Instead of Manual Constant Pool Parsing?
+// -------------------------------------------------
+// The constant pool alone is insufficient because of JVM type erasure:
+//   - Generic types like Vec[BPUUpdate] become just Vec in the constant pool
+//   - The actual type parameter (BPUUpdate) only appears in method bodies
+//     where the type is instantiated or cast
+//
+// ASM's ClassVisitor/MethodVisitor pattern lets us scan:
+//   - Class-level references (superclass, interfaces, field types)
+//   - Method body instructions (NEW, INVOKEVIRTUAL, CHECKCAST, etc.)
+//
+// This captures dependencies like:
+// ```
+// case class FrontendIf(
+//   mem: MagicMemIf,
+//   redirect: RedirectIf,
+//   uops: Vec[Decoupled[UOp]],
+//   bpu_update: Valid[BPUUpdate]
+// ) extends Bundle[FrontendIf]
+// ```
+//   - FrontendIf.apply() calls BPUUpdate.apply() -> FrontendIf depends on BPUUpdate
+//
+// =============================================================================
+
 object ModuleKey:
   private def updateInt(md: MessageDigest, i: Int): Unit =
     md.update(((i >>> 24) & 0xff).toByte)
@@ -33,6 +75,9 @@ object ModuleKey:
     }
     md.digest()
 
+  // Exclude standard library classes - they don't change between builds
+  // and including them would bloat the dependency graph unnecessarily.
+  // Uses JVM internal name format: "java/lang/String" not "java.lang.String"
   private val excludedPrefixes = Set(
     "java/", "javax/", "jdk/", "sun/",
     "scala/", "dotty/",
@@ -60,6 +105,11 @@ object ModuleKey:
         s.close()
     }
 
+  // Extract class references from ASM Type descriptors.
+  // Type descriptors use a compact format:
+  //   - "Lcom/example/MyClass;" for object types
+  //   - "[Lcom/example/MyClass;" for array of objects
+  //   - "(Lcom/example/Arg;)Lcom/example/Return;" for methods
   private def addTypeRef(refs: mutable.Set[String], t: Type): Unit =
     t.getSort match
       case Type.OBJECT => refs += t.getInternalName
@@ -67,60 +117,91 @@ object ModuleKey:
       case Type.METHOD =>
         addTypeRef(refs, t.getReturnType)
         t.getArgumentTypes.foreach(addTypeRef(refs, _))
-      case _ => ()
+      case _ => () // primitives (int, boolean, etc.) have no class refs
 
+  // Parse all class references from a classfile using ASM.
+  // This uses the Visitor pattern: ASM calls our methods as it parses.
   private def parseClassReferences(classBytes: Array[Byte]): Set[String] =
     val refs = mutable.Set[String]()
     try
       val reader = new ClassReader(classBytes)
       reader.accept(new ClassVisitor(Opcodes.ASM9) {
+
+        // Called once at the start with class-level info
+        // Captures: superclass (e.g., "hdl/Module") and interfaces
         override def visit(version: Int, access: Int, name: String,
                           signature: String, superName: String,
                           interfaces: Array[String]): Unit =
           if superName != null then refs += superName
           if interfaces != null then interfaces.foreach(refs += _)
 
+        // Called for each field declaration
+        // Captures: field types (e.g., "val io: MyBundle" -> MyBundle)
         override def visitField(access: Int, name: String, descriptor: String,
                                signature: String, value: Any) =
-// println(s"visitField ${access} ${name} ${descriptor} ${signature} ${value}")
+          // println(s"visitField ${access} ${name} ${descriptor} ${signature} ${value}")
           addTypeRef(refs, Type.getType(descriptor))
           null
 
+        // Called for each method declaration
+        // Returns a MethodVisitor to scan the method body for more references
         override def visitMethod(access: Int, name: String, descriptor: String,
                                 signature: String, exceptions: Array[String]) =
-// println(s"visitMethod ${access} ${name} ${descriptor} ${signature}")
+          // println(s"visitMethod ${access} ${name} ${descriptor} ${signature}")
+          // Capture parameter and return types from method signature
           addTypeRef(refs, Type.getMethodType(descriptor))
           if exceptions != null then exceptions.foreach(refs += _)
+
+          // Return a MethodVisitor to scan bytecode instructions
+          // This is critical for capturing types used inside method bodies
           new MethodVisitor(Opcodes.ASM9) {
+
+            // NEW, ANEWARRAY, CHECKCAST, INSTANCEOF instructions
+            // e.g., "new BusyTable()" generates NEW riscv_ooo/BusyTable
             override def visitTypeInsn(opcode: Int, tpe: String): Unit =
-// println(s"visitTypeInsn ${opcode} ${tpe}")
+              // println(s"visitTypeInsn ${opcode} ${tpe}")
               refs += tpe
+
+            // GETFIELD, PUTFIELD, GETSTATIC, PUTSTATIC instructions
+            // Captures both the owner class and field type
             override def visitFieldInsn(opcode: Int, owner: String, name: String, descriptor: String): Unit =
-// println(s"visitFieldInsn ${opcode} ${owner} ${name} ${descriptor}")
+              // println(s"visitFieldInsn ${opcode} ${owner} ${name} ${descriptor}")
               refs += owner
               addTypeRef(refs, Type.getType(descriptor))
+
+            // INVOKEVIRTUAL, INVOKESPECIAL, INVOKESTATIC, INVOKEINTERFACE
+            // e.g., "BPUUpdate.apply(p)" generates INVOKEVIRTUAL riscv_ooo/BPUUpdate$.apply
             override def visitMethodInsn(opcode: Int, owner: String, name: String, descriptor: String, isInterface: Boolean): Unit =
-// println(s"visitMethodInsn ${opcode} ${owner} ${name} ${descriptor} ${isInterface}")
+              // println(s"visitMethodInsn ${opcode} ${owner} ${name} ${descriptor} ${isInterface}")
               refs += owner
               addTypeRef(refs, Type.getMethodType(descriptor))
+
+            // LDC instruction - loads constants including Class objects
+            // e.g., "classOf[MyClass]" loads MyClass.class
             override def visitLdcInsn(value: Any): Unit =
-// println(s"visitLdcInsn ${value}")
+              // println(s"visitLdcInsn ${value}")
               value match
                 case t: Type => addTypeRef(refs, t)
                 case _ => ()
+
+            // MULTIANEWARRAY instruction - multi-dimensional array creation
             override def visitMultiANewArrayInsn(descriptor: String, numDimensions: Int): Unit =
-// println(s"visitMultiANewArrayInsn ${descriptor} ${numDimensions}")
+              // println(s"visitMultiANewArrayInsn ${descriptor} ${numDimensions}")
               addTypeRef(refs, Type.getType(descriptor))
           }
 
+        // Called for inner/nested class references
+        // Scala companion objects appear as inner classes (e.g., MyClass$)
         override def visitInnerClass(name: String, outerName: String,
                                      innerName: String, access: Int): Unit =
-// println(s"visitInnerClass ${name} ${outerName} ${innerName} ${access}")
+          // println(s"visitInnerClass ${name} ${outerName} ${innerName} ${access}")
           refs += name
       }, 0)
     catch case _: Exception => ()
     refs.toSet
 
+  // Recursively collect all transitive dependencies starting from a class.
+  // Uses BFS/DFS to walk the dependency graph, loading and parsing each class.
   private def collectTransitiveDependencies(
     cls: Class[?],
     visited: mutable.Set[String],
@@ -133,7 +214,7 @@ object ModuleKey:
     readClassBytes(cls) match
       case Some(bytes) =>
         classBytes(className) = bytes
-// println(s"============= ${className} ======================")
+        // println(s"============= ${className} ======================")
         val refs = parseClassReferences(bytes)
         for ref <- refs if shouldIncludeClass(ref) && !visited.contains(ref) do
           val refClassName = ref.replace('/', '.')
@@ -144,17 +225,21 @@ object ModuleKey:
             case _: ClassNotFoundException | _: NoClassDefFoundError => ()
       case None => ()
 
+  // Compute a SHA-256 hash over all transitive dependencies.
+  // The hash includes both class names and their bytecode, ensuring
+  // any change to any dependency produces a different hash.
   private def transitiveCodeHash(cls: Class[?]): Option[Array[Byte]] =
     val visited = mutable.Set[String]()
     val classBytes = mutable.Map[String, Array[Byte]]()
     collectTransitiveDependencies(cls, visited, classBytes)
 
-// println(s"= ${cls.getName()}")
-// println(s"  - classBytes.keySet: ${classBytes.keySet}")
-// println(s"  - visisted: ${visited}")
+    // println(s"= ${cls.getName()}")
+    // println(s"  - classBytes.keySet: ${classBytes.keySet}")
+    // println(s"  - visisted: ${visited}")
 
     if classBytes.isEmpty then return None
 
+    // Sort by class name for deterministic ordering
     val md = MessageDigest.getInstance("SHA-256")
     for (name, bytes) <- classBytes.toSeq.sortBy(_._1) do
       md.update(name.getBytes("UTF-8"))
