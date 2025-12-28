@@ -36,7 +36,7 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
     val label = assignLabel(mod, key)
     memoized.get(key.value) match
       case Some(designs) =>
-        log(s"Memoized Hit ${mod.getClass.getName} ${key} ${label}")
+        log(s"Duplicate Instance Hit ${mod.getClass.getName} ${key} ${label}")
         Future.successful((designs, false))
       case None =>
         startElaboration(mod, key, label, isTop)

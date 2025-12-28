@@ -3,7 +3,7 @@ package hdl
 import java.io.{ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import java.nio.file.{Files, Path, Paths}
 import java.security.MessageDigest
-import org.objectweb.asm.{ClassReader, ClassVisitor, Opcodes}
+import org.objectweb.asm.{ClassReader, ClassVisitor, MethodVisitor, Opcodes, Type}
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
 import scala.util.control.NonFatal
@@ -60,18 +60,64 @@ object ModuleKey:
         s.close()
     }
 
+  private def addTypeRef(refs: mutable.Set[String], t: Type): Unit =
+    t.getSort match
+      case Type.OBJECT => refs += t.getInternalName
+      case Type.ARRAY => addTypeRef(refs, t.getElementType)
+      case Type.METHOD =>
+        addTypeRef(refs, t.getReturnType)
+        t.getArgumentTypes.foreach(addTypeRef(refs, _))
+      case _ => ()
+
   private def parseClassReferences(classBytes: Array[Byte]): Set[String] =
     val refs = mutable.Set[String]()
     try
       val reader = new ClassReader(classBytes)
-      for i <- 1 until reader.getItemCount do
-        try
-          val offset = reader.getItem(i)
-          if offset > 0 && (classBytes(offset - 1) & 0xff) == 7 then
-            val name = reader.readClass(i, new Array[Char](256))
-            if name != null && !name.startsWith("[") then
-              refs += name
-        catch case _: Exception => ()
+      reader.accept(new ClassVisitor(Opcodes.ASM9) {
+        override def visit(version: Int, access: Int, name: String,
+                          signature: String, superName: String,
+                          interfaces: Array[String]): Unit =
+          if superName != null then refs += superName
+          if interfaces != null then interfaces.foreach(refs += _)
+
+        override def visitField(access: Int, name: String, descriptor: String,
+                               signature: String, value: Any) =
+// println(s"visitField ${access} ${name} ${descriptor} ${signature} ${value}")
+          addTypeRef(refs, Type.getType(descriptor))
+          null
+
+        override def visitMethod(access: Int, name: String, descriptor: String,
+                                signature: String, exceptions: Array[String]) =
+// println(s"visitMethod ${access} ${name} ${descriptor} ${signature}")
+          addTypeRef(refs, Type.getMethodType(descriptor))
+          if exceptions != null then exceptions.foreach(refs += _)
+          new MethodVisitor(Opcodes.ASM9) {
+            override def visitTypeInsn(opcode: Int, tpe: String): Unit =
+// println(s"visitTypeInsn ${opcode} ${tpe}")
+              refs += tpe
+            override def visitFieldInsn(opcode: Int, owner: String, name: String, descriptor: String): Unit =
+// println(s"visitFieldInsn ${opcode} ${owner} ${name} ${descriptor}")
+              refs += owner
+              addTypeRef(refs, Type.getType(descriptor))
+            override def visitMethodInsn(opcode: Int, owner: String, name: String, descriptor: String, isInterface: Boolean): Unit =
+// println(s"visitMethodInsn ${opcode} ${owner} ${name} ${descriptor} ${isInterface}")
+              refs += owner
+              addTypeRef(refs, Type.getMethodType(descriptor))
+            override def visitLdcInsn(value: Any): Unit =
+// println(s"visitLdcInsn ${value}")
+              value match
+                case t: Type => addTypeRef(refs, t)
+                case _ => ()
+            override def visitMultiANewArrayInsn(descriptor: String, numDimensions: Int): Unit =
+// println(s"visitMultiANewArrayInsn ${descriptor} ${numDimensions}")
+              addTypeRef(refs, Type.getType(descriptor))
+          }
+
+        override def visitInnerClass(name: String, outerName: String,
+                                     innerName: String, access: Int): Unit =
+// println(s"visitInnerClass ${name} ${outerName} ${innerName} ${access}")
+          refs += name
+      }, 0)
     catch case _: Exception => ()
     refs.toSet
 
@@ -87,6 +133,7 @@ object ModuleKey:
     readClassBytes(cls) match
       case Some(bytes) =>
         classBytes(className) = bytes
+// println(s"============= ${className} ======================")
         val refs = parseClassReferences(bytes)
         for ref <- refs if shouldIncludeClass(ref) && !visited.contains(ref) do
           val refClassName = ref.replace('/', '.')
@@ -102,9 +149,9 @@ object ModuleKey:
     val classBytes = mutable.Map[String, Array[Byte]]()
     collectTransitiveDependencies(cls, visited, classBytes)
 
-    println(s"= ${cls.getName()}")
-    println(s"  - classBytes.keySet: ${classBytes.keySet}")
-    println(s"  - visisted: ${visited}")
+// println(s"= ${cls.getName()}")
+// println(s"  - classBytes.keySet: ${classBytes.keySet}")
+// println(s"  - visisted: ${visited}")
 
     if classBytes.isEmpty then return None
 
