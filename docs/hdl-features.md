@@ -59,7 +59,7 @@ class SwitchEnum extends Module:
   io.out := reg
 ```
 
-Using typeclass derivation, switch statements can also accept tuples as well, similar to how Scala3's match accepts tuples.
+Using typeclass derivation, switch statements can accept tuples, similar to how Scala's match accepts tuples.
 For example, we can do this:
 
 ```scala
