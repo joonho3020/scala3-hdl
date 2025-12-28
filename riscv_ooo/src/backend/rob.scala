@@ -132,6 +132,9 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
     }
 
     val commit_mask = Wire(Vec.fill(p.retireWidth)(Bool()))
+    val commit_fire = commit_mask.reduce(_ || _) && !io.branch_update.valid
+    val commit_cnt  = commit_mask.map(_.asUInt).reduce(_ +& _)
+
     for (i <- 0 until p.retireWidth) {
       val rob_idx = idx_offset(rob_head, i)
       val row  = robIdxToRow(rob_idx)
@@ -145,35 +148,37 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
         commit_mask(i) := ready && commit_mask(i - 1)
       }
 
-      io.commit(i).valid := commit_mask(i)
+      io.commit(i).valid := false.B
       io.commit(i).bits := entry.uop
       io.commit_data(i) := Mux(commit_mask(i), entry.wb_data, 0.U)
+
+      when (commit_fire && commit_mask(i)) {
+        rob_entries(row)(bank).valid := false.B
+        rob_entries(row)(bank).done := false.B
+        io.commit(i).valid := true.B
+      }
     }
 
-    val commit_fire = commit_mask.reduce(_ || _)
-    val commit_cnt  = commit_mask.map(_.asUInt).reduce(_ +& _)
-    when (commit_fire && !io.branch_update.valid) {
-      for (i <- 0 until p.retireWidth) {
-        when (commit_mask(i)) {
-          val rob_idx = idx_offset(rob_head, i)
-          val row  = robIdxToRow(rob_idx)
-          val bank = robIdxToBank(rob_idx)
-          rob_entries(row)(bank).valid := false.B
-          rob_entries(row)(bank).done := false.B
-        }
-      }
-
+    when (commit_fire) {
       bump_ptr(rob_head, commit_cnt)
     }
+    dontTouch(commit_mask)
+    dontTouch(commit_fire.asWire)
 
     // -----------------------------------------------------------------------
     // Rollback Logic (on misprediction)
     // -----------------------------------------------------------------------
-    val brupdate_b2_rob_row = robIdxToRow(io.branch_update.rob_idx)
-    val brupdate_b2_rob_row_oh = UIntToOH(brupdate_b2_rob_row)
-    val brupdate_b2_rob_clr_oh = IsYoungerMask(brupdate_b2_rob_row, rob_head, numRows)
-    val brupdate_b2_rob_bank_idx = robIdxToBank(io.branch_update.rob_idx)
-    val brupdate_b2_rob_bank_clr_oh = ~MaskLower(UIntToOH(brupdate_b2_rob_bank_idx))
+    val brupdate_b2_rob_row = robIdxToRow(io.branch_update.rob_idx).asWire
+    val brupdate_b2_rob_row_oh = UIntToOH(brupdate_b2_rob_row).asWire
+    val brupdate_b2_rob_clr_oh = IsYoungerMask(brupdate_b2_rob_row, robIdxToRow(rob_head), numRows).asWire
+    val brupdate_b2_rob_bank_idx = robIdxToBank(io.branch_update.rob_idx).asWire
+    val brupdate_b2_rob_bank_clr_oh = ~MaskLower(UIntToOH(brupdate_b2_rob_bank_idx)).asWire
+
+    dontTouch(brupdate_b2_rob_row)
+    dontTouch(brupdate_b2_rob_row_oh)
+    dontTouch(brupdate_b2_rob_clr_oh)
+    dontTouch(brupdate_b2_rob_bank_idx)
+    dontTouch(brupdate_b2_rob_bank_clr_oh)
 
     when (io.branch_update.valid && io.branch_update.mispred) {
       for (c <- 0 until coreWidth) {

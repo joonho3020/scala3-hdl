@@ -58,7 +58,9 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
       map_table.io.dec_req(i).lrd  := io.dec_uops(i).bits.lrd
     }
 
-    val kill_rename = io.br_resolve.valid && io.br_resolve.mispredict
+    val kill_rename = (io.br_resolve.valid && io.br_resolve.mispredict).asWire
+    dontTouch(kill_rename)
+
     val rn1_fire = !io.dis_stall && !kill_rename
     for (i <- 0 until p.coreWidth) {
       val dec = io.dec_uops(i).bits
@@ -88,7 +90,10 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
     }
 
     val rn1_uops = Wire(Vec.fill(p.coreWidth)(Valid(UOp(p))))
-    rn1_uops.zip(rn1_uops_reg).foreach(_ := _)
+    rn1_uops.zip(rn1_uops_reg).foreach((w, r) => {
+      w.valid := r.valid && !kill_rename
+      w.bits := r.bits
+    })
     dontTouch(rn1_uops)
 
     for (i <- 0 until p.coreWidth) {

@@ -58,7 +58,7 @@ class PhysicalRegfile(p: CoreParams) extends Module with CoreCacheable(p):
     })
 
     io.write_ports.zipWithIndex.foreach((wp, idx) => {
-      when (wp.valid && wp.addr =/= 0.U) {
+      when (wp.valid) {
         regfile.writePorts(idx).write(wp.addr, wp.data)
       }
     })
