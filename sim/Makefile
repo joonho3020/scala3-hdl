@@ -57,7 +57,6 @@ clean:
 	cargo clean
 	rm -rf test-outputs
 	rm -f libVdut.so
-	rm -f *.vcd
 	rm -f .inorder-verilog-stamp .ooo-verilog-stamp
 
 test-all: .inorder-verilog-stamp
