@@ -36,6 +36,7 @@ class BranchTagManager(p: CoreParams) extends Module with CoreCacheable(p):
 
   val coreWidth = p.coreWidth
   val branchTagBits = p.branchTagBits
+  require(branchTagBits >= coreWidth)
 
   val io = IO(BranchTagManagerIO(
     req_valid = Input(Vec.fill(coreWidth)(Bool())),
@@ -67,13 +68,15 @@ class BranchTagManager(p: CoreParams) extends Module with CoreCacheable(p):
     val next_mask_base = Wire(Vec.fill(coreWidth)(UInt(branchTagBits.W)))
     val next_mask_alloc = Wire(Vec.fill(coreWidth)(UInt(branchTagBits.W)))
 
+    val base_mask = Mux(io.br_resolve.valid, cur_mask & ~io.br_resolve.tag, cur_mask)
+
     for (i <- 0 until coreWidth) {
       if i == 0 then
         next_freetags_base(i) := free_tags
         next_freetags_alloc(i) := free_tags
 
-        next_mask_base(i) := cur_mask
-        next_mask_alloc(i) := cur_mask
+        next_mask_base(i) := base_mask
+        next_mask_alloc(i) := base_mask
       else
         next_freetags_base(i) := next_freetags_alloc(i-1)
         next_freetags_alloc(i) := next_freetags_alloc(i-1)
