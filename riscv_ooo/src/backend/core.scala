@@ -315,11 +315,9 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     rob.io.wb_data := wb_data
 
     for (i <- 0 until issueWidth) {
-      prf.io.write_ports(i).valid := wb_uops(i).valid &&
-                                     wb_uops(i).bits.ctrl.rd_wen &&
-                                     wb_uops(i).bits.lrd =/= 0.U
+      prf.io.write_ports(i).valid := wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen
       prf.io.write_ports(i).addr := wb_uops(i).bits.prd
-      prf.io.write_ports(i).data := wb_data(i)
+      prf.io.write_ports(i).data := Mux(wb_uops(i).bits.lrd === 0.U, 0.U, wb_data(i))
     }
 
     for (i <- 0 until issueWidth) {
