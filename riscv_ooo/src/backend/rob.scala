@@ -71,9 +71,10 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
     val empty = (rob_head === rob_tail) && !maybe_full
 
     val valid_entries = Wire(UInt(log2Ceil(entries + 1).W))
-    valid_entries := Mux(rob_tail >= rob_head,
+    valid_entries := Mux(full, entries.U,
+                          Mux(rob_tail >= rob_head,
                             rob_tail - rob_head,
-                            entries.U - (rob_head - rob_tail))
+                              entries.U - (rob_head - rob_tail)))
 
     io.valid_entries := valid_entries
     io.full := (p.rob.numEntries.U - valid_entries) < coreWidth.U
@@ -160,6 +161,10 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
 
     when (commit_fire) {
       bump_ptr(rob_head, commit_cnt)
+    }
+
+    when (dispatch_fire =/= commit_fire) {
+      maybe_full := dispatch_fire
     }
     dontTouch(commit_mask)
     dontTouch(commit_fire.asWire)
