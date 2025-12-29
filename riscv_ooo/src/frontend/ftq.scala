@@ -99,6 +99,7 @@ class FetchTargetQueue(p: CoreParams) extends Module with CoreCacheable(p):
 
     when (do_deq) {
       val deq_entry = entries(io.commit.ftq_idx)
+      deq_entry.valid := false.B
 
       io.bht_btb_update.valid := true.B
       io.bht_btb_update.bits.pc := deq_entry.bits.pc

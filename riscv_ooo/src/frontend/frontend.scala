@@ -88,13 +88,27 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     bpu.io.req.valid := false.B
     bpu.io.req.bits.pc := 0.U(p.pcBits.W)
 
-    ftq.io.redirect <> io.core.redirect
-    ftq.io.commit <> io.core.commit
+    ftq.io.redirect.valid := io.core.redirect.valid
+    ftq.io.redirect.target := io.core.redirect.target
+    ftq.io.redirect.ftq_idx := io.core.redirect.ftq_idx
+    ftq.io.redirect.taken := io.core.redirect.taken
 
-    bpu.io.restore_ghist.valid := io.core.redirect.valid && ftq.io.redirect_resp.valid
-    bpu.io.restore_ghist.bits := ftq.io.redirect_resp.bits.ghist
-    bpu.io.restore_ras.valid := io.core.redirect.valid && ftq.io.redirect_resp.valid
-    bpu.io.restore_ras.bits.ras_ptr := ftq.io.redirect_resp.bits.ras_ptr
+    ftq.io.commit.valid := io.core.commit.valid
+    ftq.io.commit.ftq_idx := io.core.commit.ftq_idx
+
+    bpu.io.restore_ghist.valid := false.B
+    bpu.io.restore_ghist.bits := DontCare
+
+    bpu.io.restore_ras.valid := false.B
+    bpu.io.restore_ras.bits := DontCare
+
+    when (io.core.redirect.valid) {
+      bpu.io.restore_ghist.valid := ftq.io.redirect_resp.valid
+      bpu.io.restore_ghist.bits := ftq.io.redirect_resp.bits.ghist
+      bpu.io.restore_ras.valid := ftq.io.redirect_resp.valid
+      bpu.io.restore_ras.bits.ras_ptr := ftq.io.redirect_resp.bits.ras_ptr
+      bpu.io.restore_ras.bits.ras_top := ftq.io.redirect_resp.bits.ras_top
+    }
 
     val f3_ready = Wire(Bool())
 
