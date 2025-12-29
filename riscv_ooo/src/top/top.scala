@@ -32,19 +32,8 @@ class Tile(p: CoreParams) extends Module:
     memarb.io.dcache <> core.io.mem
     io.mem <> memarb.io.mem
 
-    for (i <- 0 until p.coreWidth) {
-      core.io.ifu.fetch_uops(i).valid := frontend.io.core.fetch_uops(i).valid
-      core.io.ifu.fetch_uops(i).bits := frontend.io.core.fetch_uops(i).bits
-      frontend.io.core.fetch_uops(i).ready := core.io.ifu.fetch_uops(i).ready
-    }
+    core.io.ifu <> frontend.io.core
 
-    frontend.io.core.redirect.valid := core.io.ifu.redirect.valid
-    frontend.io.core.redirect.target := core.io.ifu.redirect.target
-    frontend.io.core.redirect.ftq_idx := core.io.ifu.redirect.ftq_idx
-    frontend.io.core.redirect.taken := core.io.ifu.redirect.taken
-
-    frontend.io.core.commit.valid := core.io.ifu.commit.valid
-    frontend.io.core.commit.ftq_idx := core.io.ifu.commit.ftq_idx
     io.retire_info <> core.io.retire_info
     io.cosim_info <> core.io.cosim_info
   }
