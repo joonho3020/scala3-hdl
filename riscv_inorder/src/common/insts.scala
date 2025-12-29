@@ -1,6 +1,9 @@
 package riscv_inorder
 
-import hdl._
+import hdl.core._
+import hdl.util._
+import hdl.elaboration._
+
 
 object Instructions {
   def ADD                = BitPat("b0000000??????????000?????0110011")

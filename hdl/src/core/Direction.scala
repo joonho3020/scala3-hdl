@@ -1,4 +1,4 @@
-package hdl
+package hdl.core
 
 /** Direction of a hardware value or port. */
 enum Direction:

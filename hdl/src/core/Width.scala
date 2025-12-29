@@ -1,4 +1,4 @@
-package hdl
+package hdl.core
 
 /** Constructors for width values. */
 object Width {

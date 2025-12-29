@@ -1,8 +1,14 @@
 package riscv_ooo
 
+import hdl.core._
+import hdl.util._
+import hdl.elaboration._
+
+import hdl.core._
+import hdl.util._
+import hdl.elaboration._
 import java.io.{File, PrintWriter}
 import scala.sys.process.*
-import hdl._
 
 def writeChirrtl(filename: String, content: String): Unit =
   val dir = new File("sim/test-outputs/chirrtl")

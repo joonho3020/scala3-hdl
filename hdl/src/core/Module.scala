@@ -1,4 +1,4 @@
-package hdl
+package hdl.core
 
 import scala.collection.mutable
 
@@ -51,35 +51,170 @@ abstract class Module:
       _bodyFn.foreach(fn => fn(using summon[Module]))
       _bodyRan = true
 
-  /** Declare a module IO port. */
+  /**
+   * Declare a module IO port with automatic name inference.
+   *
+   * Creates a port on the module boundary. The port name is automatically inferred
+   * from the enclosing `val` declaration. Direction (Input/Output/Flipped) must be
+   * specified in the hardware type construction.
+   *
+   * @example
+   * {{{
+   * class MyModule extends Module:
+   *   given Module = this
+   *   val io = IO(MyIO(
+   *     dataIn = Input(UInt(Width(8))),
+   *     dataOut = Output(UInt(Width(8)))
+   *   ))
+   * }}}
+   *
+   * @tparam T the hardware data type of the port
+   * @param t the port template with direction annotations
+   * @return the declared IO port
+   */
   protected inline def IO[T <: HWData](inline t: T): T =
     ${ ModuleMacros.ioImpl('t, 'this) }
 
-  /** Declare a wire. */
+  /**
+   * Declare a combinational wire with automatic name inference.
+   *
+   * Wires represent combinational logic. They must be assigned exactly once using `:=`.
+   * The wire name is automatically inferred from the enclosing `val` declaration.
+   *
+   * @example
+   * {{{
+   * val sum = Wire(UInt(Width(9)))
+   * sum := a +& b  // Assign once
+   * }}}
+   *
+   * @tparam T the hardware data type
+   * @param t the wire type template
+   * @return the declared wire
+   * @see [[WireInit]] for wires with initialization
+   */
   protected inline def Wire[T <: HWData](inline t: T): T =
     ${ ModuleMacros.wireImpl('t, 'this) }
 
-  /** Declare a register. */
+  /**
+   * Declare a register with automatic name inference.
+   *
+   * Registers capture their input on the rising edge of the implicit clock signal.
+   * They hold state across clock cycles. Must be assigned to establish the next value.
+   *
+   * @example
+   * {{{
+   * val counter = Reg(UInt(Width(32)))
+   * counter := counter + 1.U
+   * }}}
+   *
+   * @tparam T the hardware data type
+   * @param t the register type template
+   * @return the declared register
+   * @see [[RegInit]] for registers with reset values
+   * @see [[RegNext]] for direct signal delay
+   */
   protected inline def Reg[T <: HWData](inline t: T): T =
     ${ ModuleMacros.regImpl('t, 'this) }
 
-  /** Declare a register connected to the next value. */
+  /**
+   * Declare a register directly connected to a signal.
+   *
+   * Creates a register whose next value is the provided signal, equivalent to
+   * creating a Reg and immediately assigning it. Useful for pipeline delays.
+   *
+   * @example
+   * {{{
+   * val delayed = RegNext(dataIn)  // Delays dataIn by one cycle
+   * val pipeline = RegNext(RegNext(dataIn))  // Two-cycle delay
+   * }}}
+   *
+   * @tparam T the hardware data type
+   * @param t the signal to register
+   * @return the declared register with input connected
+   * @see [[Reg]] for explicit assignment
+   */
   protected inline def RegNext[T <: HWData](inline t: T): T =
     ${ ModuleMacros.regNextImpl('t, 'this) }
 
-  /** Declare a register with an explicit reset value. */
+  /**
+   * Declare a register with a reset value.
+   *
+   * Creates a register that initializes to the specified value when the implicit
+   * reset signal is asserted. The reset value must be a hardware literal.
+   *
+   * @example
+   * {{{
+   * val state = RegInit(0.U(3.W))      // Resets to 0
+   * val valid = RegInit(false.B)       // Resets to false
+   * }}}
+   *
+   * @tparam T the hardware data type
+   * @param t the reset value (hardware literal)
+   * @return the declared register with reset
+   * @see [[Reg]] for registers without reset
+   */
   protected inline def RegInit[T <: HWData](inline t: T): T =
     ${ ModuleMacros.regInitImpl('t, 'this) }
 
-  /** Declare a wire with an explicit default value. */
+  /**
+   * Declare a wire with an initialization value.
+   *
+   * Creates a wire and immediately assigns it to the provided value. Equivalent
+   * to declaring a Wire and then using `:=` to assign it.
+   *
+   * @example
+   * {{{
+   * val defaultValue = WireInit(42.U(8.W))
+   * }}}
+   *
+   * @tparam T the hardware data type
+   * @param t the initialization value
+   * @return the declared and initialized wire
+   * @see [[Wire]] for uninitialized wires
+   */
   protected inline def WireInit[T <: HWData](inline t: T): T =
     ${ ModuleMacros.wireInitImpl('t, 'this) }
 
-  /** Create a literal hardware value. */
+  /**
+   * Create a hardware literal value.
+   *
+   * Converts a Scala value to a hardware literal. The payload type must match
+   * the hardware type's host type.
+   *
+   * @example
+   * {{{
+   * val myBundle = Lit(MyBundle(UInt(Width(4)), Bool()))(4, true)
+   * }}}
+   *
+   * @tparam T the hardware data type
+   * @param t the hardware type template
+   * @param payload the Scala value to convert
+   * @return a hardware literal
+   */
   protected inline def Lit[T <: HWData](inline t: T)(inline payload: HostTypeOf[T]): T =
     ${ ModuleMacros.litImpl('t, 'payload, 'this) }
 
-  /** Conditional hardware construction. */
+  /**
+   * Conditional hardware construction using when/elsewhen/otherwise.
+   *
+   * Creates conditional logic blocks. Hardware inside the block is only active
+   * when the condition is true. Can be chained with `.elsewhen` and `.otherwise`.
+   *
+   * @example
+   * {{{
+   * when(enable) {
+   *   counter := counter + 1.U
+   * }.elsewhen(reset) {
+   *   counter := 0.U
+   * }.otherwise {
+   *   counter := counter
+   * }
+   * }}}
+   *
+   * @param cond the condition (Bool signal)
+   * @param block the hardware to construct when condition is true
+   * @return WhenDSL for chaining elsewhen/otherwise
+   */
   protected inline def when(cond: Bool)(block: => Unit)(using m: Module): WhenDSL =
     ModuleOps.when(cond, summon[Module]) {
       block
@@ -95,11 +230,11 @@ abstract class Module:
 
 object Module:
   /** Instantiate a child module with a name inferred from the enclosing val. */
-  inline def apply[M <: hdl.Module](inline gen: M)(using inline parent: hdl.Module): M =
+  inline def apply[M <: Module](inline gen: M)(using inline parent: Module): M =
     ${ ModuleMacros.moduleInstImpl('gen, 'parent) }
 
   /** Instantiate a child module with an optional explicit name hint. */
-  def instantiate[M <: hdl.Module](gen: => M, parent: hdl.Module, name: Option[String]): M =
+  def instantiate[M <: Module](gen: => M, parent: Module, name: Option[String]): M =
     val sub = gen
     val instName = parent.getBuilder.allocateName(name, "inst")
     sub.setInstanceName(instName)

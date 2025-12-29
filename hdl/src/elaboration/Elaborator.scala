@@ -1,10 +1,11 @@
-package hdl
+package hdl.elaboration
+
+import hdl.core._
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.Duration
-import hdl.IR.PrimOp
 
 final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String => Unit = println):
   private implicit val ec: ExecutionContext = ExecutionContext.global
@@ -255,7 +256,7 @@ final class Elaborator(buildCache: BuildCache = BuildCache.default, log: String 
       case IR.DoPrim(op, args, consts) =>
         val parts = args.map(emitChirrtlExpr) ++ consts.map(_.toString)
         op match
-          case PrimOp.AsBool =>
+          case IR.PrimOp.AsBool =>
             s"${parts.mkString(", ")}"
           case _ =>
             s"${op.opName}(${parts.mkString(", ")})"

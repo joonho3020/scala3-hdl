@@ -1,9 +1,12 @@
 package hdl
 
+import hdl.core._
+import hdl.util._
+import hdl.elaboration._
+
 import utest.*
 import scala.compiletime.testing.*
 import scala.reflect.ClassTag
-import hdl.ModuleOps.{given, *}
 
 final case class SimpleIO(in: UInt, out: UInt) extends Bundle[SimpleIO]
 

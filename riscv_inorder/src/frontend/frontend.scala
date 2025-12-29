@@ -1,6 +1,9 @@
 package riscv_inorder
 
-import hdl._
+import hdl.core._
+import hdl.util._
+import hdl.elaboration._
+
 
 case class ICacheIf(
   s0_vaddr: Valid[UInt],

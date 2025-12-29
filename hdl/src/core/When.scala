@@ -1,4 +1,4 @@
-package hdl
+package hdl.core
 
 object WhenOps:
   def when(cond: Bool, mod: Module)(block: => Unit): WhenDSL =

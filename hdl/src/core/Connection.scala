@@ -1,4 +1,4 @@
-package hdl
+package hdl.core
 
 
 import scala.deriving.Mirror

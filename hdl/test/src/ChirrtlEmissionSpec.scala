@@ -1,10 +1,12 @@
 package hdl
 
+import hdl.core._
+import hdl.util._
+import hdl.elaboration._
+
 import utest.*
 import java.io.{File, PrintWriter}
 import scala.sys.process.*
-import hdl.*
-import hdl.`Value$package`.*
 
 case class AdderIO(a: UInt, b: UInt, c: UInt) extends Bundle[AdderIO]
 

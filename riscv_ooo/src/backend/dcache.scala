@@ -1,6 +1,9 @@
 package riscv_ooo
 
-import hdl._
+import hdl.core._
+import hdl.util._
+import hdl.elaboration._
+
 import riscv_inorder.CoreConstants._
 
 case class DCacheReq(

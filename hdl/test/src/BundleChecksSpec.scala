@@ -1,5 +1,9 @@
 package hdl
 
+import hdl.core._
+import hdl.util._
+import hdl.elaboration._
+
 import utest.*
 import scala.compiletime.testing.*
 

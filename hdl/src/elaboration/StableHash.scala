@@ -1,4 +1,6 @@
-package hdl
+package hdl.elaboration
+
+import hdl.core._
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest

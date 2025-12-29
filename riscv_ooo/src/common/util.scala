@@ -1,6 +1,9 @@
 package riscv_ooo
 
-import hdl._
+import hdl.core._
+import hdl.util._
+import hdl.elaboration._
+
 
 // From BOOM
 // n-1                 0

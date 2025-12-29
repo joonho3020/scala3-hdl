@@ -1,4 +1,6 @@
-package hdl
+package hdl.core
+
+import hdl.util.BitPat
 
 extension [S, C](selector: S)
   /** Start a switch builder for the selector. */

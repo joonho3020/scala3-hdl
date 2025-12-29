@@ -1,6 +1,9 @@
 package riscv_inorder
 
-import hdl._
+import hdl.core._
+import hdl.util._
+import hdl.elaboration._
+
 import riscv_inorder.ALUParams.Opcode
 
 case class UOp(

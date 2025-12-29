@@ -1,5 +1,9 @@
 package hdl
 
+import hdl.core._
+import hdl.util._
+import hdl.elaboration._
+
 import utest.*
 import java.io.{ByteArrayOutputStream, PrintStream}
 import java.nio.file.{Files, Path}

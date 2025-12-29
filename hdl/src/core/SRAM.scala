@@ -1,4 +1,4 @@
-package hdl
+package hdl.core
 
 /** Handle for an SRAM read port. */
 final class SRAMReadPortHandle[T <: HWData](

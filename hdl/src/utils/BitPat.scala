@@ -1,4 +1,6 @@
-package hdl
+package hdl.util
+
+import hdl.core._
 
 /** Bit pattern with don't-care support for matching UInt values. */
 final class BitPat private (

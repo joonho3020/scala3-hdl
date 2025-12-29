@@ -1,4 +1,4 @@
-package hdl
+package hdl.core
 
 private[hdl] object IR:
   opaque type Identifier = String

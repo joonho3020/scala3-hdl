@@ -1,5 +1,19 @@
-package hdl
+package hdl.util
 
+import hdl.core._
+
+/**
+ * Bit replication utility for creating repeated patterns.
+ *
+ * Replicates a Bool or UInt value n times through concatenation, useful for
+ * creating masks, sign extension, and constant patterns in hardware.
+ *
+ * @example
+ * {{{
+ * val allOnes = Fill(8, true.B)           // 0b11111111
+ * val pattern = Fill(4, 0b11.U(2.W))      // 0b11111111
+ * }}}
+ */
 object Fill:
   /** Replicate a Bool n times to build a UInt.
     * Example: Fill(4, true.B) => 0b1111
@@ -18,6 +32,17 @@ object Fill:
       throw new IllegalArgumentException("Fill requires n > 0")
     Seq.fill(n)(x).Cat
 
+/**
+ * Bit order reversal utility.
+ *
+ * Reverses the bit ordering of a Bits value (LSB becomes MSB and vice versa).
+ * Commonly used for endianness conversion and bit-reversed addressing schemes.
+ *
+ * @example
+ * {{{
+ * val reversed = Reverse(0b1100.U(4.W))  // Returns 0b0011
+ * }}}
+ */
 object Reverse:
   /** Reverse the bit order of a value.
     * Example: Reverse(0b1100) => 0b0011
@@ -37,6 +62,19 @@ object Reverse:
       i -= 1
     acc
 
+/**
+ * Population count (popcount/Hamming weight) utility.
+ *
+ * Counts the number of set bits (1s) in a Bits value or Vec of Bools.
+ * Widely used for counting active signals, computing Hamming distance,
+ * and detecting sparse or dense bit patterns.
+ *
+ * @example
+ * {{{
+ * val count = PopCount(0b10110.U)              // Returns 3.U
+ * val active = PopCount(Vec(true.B, false.B))  // Returns 1.U
+ * }}}
+ */
 object PopCount:
   /** Count the number of set bits in a Bool Vec.
     * Example: PopCount(Vec(false.B, true.B, true.B)) => 2
@@ -55,6 +93,23 @@ object PopCount:
     val bits = (0 until width).map(i => u(i))
     bits.reduce(_ +& _)
 
+/**
+ * Priority encoder for finding the highest (most significant) set bit.
+ *
+ * Returns the index of the highest set bit in a Bits value, with LSB = 0.
+ * If no bits are set, returns 0. Commonly used in arbitration, finding
+ * the highest priority request, and bit scanning operations.
+ *
+ * For one-hot encoded output, see [[PriorityEncoderOH]].
+ *
+ * @example
+ * {{{
+ * val idx = PriorityEncoder(0b010100.U)  // Returns 4.U (bit 4 is highest)
+ * val none = PriorityEncoder(0b000000.U) // Returns 0.U (no bits set)
+ * }}}
+ *
+ * @see [[PriorityEncoderOH]] for one-hot output
+ */
 object PriorityEncoder:
   /** Return the index of the highest set bit (LSB = 0).
     * Example: PriorityEncoder(0b010100) => 4

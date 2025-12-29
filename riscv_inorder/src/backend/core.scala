@@ -1,6 +1,9 @@
 package riscv_inorder
 
-import hdl._
+import hdl.core._
+import hdl.util._
+import hdl.elaboration._
+
 import CoreConstants.{ALUOp1, ALUOp2, MemOp}
 
 case class RedirectIf(

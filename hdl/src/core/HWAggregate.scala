@@ -1,4 +1,4 @@
-package hdl
+package hdl.core
 
 private[hdl] object HWAggregate:
   def foreach[T](value: T, path: String = "")(f: (HWData, String) => Unit): Unit =

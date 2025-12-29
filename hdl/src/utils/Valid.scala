@@ -1,4 +1,6 @@
-package hdl
+package hdl.util
+
+import hdl.core._
 
 /** Bundle carrying a valid bit and associated payload. */
 case class Valid[T <: HWData](valid: Bool, bits: T) extends Bundle[Valid[T]]

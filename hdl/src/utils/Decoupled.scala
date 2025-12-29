@@ -1,4 +1,6 @@
-package hdl
+package hdl.util
+
+import hdl.core._
 
 /** Ready/valid interface bundle. */
 case class Decoupled[T <: HWData](valid: Bool, ready: Bool, bits: T) extends Bundle[Decoupled[T]]:

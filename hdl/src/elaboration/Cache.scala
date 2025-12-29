@@ -1,4 +1,6 @@
-package hdl
+package hdl.elaboration
+
+import hdl.core._
 
 import java.io.{ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import java.nio.file.{Files, Path, Paths}
