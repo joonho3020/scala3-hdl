@@ -14,22 +14,16 @@ ALU_TESTS := \
 
 BRANCH_TESTS := \
 	tests/riscv64i_shift_cf_test.hex \
-	tests/riscv64i_shift_cf_test_long.hex
-
-LOAD_STORE_TESTS := \
-	tests/rv64i_load_store_cacheline_test.hex \
-	tests/rv64i_pointer_chase_cache_stress.hex \
-	tests/rv64i_dirty_evict_reload_cache2k.hex
-
-BP_TESTS := \
+	tests/riscv64i_shift_cf_test_long.hex \
 	tests/riscv64i_bp_btb_ras_test.hex \
 	tests/rv64i_bp_alternating_4.hex \
 	tests/rv64i_bp_correlated_4.hex \
 	tests/rv64i_bp_warmup_16.hex \
 	tests/rv64i_btb_ring64_laps4.hex \
-	tests/rv64i_ras_depth16_reps4.hex
+	tests/rv64i_ras_depth16_reps4.hex \
+	tests/rv64i_integer_big_test.hex
 
-CACHE_TESTS := \
+LOAD_STORE_TESTS := \
 	tests/rv64i_load_store_cacheline_test.hex \
 	tests/rv64i_pointer_chase_cache_stress.hex \
 	tests/rv64i_dirty_evict_reload_cache2k.hex
@@ -40,11 +34,15 @@ $(VERILOG_DIR):
 	mkdir -p $(VERILOG_DIR)
 
 .inorder-verilog-stamp: $(INORDER_SOURCES) $(HDL_SOURCES) | $(VERILOG_DIR)
+	-rm -f $(INORDER_VERILOG)
 	cd .. && ./mill -i riscv_inorder.run
+	test -s $(INORDER_VERILOG)
 	touch $@
 
 .ooo-verilog-stamp: $(OOO_SOURCES) $(HDL_SOURCES) | $(VERILOG_DIR)
+	-rm -f $(OOO_VERILOG)
 	cd .. && ./mill -i riscv_ooo.run
+	test -s $(OOO_VERILOG)
 	touch $@
 
 ooo-cosim: .ooo-verilog-stamp
