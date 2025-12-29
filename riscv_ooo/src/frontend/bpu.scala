@@ -71,11 +71,28 @@ object BPUUpdate:
       is_ret = Bool()
     )
 
+case class RASSnapshot(
+  ras_ptr: UInt,
+  ras_top: UInt
+) extends Bundle[RASSnapshot]
+
+object RASSnapshot:
+  def apply(p: CoreParams): RASSnapshot =
+    RASSnapshot(
+      ras_ptr = UInt(log2Ceil(p.bpu.rasEntries + 1).W),
+      ras_top = UInt(p.pcBits.W)
+    )
+
 case class BranchPredictorIO(
   req: Valid[BPUReq],
   resp: Vec[Valid[BPUResp]],
-  update: Valid[BPUUpdate],
-  flush: Bool
+  bht_btb_update: Valid[BPUUpdate],
+  ras_update: Valid[BPUUpdate],
+  flush: Bool,
+  ghist: UInt,
+  ras_snapshot: RASSnapshot,
+  restore_ghist: Valid[UInt],
+  restore_ras: Valid[RASSnapshot],
 ) extends Bundle[BranchPredictorIO]
 
 object BranchPredictorIO:
@@ -83,8 +100,13 @@ object BranchPredictorIO:
     BranchPredictorIO(
       req = Input(Valid(BPUReq(p))),
       resp = Output(Vec.fill(p.coreWidth)(Valid(BPUResp(p)))),
-      update = Flipped(Valid(BPUUpdate(p))),
-      flush = Input(Bool())
+      bht_btb_update = Flipped(Valid(BPUUpdate(p))),
+      ras_update = Flipped(Valid(BPUUpdate(p))),
+      flush = Input(Bool()),
+      ghist = Output(UInt(p.bpu.ghistBits.W)),
+      ras_snapshot = Output(RASSnapshot(p)),
+      restore_ghist = Flipped(Valid(UInt(p.bpu.ghistBits.W))),
+      restore_ras = Flipped(Valid(RASSnapshot(p))),
     )
 
 // TODO: Bank BTB, BHT memory structures
@@ -104,6 +126,16 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       val top_idx = Mux(ptr === 0.U, (nras - 1).U, ptr - 1.U)
       stack(top_idx)
     def empty: Bool = count === 0.U
+    def get_idx: UInt = ptr
+    def get_snapshot: RASSnapshot =
+      val snap = Wire(RASSnapshot(p))
+      snap.ras_ptr := ptr
+      snap.ras_top := top
+      snap
+    def restore(snapshot: RASSnapshot): Unit =
+      ptr := snapshot.ras_ptr
+      val top_idx = Mux(snapshot.ras_ptr === 0.U, (nras - 1).U, ptr - 1.U)
+      stack(top_idx) := snapshot.ras_top
     def clear: Unit =
       count := 0.U
       ptr := 0.U
@@ -147,37 +179,55 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
         btb(i).valid := false.B
       }
 
-  class BHT(entries: Int):
-    val bhtIdxBits = log2Ceil(entries)
-    private val bht = Reg(Vec.fill(entries)(UInt(2.W)))
+  class GHT(entries: Int, ghistBits: Int):
+    val phtIdxBits = log2Ceil(entries)
+    private val pht = Reg(Vec.fill(entries)(UInt(2.W)))
 
-    def lookup(pc: UInt): Bool =
-      val idx = if entries == 1 then 0.U else pc(bhtIdxBits + 1, 2)
-      bht(idx)(1).asBool
+    def hash(pc: UInt, ghist: UInt): UInt =
+      val pc_bits = if entries == 1 then 0.U else pc(phtIdxBits + 1, 2)
+      val ghist_folded = ghist(phtIdxBits - 1, 0)
+      pc_bits ^ ghist_folded
 
-    def update(pc: UInt, taken: Bool): Unit =
-      val update_idx = if entries == 1 then 0.U else pc(bhtIdxBits + 1, 2)
-      val counter = bht(update_idx)
+    def lookup(pc: UInt, ghist: UInt): Bool =
+      val idx = hash(pc, ghist)
+      pht(idx)(1).asBool
+
+    def update(pc: UInt, ghist: UInt, taken: Bool): Unit =
+      val update_idx = hash(pc, ghist)
+      val counter = pht(update_idx)
       val next = Wire(UInt(2.W))
       next := counter
       when (taken && counter =/= 3.U) { next := counter + 1.U }
       when (!taken && counter =/= 0.U) { next := counter - 1.U }
-      bht(update_idx) := next
+      pht(update_idx) := next
 
     def clear: Unit =
-      bht.foreach(_ := 1.U)
+      pht.foreach(_ := 1.U)
+
+  class GHR(ghistBits: Int):
+    private val ghist = RegInit(0.U(ghistBits.W))
+
+    def read: UInt = ghist
+
+    def update(taken: Bool): Unit =
+      ghist := (ghist << 1) | taken.asUInt
+
+    def restore(value: UInt): Unit =
+      ghist := value
+
+    def clear: Unit =
+      ghist := 0.U
 
   val io = IO(BranchPredictorIO(p))
 
   body {
-    val bhtEntries = p.bpu.bhtEntries
     val btbEntries = p.bpu.btbEntries
     val rasEntries = p.bpu.rasEntries
+    val ghtEntries = p.bpu.ghtEntries
+    val ghistBits = p.bpu.ghistBits
 
-    val bhtIdxBits = log2Ceil(bhtEntries)
     val btbIdxBits = log2Ceil(btbEntries)
 
-    require(bhtEntries > 0)
     require(btbEntries > 0)
     require(rasEntries > 0)
     require(p.pcBits > btbIdxBits + 2)
@@ -185,24 +235,19 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
 
     val ras = new RAS(rasEntries)
     val btb = new BTB(btbEntries)
-    val bht = new BHT(bhtEntries)
+    val ght = new GHT(ghtEntries, ghistBits)
+    val ghr = new GHR(ghistBits)
 
-    for (i <- 0 until p.coreWidth) {
-    }
-
-// io.resp.valid := io.req.valid
-// io.resp.bits.hit := false.B
-// io.resp.bits.taken := false.B
-// io.resp.bits.target := 0.U(p.pcBits.W)
-// io.resp.bits.is_ret := false.B
-// io.resp.bits.uses_ras := false.B
+    io.ghist := ghr.read
+    io.ras_snapshot := ras.get_snapshot
 
     for (i <- 0 until p.coreWidth) {
       io.resp(i).valid := io.req.valid
       io.resp(i).bits  := DontCare
 
       val pc = io.req.bits.pc + (4 * i).U
-      val pred_taken = bht.lookup(pc)
+      val pred_taken = ght.lookup(pc, ghr.read)
+
       val (btb_hit, btb_entry) = btb.lookup(pc)
       val use_ras = btb_entry.is_ret && !ras.empty
       val predicted_target = Mux(use_ras, ras.top, btb_entry.target)
@@ -215,28 +260,42 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       io.resp(i).bits.uses_ras := use_ras
     }
 
-    when (io.update.valid) {
-      val taken = io.update.bits.taken
-      bht.update(io.update.bits.pc, taken)
+    when (io.bht_btb_update.valid) {
+      val taken = io.bht_btb_update.bits.taken
+      val pc = io.bht_btb_update.bits.pc
+      val ghist_for_update = ghr.read
+      ght.update(pc, ghist_for_update, taken)
+      ghr.update(taken)
 
       when (taken) {
         btb.update(
-          io.update.bits.pc,
-          io.update.bits.target,
-          io.update.bits.is_ret,
-          io.update.bits.is_call)
+          io.bht_btb_update.bits.pc,
+          io.bht_btb_update.bits.target,
+          io.bht_btb_update.bits.is_ret,
+          io.bht_btb_update.bits.is_call)
       }
+    }
 
-      when (io.update.bits.is_call) {
-        ras.push(io.update.bits.pc + p.instBytes.U)
-      } .elsewhen (io.update.bits.is_ret) {
+    when (io.ras_update.valid) {
+      when (io.ras_update.bits.is_call) {
+        ras.push(io.ras_update.bits.pc + p.instBytes.U)
+      } .elsewhen (io.ras_update.bits.is_ret) {
         ras.pop
       }
     }
 
+    when (io.restore_ghist.valid) {
+      ghr.restore(io.restore_ghist.bits)
+    }
+
+    when (io.restore_ras.valid) {
+      ras.restore(io.restore_ras.bits)
+    }
+
     when (reset.asBool || io.flush) {
-      bht.clear
       btb.clear
       ras.clear
+      ght.clear
+      ghr.clear
     }
   }

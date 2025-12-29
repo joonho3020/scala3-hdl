@@ -58,6 +58,14 @@ object Instructions {
   def XOR                = BitPat("b0000000??????????100?????0110011")
   def XORI               = BitPat("b?????????????????100?????0010011")
 
+  def lrd(inst: UInt)(using m: Module): UInt =
+    inst(11, 7)
+
+  def lrs1(inst: UInt)(using m: Module): UInt =
+    inst(19, 15)
+
+  def lrs2(inst: UInt)(using m: Module): UInt =
+    inst(24, 20)
 }
 // object Causes {
 //   val misaligned_fetch = 0x0

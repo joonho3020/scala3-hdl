@@ -22,6 +22,7 @@ class Decoder(p: CoreParams) extends Module with CoreCacheable(p):
   val io = IO(DecoderIO(p))
   body {
     import ALUParams.Opcode._
+    import riscv_inorder.Instructions._
 
     io.enq.zip(io.deq).foreach((enq, deq) => {
       enq.ready := deq.ready
@@ -32,9 +33,9 @@ class Decoder(p: CoreParams) extends Module with CoreCacheable(p):
       val inst = enq_uop.inst
 
       deq_uop        := enq_uop
-      deq_uop.lrs1    := inst(19, 15)
-      deq_uop.lrs2    := inst(24, 20)
-      deq_uop.lrd     := inst(11,  7)
+      deq_uop.lrs1   := lrs1(inst)
+      deq_uop.lrs2   := lrs2(inst)
+      deq_uop.lrd    := lrd(inst)
       deq_uop.taken  := false.B
       CtrlSignals.decode(deq_uop.ctrl, enq_uop.inst)
     })

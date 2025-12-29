@@ -18,9 +18,10 @@ case class DCacheParams(
 ) derives StableHash
 
 case class BPUParams(
-  bhtEntries: Int = 128,
   btbEntries: Int = 32,
-  rasEntries: Int = 8
+  rasEntries: Int = 8,
+  ghistBits: Int = 8,
+  ghtEntries: Int = 32,
 ) derives StableHash
 
 case class LSUParams(

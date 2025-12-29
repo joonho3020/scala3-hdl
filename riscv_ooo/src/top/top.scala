@@ -34,11 +34,7 @@ class Tile(p: CoreParams) extends Module:
     memarb.io.dcache <> core.io.mem
     io.mem <> memarb.io.mem
 
-    core.io.fetch_uops <> frontend.io.uops
-    frontend.io.redirect <> core.io.redirect
-    frontend.io.bpu_update <> core.io.bpu_update
-
+    frontend.io.core <> core.io.ifu
     io.retire_info <> core.io.retire_info
-    io.rn2_uops.zip(core.io.debug_rn2_uops).foreach(_ <> _)
     io.cosim_info <> core.io.cosim_info
   }

@@ -82,9 +82,6 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val bpu_hit_count = RegInit(0.U(p.xlenBits.W))
     val kill_on_mispred = Wire(Bool())
 
-    io.ifu.redirect.valid := false.B
-    io.ifu.redirect.target := 0.U
-
     io.mem.req.valid := false.B
     io.mem.req.bits.addr := 0.U
     io.mem.req.bits.tpe := Read.EN
@@ -280,13 +277,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     io.ifu.redirect.valid := has_mispred
     io.ifu.redirect.target := resolve_target
-
-// io.bpu_update.valid := exe_cfi_valid
-// io.bpu_update.bits.pc := cfi_uop.bits.pc
-// io.bpu_update.bits.target := exe_cfi_target(p.pcBits - 1, 0)
-// io.bpu_update.bits.taken := exe_cfi_taken
-// io.bpu_update.bits.is_call := (cfi_uop.bits.ctrl.jal || cfi_uop.bits.ctrl.jalr) && cfi_uop.bits.lrd === 1.U
-// io.bpu_update.bits.is_ret := cfi_uop.bits.ctrl.jalr && cfi_uop.bits.lrs1 === 1.U && cfi_uop.bits.lrd === 0.U
+    io.ifu.redirect.ftq_idx := cfi_uop.bits.ftq_idx
+    io.ifu.redirect.taken := exe_cfi_taken
 
     when (exe_cfi_valid) {
       bpu_pred_count := bpu_pred_count + 1.U

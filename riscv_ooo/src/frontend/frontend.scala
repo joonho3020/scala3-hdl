@@ -3,11 +3,13 @@ package riscv_ooo
 import hdl.core._
 import hdl.util._
 import hdl.elaboration._
+import riscv_inorder.Instructions._
 
 case class FetchBundle(
   pc: UInt,
   insts: Vec[Valid[UInt]],
   next_pc: Valid[UInt],
+  ftq_idx: UInt,
 ) extends Bundle[FetchBundle]
 
 object FetchBundle:
@@ -15,13 +17,15 @@ object FetchBundle:
     FetchBundle(
       pc = UInt(p.xlenBits.W),
       insts = Vec(Seq.fill(p.coreWidth)(Valid(UInt(32.W)))),
-      next_pc = Valid(UInt(p.pcBits.W))
+      next_pc = Valid(UInt(p.pcBits.W)),
+      ftq_idx = UInt(p.ftqIdxBits.W)
     )
 
 case class RedirectIf(
   valid:  Bool,
   target: UInt,
   ftq_idx: UInt,
+  taken: Bool,
 ) extends Bundle[RedirectIf]
 
 object RedirectIf:
@@ -30,6 +34,7 @@ object RedirectIf:
       valid  = Input(Bool()),
       target = Input(UInt(p.pcBits.W)),
       ftq_idx = Input(UInt(p.ftqIdxBits.W)),
+      taken   = Input(Bool()),
     )
 
 case class BranchCommitIf(
@@ -76,12 +81,20 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(io)
 
     val bpu = Module(new BranchPredictor(p))
+    val ftq = Module(new FetchTargetQueue(p))
 
 // bpu.io.flush := io.redirect.valid
     bpu.io.flush := false.B
-// bpu.io.update := io.bpu_update
     bpu.io.req.valid := false.B
     bpu.io.req.bits.pc := 0.U(p.pcBits.W)
+
+    ftq.io.redirect <> io.core.redirect
+    ftq.io.commit <> io.core.commit
+
+    bpu.io.restore_ghist.valid := io.core.redirect.valid && ftq.io.redirect_resp.valid
+    bpu.io.restore_ghist.bits := ftq.io.redirect_resp.bits.ghist
+    bpu.io.restore_ras.valid := io.core.redirect.valid && ftq.io.redirect_resp.valid
+    bpu.io.restore_ras.bits.ras_ptr := ftq.io.redirect_resp.bits.ras_ptr
 
     val f3_ready = Wire(Bool())
 
@@ -137,6 +150,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     val f1_taken_hit  = f1_taken_hits.reduce(_ || _)
     val f1_taken_hit_idx = PriorityEncoder(Cat(f1_taken_hits.reverse))
     val f1_pred_target = Mux(f1_taken_hit, bpu.io.resp(f1_taken_hit_idx).bits.target, f1_next_fetch)
+    val f1_ghist = bpu.io.ghist
 
     when (s1_valid && !f1_clear) {
       s0_vpc := f1_pred_target
@@ -154,26 +168,21 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     val s2_taken_hit_idx = RegNext(f1_taken_hit_idx)
     val s2_taken_hit  = RegNext(f1_taken_hit)
     val s2_pred_target = RegNext(f1_pred_target)
+    val s2_taken_hits = RegNext(Cat(f1_taken_hits.reverse))
+    val s2_ghist = RegNext(f1_ghist)
+
+    val fetch_bundle = Wire(FetchBundle(p))
+
+    val brjmp = Wire(Vec.fill(p.coreWidth)(BrJmpSignal()))
+    val s2_is_taken = Wire(Vec.fill(p.coreWidth)(Bool()))
+    val s2_prev_brjmp_taken = Wire(Vec.fill(p.coreWidth)(Bool()))
 
     s2_valid := s1_valid && !f1_clear
     s2_fetch_mask := p.fetchMask(s2_vpc)
 
-    dontTouch(s2_vpc)
-    dontTouch(s2_valid)
-    dontTouch(s2_fetch_mask)
-    dontTouch(f2_clear)
-
-    val fetch_bundle = Wire(FetchBundle(p))
     fetch_bundle := DontCare
     fetch_bundle.pc := s2_vpc
 
-    val brjmp = Wire(Vec.fill(p.coreWidth)(BrJmpSignal()))
-    val s2_is_taken = Wire(Vec.fill(p.coreWidth)(Bool()))
-    dontTouch(brjmp)
-    dontTouch(s2_is_taken)
-    dontTouch(fetch_bundle)
-
-    val s2_prev_brjmp_taken = Wire(Vec.fill(p.coreWidth)(Bool()))
     for (i <- 0 until p.coreWidth) {
       val inst = fetch_bundle.insts(i)
       inst.bits  := ic.s2_insts(i)
@@ -195,6 +204,51 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
 
     fetch_bundle.next_pc.valid := s2_valid && s2_is_taken.reduce(_ || _)
     fetch_bundle.next_pc.bits  := s2_pred_target
+
+    val s2_has_cfi = brjmp.zipWithIndex.map { case (bj, i) =>
+      s2_fetch_mask(i).asBool && (bj.is_br || bj.is_jal || bj.is_jalr)
+    }.reduce(_ || _)
+
+    val s2_call_mask = brjmp.zipWithIndex.map { case (bj, i) =>
+      s2_fetch_mask(i).asBool && s2_is_taken(i) &&
+      ((bj.is_jal || bj.is_jalr) && lrd(ic.s2_insts(i)) === 1.U)
+    }
+    val s2_has_call = s2_call_mask.reduce(_ || _)
+
+    val s2_has_ret = brjmp.zipWithIndex.map { case (bj, i) =>
+      s2_fetch_mask(i).asBool && s2_is_taken(i) &&
+      (bj.is_jalr && lrs1(ic.s2_insts(i)) === 1.U) && lrd(ic.s2_insts(i)) === 0.U
+    }.reduce(_ || _)
+
+    val s2_call_idx = PriorityEncoder(Cat(s2_call_mask.reverse))
+
+    val s2_call_pc = Wire(UInt(p.pcBits.W))
+    s2_call_pc := p.fetchAlign(s2_vpc) + (s2_call_idx << 2)
+
+    // Speculatively update RAS
+    bpu.io.ras_update.valid := s2_valid && ic.s2_valid && (s2_has_call || s2_has_ret)
+    bpu.io.ras_update.bits := DontCare
+    bpu.io.ras_update.bits.pc := s2_call_pc
+    bpu.io.ras_update.bits.is_call := s2_has_call
+    bpu.io.ras_update.bits.is_ret := s2_has_ret
+
+    // Enqueue ftq
+    ftq.io.enq.valid := s2_valid && ic.s2_valid && s2_has_cfi
+    ftq.io.enq.bits.pc := p.fetchAlign(s2_vpc)
+    ftq.io.enq.bits.target := s2_pred_target
+    ftq.io.enq.bits.ras_ptr := bpu.io.ras_snapshot.ras_ptr
+    ftq.io.enq.bits.ras_top := bpu.io.ras_snapshot.ras_top
+    ftq.io.enq.bits.ghist := s2_ghist
+    ftq.io.enq.bits.taken := fetch_bundle.next_pc.valid
+    ftq.io.enq.bits.is_call := s2_has_call
+    ftq.io.enq.bits.is_ret  := s2_has_ret
+
+
+
+    bpu.io.bht_btb_update := ftq.io.bht_btb_update
+
+
+    fetch_bundle.ftq_idx := ftq.io.enq_idx.bits
 
     ic.s2_kill := f2_clear
 
@@ -246,4 +300,12 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
       f2_clear := true.B
       jump_to_reset := false.B
     }
+
+    dontTouch(s2_vpc)
+    dontTouch(s2_valid)
+    dontTouch(s2_fetch_mask)
+    dontTouch(f2_clear)
+    dontTouch(brjmp)
+    dontTouch(s2_is_taken)
+    dontTouch(fetch_bundle)
   }
