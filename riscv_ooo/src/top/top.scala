@@ -7,7 +7,7 @@ import hdl.elaboration._
 
 case class TileIO(
   mem: MagicMemIf,
-  retire_info: Vec[RetireInfoIf],
+  retire_info: Vec[RetireTraceIf],
   rn2_uops: Option[Vec[Valid[UOp]]],
   cosim_info: Vec[CoSimInfoIf]
 ) extends Bundle[TileIO]
@@ -16,7 +16,7 @@ object TileIO:
   def apply(p: CoreParams): TileIO =
     TileIO(
       mem = MagicMemIf(p),
-      retire_info = Vec.fill(p.coreWidth)(RetireInfoIf(p)),
+      retire_info = Vec.fill(p.coreWidth)(RetireTraceIf(p)),
       rn2_uops = if p.debug then Some(Output(Vec.fill(p.coreWidth)(Valid(UOp(p))))) else None,
       cosim_info = Vec.fill(p.coreWidth)(CoSimInfoIf(p))
     )

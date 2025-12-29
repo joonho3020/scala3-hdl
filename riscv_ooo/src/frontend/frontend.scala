@@ -4,31 +4,6 @@ import hdl.core._
 import hdl.util._
 import hdl.elaboration._
 
-
-case class ICacheIf(
-  s0_vaddr: Valid[UInt],
-
-  s1_kill:  Bool,
-  s1_paddr: Valid[UInt],
-
-  s2_kill:  Bool,
-  s2_valid: Bool,
-  s2_insts: Vec[UInt],
-) extends Bundle[ICacheIf]
-
-object ICacheIf:
-  def apply(p: CoreParams): ICacheIf =
-    ICacheIf(
-      s0_vaddr = Output(Valid(UInt(p.pcBits.W))),
-
-      s1_kill  = Output(Bool()),
-      s1_paddr = Output(Valid(UInt(p.pcBits.W))),
-
-      s2_kill  = Output(Bool()),
-      s2_valid = Input(Bool()),
-      s2_insts = Flipped(Vec.fill(p.icacheFetchInstCount)(UInt(p.instBits.W)))
-    )
-
 case class FetchBundle(
   pc: UInt,
   insts: Vec[Valid[UInt]],
@@ -43,24 +18,60 @@ object FetchBundle:
       next_pc = Valid(UInt(p.pcBits.W))
     )
 
-case class FrontendIf(
-  mem: MagicMemIf,
-  redirect: RedirectIf,
-  uops: Vec[Decoupled[UOp]],
-  bpu_update: Valid[BPUUpdate]
-) extends Bundle[FrontendIf]
+case class RedirectIf(
+  valid:  Bool,
+  target: UInt,
+  ftq_idx: UInt,
+) extends Bundle[RedirectIf]
 
-object FrontendIf:
-  def apply(p: CoreParams): FrontendIf =
-    FrontendIf(
+object RedirectIf:
+  def apply(p: CoreParams): RedirectIf =
+    RedirectIf(
+      valid  = Input(Bool()),
+      target = Input(UInt(p.pcBits.W)),
+      ftq_idx = Input(UInt(p.ftqIdxBits.W)),
+    )
+
+case class BranchCommitIf(
+  valid: Bool,
+  ftq_idx: UInt
+) extends Bundle[BranchCommitIf]
+
+object BranchCommitIf:
+  def apply(p: CoreParams): BranchCommitIf =
+    BranchCommitIf(
+      valid = Input(Bool()),
+      ftq_idx = Input(UInt(p.ftqIdxBits.W)),
+    )
+
+case class FrontendCoreIf(
+  fetch_uops: Vec[Decoupled[UOp]],
+  redirect: RedirectIf,
+  commit:   BranchCommitIf
+) extends Bundle[FrontendCoreIf]
+
+object FrontendCoreIf:
+  def apply(p: CoreParams): FrontendCoreIf =
+    FrontendCoreIf(
+      fetch_uops = Vec.fill(p.coreWidth)(Decoupled(UOp(p))),
+      redirect = RedirectIf(p),
+      commit = BranchCommitIf(p)
+    )
+
+case class FrontendIO(
+  mem: MagicMemIf,
+  core: FrontendCoreIf,
+) extends Bundle[FrontendIO]
+
+object FrontendIO:
+  def apply(p: CoreParams): FrontendIO =
+    FrontendIO(
       mem = MagicMemIf(p),
-      redirect = Flipped(RedirectIf(p)),
-      uops = Vec.fill(p.coreWidth)(Decoupled(UOp(p))),
-      bpu_update = Flipped(Valid(BPUUpdate(p)))
+      core = FrontendCoreIf(p)
     )
 
 class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
-  val io = IO(FrontendIf(p))
+  val io = IO(FrontendIO(p))
   body {
     dontTouch(io)
 
@@ -68,7 +79,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
 
 // bpu.io.flush := io.redirect.valid
     bpu.io.flush := false.B
-    bpu.io.update := io.bpu_update
+// bpu.io.update := io.bpu_update
     bpu.io.req.valid := false.B
     bpu.io.req.bits.pc := 0.U(p.pcBits.W)
 
@@ -194,7 +205,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     fb.io.enq.bits  := fetch_bundle
     f3_ready := fb.io.enq.ready
 
-    io.uops.zip(fb.io.deq).foreach((io_uop, fb_uop) => {
+    io.core.fetch_uops.zip(fb.io.deq).foreach((io_uop, fb_uop) => {
       io_uop.valid := fb_uop.valid
       io_uop.bits  := fb_uop.bits
       fb_uop.ready := io_uop.ready
@@ -217,8 +228,8 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
       }
     }
 
-    when (io.redirect.valid) {
-      s0_vpc := io.redirect.target
+    when (io.core.redirect.valid) {
+      s0_vpc := io.core.redirect.target
       s0_valid := true.B
       f1_clear := true.B
       f2_clear := true.B

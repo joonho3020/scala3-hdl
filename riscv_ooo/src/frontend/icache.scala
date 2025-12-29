@@ -4,12 +4,34 @@ import hdl.core._
 import hdl.util._
 import hdl.elaboration._
 
-
 case class TagEntry(valid: Bool, tag: UInt) extends Bundle[TagEntry]
 object TagEntry:
   def apply(tagBits: Int): TagEntry =
     TagEntry(valid = Bool(), tag = UInt(tagBits.W))
 
+case class ICacheIf(
+  s0_vaddr: Valid[UInt],
+
+  s1_kill:  Bool,
+  s1_paddr: Valid[UInt],
+
+  s2_kill:  Bool,
+  s2_valid: Bool,
+  s2_insts: Vec[UInt],
+) extends Bundle[ICacheIf]
+
+object ICacheIf:
+  def apply(p: CoreParams): ICacheIf =
+    ICacheIf(
+      s0_vaddr = Output(Valid(UInt(p.pcBits.W))),
+
+      s1_kill  = Output(Bool()),
+      s1_paddr = Output(Valid(UInt(p.pcBits.W))),
+
+      s2_kill  = Output(Bool()),
+      s2_valid = Input(Bool()),
+      s2_insts = Flipped(Vec.fill(p.icacheFetchInstCount)(UInt(p.instBits.W)))
+    )
 
 case class ICacheBundle(
   core: ICacheIf,

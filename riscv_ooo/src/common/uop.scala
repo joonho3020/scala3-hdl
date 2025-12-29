@@ -24,6 +24,7 @@ case class UOp(
   prs2_busy: Bool,
 
   rob_idx: UInt,
+  ftq_idx: UInt,
 
   br_tag:  OneHot,
   br_mask: UInt,
@@ -77,6 +78,7 @@ object UOp:
       prs2_busy = Bool(),
 
       rob_idx = UInt(p.robIdxBits.W),
+      ftq_idx = UInt(p.ftqIdxBits.W),
 
       br_tag  = OneHot(p.branchTagBits.W),
       br_mask = UInt(p.branchTagBits.W),

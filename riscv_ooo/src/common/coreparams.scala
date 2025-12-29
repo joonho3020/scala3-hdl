@@ -4,7 +4,6 @@ import hdl.core._
 import hdl.util._
 import hdl.elaboration._
 
-
 case class ICacheParams(
   nSets: Int = 64,
   nWays: Int = 4,
@@ -33,7 +32,6 @@ case class ROBParams(
   numEntries: Int = 32
 ) derives StableHash
 
-
 case class PRFParams(
   numEntries: Int = 64,
 ) derives StableHash
@@ -44,6 +42,7 @@ case class IssueQueueParams(
 
 case class BranchParams(
   inFlightBranches: Int = 4,
+  ftqEntries: Int = 8,
 ) derives StableHash
 
 case class CoreParams(
@@ -101,13 +100,14 @@ case class CoreParams(
 
   def robEntries: Int = rob.numEntries
   def robRows: Int = rob.numEntries / coreWidth
-  def robIdxBits: Int = log2Ceil(rob.numEntries)
+  def robIdxBits: Int = log2Ceil(rob.numEntries + 1)
   def robRowIdxBits: Int = log2Ceil(robRows)
 
   def nPhysicalRegs: Int = prf.numEntries
 
   def numBranchTags: Int = br.inFlightBranches
   def branchTagBits: Int = numBranchTags
+  def ftqIdxBits: Int = log2Ceil(br.ftqEntries + 1)
 
   // TODO: need better uarching to prevent prfReadPort count from
   // increasing linearly w.r.t the core width.

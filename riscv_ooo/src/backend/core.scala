@@ -8,19 +8,7 @@ import riscv_inorder.CoreConstants.{ALUOp1, ALUOp2, MemOp}
 import riscv_inorder.{ALU, ALUParams, ImmGen}
 import MagicMemMsg.Read
 
-case class RedirectIf(
-  valid:  Bool,
-  target: UInt,
-) extends Bundle[RedirectIf]
-
-object RedirectIf:
-  def apply(p: CoreParams): RedirectIf =
-    RedirectIf(
-      valid  = Output(Bool()),
-      target = Output(UInt(p.pcBits.W)),
-    )
-
-case class RetireInfoIf(
+case class RetireTraceIf(
   valid: Bool,
   pc: UInt,
   wb_valid: Bool,
@@ -28,11 +16,11 @@ case class RetireInfoIf(
   wb_rd: UInt,
   bpu_preds: UInt,
   bpu_hits: UInt
-) extends Bundle[RetireInfoIf]
+) extends Bundle[RetireTraceIf]
 
-object RetireInfoIf:
-  def apply(p: CoreParams): RetireInfoIf =
-    RetireInfoIf(
+object RetireTraceIf:
+  def apply(p: CoreParams): RetireTraceIf =
+    RetireTraceIf(
       valid    = Output(Bool()),
       pc       = Output(UInt(p.pcBits.W)),
       wb_valid = Output(Bool()),
@@ -65,24 +53,18 @@ object CoSimInfoIf:
     )
 
 case class CoreIf(
-  fetch_uops: Vec[Decoupled[UOp]],
-  redirect: RedirectIf,
-  retire_info: Vec[RetireInfoIf],
-  debug_rn2_uops: Option[Vec[Valid[UOp]]],
-  bpu_update: Valid[BPUUpdate],
+  ifu: FrontendCoreIf,
   mem: MagicMemIf,
+  retire_info: Vec[RetireTraceIf],
   cosim_info: Vec[CoSimInfoIf]
 ) extends Bundle[CoreIf]
 
 object CoreIf:
   def apply(p: CoreParams): CoreIf =
     CoreIf(
-      fetch_uops     = Flipped(Vec.fill(p.coreWidth)(Decoupled(UOp(p)))),
-      redirect       = RedirectIf(p),
-      retire_info    = Vec.fill(p.coreWidth)(RetireInfoIf(p)),
-      debug_rn2_uops = if p.debug then Some(Output(Vec.fill(p.coreWidth)(Valid(UOp(p))))) else None,
-      bpu_update     = Valid(BPUUpdate(p)),
+      ifu            = Flipped(FrontendCoreIf(p)),
       mem            = MagicMemIf(p),
+      retire_info    = Vec.fill(p.coreWidth)(RetireTraceIf(p)),
       cosim_info     = Vec.fill(p.coreWidth)(CoSimInfoIf(p))
     )
 
@@ -100,15 +82,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val bpu_hit_count = RegInit(0.U(p.xlenBits.W))
     val kill_on_mispred = Wire(Bool())
 
-    io.redirect.valid := false.B
-    io.redirect.target := 0.U
-
-    io.bpu_update.valid := false.B
-    io.bpu_update.bits.pc := 0.U
-    io.bpu_update.bits.target := 0.U
-    io.bpu_update.bits.taken := false.B
-    io.bpu_update.bits.is_call := false.B
-    io.bpu_update.bits.is_ret := false.B
+    io.ifu.redirect.valid := false.B
+    io.ifu.redirect.target := 0.U
 
     io.mem.req.valid := false.B
     io.mem.req.bits.addr := 0.U
@@ -141,7 +116,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     // Decode
     // -----------------------------------------------------------------------
     val decoder = Module(new Decoder(p))
-    decoder.io.enq.zip(io.fetch_uops).foreach((d, f) => d <> f)
+    decoder.io.enq.zip(io.ifu.fetch_uops).foreach((d, f) => d <> f)
 
     // -----------------------------------------------------------------------
     // BranchTag Allocation & Rename 0 & 1
@@ -303,15 +278,15 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     kill_on_mispred := exe_resolve_info.valid && exe_resolve_info.mispredict
 
-    io.redirect.valid := has_mispred
-    io.redirect.target := resolve_target
+    io.ifu.redirect.valid := has_mispred
+    io.ifu.redirect.target := resolve_target
 
-    io.bpu_update.valid := exe_cfi_valid
-    io.bpu_update.bits.pc := cfi_uop.bits.pc
-    io.bpu_update.bits.target := exe_cfi_target(p.pcBits - 1, 0)
-    io.bpu_update.bits.taken := exe_cfi_taken
-    io.bpu_update.bits.is_call := (cfi_uop.bits.ctrl.jal || cfi_uop.bits.ctrl.jalr) && cfi_uop.bits.lrd === 1.U
-    io.bpu_update.bits.is_ret := cfi_uop.bits.ctrl.jalr && cfi_uop.bits.lrs1 === 1.U && cfi_uop.bits.lrd === 0.U
+// io.bpu_update.valid := exe_cfi_valid
+// io.bpu_update.bits.pc := cfi_uop.bits.pc
+// io.bpu_update.bits.target := exe_cfi_target(p.pcBits - 1, 0)
+// io.bpu_update.bits.taken := exe_cfi_taken
+// io.bpu_update.bits.is_call := (cfi_uop.bits.ctrl.jal || cfi_uop.bits.ctrl.jalr) && cfi_uop.bits.lrd === 1.U
+// io.bpu_update.bits.is_ret := cfi_uop.bits.ctrl.jalr && cfi_uop.bits.lrs1 === 1.U && cfi_uop.bits.lrd === 0.U
 
     when (exe_cfi_valid) {
       bpu_pred_count := bpu_pred_count + 1.U
@@ -387,6 +362,11 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       renamer.io.comm_free_phys(i).bits  := comm_uops(i).bits.stale_prd
     }
 
+    val comm_cfi_mask = comm_uops.map(u => u.valid && u.bits.ctrl.is_cfi)
+    val comm_cfi_idx  = PriorityEncoder(Cat(comm_cfi_mask.reverse))
+    io.ifu.commit.valid := comm_cfi_mask.reduce(_ || _)
+    io.ifu.commit.ftq_idx := comm_uops(comm_cfi_idx).bits.ftq_idx
+
     // -----------------------------------------------------------------------
     // Reset
     // -----------------------------------------------------------------------
@@ -395,8 +375,6 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
         exe_uops(i).valid := false.B
       }
     }
-
-    io.debug_rn2_uops.map(_ := renamer.io.rn2_uops)
 
     dontTouch(io.cosim_info)
     dontTouch(dec_stall)
@@ -408,5 +386,4 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(wb_uops)
     dontTouch(wb_data)
     dontTouch(comm_uops)
-    dontTouch(io.redirect)
   }
