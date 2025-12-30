@@ -278,6 +278,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     io.ifu.redirect.valid := has_mispred
     io.ifu.redirect.target := resolve_target
     io.ifu.redirect.ftq_idx := cfi_uop.bits.ftq_idx
+    io.ifu.redirect.fb_idx := p.fetchBundleIdx(cfi_uop.bits.pc)
     io.ifu.redirect.taken := exe_cfi_taken
 
     when (exe_cfi_valid) {

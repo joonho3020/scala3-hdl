@@ -7,12 +7,14 @@ import hdl.elaboration._
 case class FTQEntry(
   pc: UInt,
   target: UInt,
+  taken: Bool,
   ras_ptr: UInt,
   ras_top: UInt,
   ghist: UInt,
-  taken: Bool,
   is_call: Bool,
   is_ret: Bool,
+  cfi_mask: UInt,
+  cfi_idx: Valid[UInt],
 ) extends Bundle[FTQEntry]
 
 object FTQEntry:
@@ -20,16 +22,22 @@ object FTQEntry:
     FTQEntry(
       pc = UInt(p.pcBits.W),
       target = UInt(p.pcBits.W),
+      taken  = Bool(),
+
       ras_ptr = UInt(log2Ceil(p.bpu.rasEntries + 1).W),
       ras_top = UInt(p.pcBits.W),
       ghist = UInt(p.bpu.ghistBits.W),
-      taken = Bool(),
+
       is_call = Bool(),
       is_ret = Bool(),
+
+      cfi_mask = UInt(p.coreWidth.W),
+      cfi_idx  = Valid(UInt(log2Ceil(p.coreWidth + 1).W)),
     )
 
 case class FTQIO(
-  enq: Valid[FTQEntry],
+  enq: FetchBundle,
+  enq_ready: Bool,
   enq_idx: Valid[UInt],
   redirect_resp: Valid[FTQEntry],
   redirect: RedirectIf,
@@ -40,7 +48,8 @@ case class FTQIO(
 object FTQIO:
   def apply(p: CoreParams): FTQIO =
     FTQIO(
-      enq = Input(Valid(FTQEntry(p))),
+      enq = Input(FetchBundle(p)),
+      enq_ready = Output(Bool()),
       enq_idx = Output(Valid(UInt(p.ftqIdxBits.W))),
       redirect_resp = Output(Valid(FTQEntry(p))),
       redirect = RedirectIf(p),
@@ -69,27 +78,46 @@ class FetchTargetQueue(p: CoreParams) extends Module with CoreCacheable(p):
     val empty = ptr_match && !maybe_full
     val full = ptr_match && maybe_full
 
-    val do_enq = io.enq.valid && !full
+    io.enq_ready := !full
+
+    val do_enq = io.enq_ready && io.enq.insts.map(_.valid).reduce(_ || _) && io.enq.cfi_idx.valid
     val do_deq = io.commit.valid
     val do_redirect = io.redirect.valid
 
-    def bump_ptr(ptr: UInt): UInt =
+    def next_ptr(ptr: UInt): UInt =
       Mux(ptr === (numEntries - 1).U, 0.U, ptr + 1.U)
 
     when (do_enq) {
       val idx = enq_ptr
       entries(idx).valid := true.B
-      entries(idx).bits := io.enq.bits
-      enq_ptr := bump_ptr(idx)
+      entries(idx).bits.pc := p.fetchAlign(io.enq.pc)
+      entries(idx).bits.taken    := io.enq.target_pc.valid
+      entries(idx).bits.target   := io.enq.target_pc.bits
+      entries(idx).bits.ras_ptr  := io.enq.ras_ptr
+      entries(idx).bits.ras_top  := io.enq.ras_top
+      entries(idx).bits.ghist    := io.enq.ghist
+      entries(idx).bits.ghist    := io.enq.ghist
+      entries(idx).bits.is_call  := io.enq.is_call
+      entries(idx).bits.is_ret   := io.enq.is_ret
+      entries(idx).bits.cfi_mask := io.enq.cfi_mask
+      entries(idx).bits.cfi_idx  := io.enq.cfi_idx
+      enq_ptr := next_ptr(idx)
     }
 
     io.redirect_resp := DontCare
     when (do_redirect) {
-      enq_ptr := io.redirect.ftq_idx
-      entries(io.redirect.ftq_idx).bits.target := io.redirect.target
-      entries(io.redirect.ftq_idx).bits.taken := io.redirect.taken
+      enq_ptr := next_ptr(io.redirect.ftq_idx)
+      val redirect_entry = entries(io.redirect.ftq_idx)
+      redirect_entry.bits.taken   := io.redirect.taken
+      redirect_entry.bits.target  := io.redirect.target
+      redirect_entry.bits.cfi_idx.bits := io.redirect.fb_idx
+      redirect_entry.bits.cfi_idx.valid := true.B
+      redirect_entry.bits.is_call := redirect_entry.bits.is_call && (redirect_entry.bits.cfi_idx.bits === io.redirect.fb_idx)
+      redirect_entry.bits.is_ret  := redirect_entry.bits.is_ret  && (redirect_entry.bits.cfi_idx.bits === io.redirect.fb_idx)
+
+      io.redirect_resp := redirect_entry
+
       maybe_full := false.B
-      io.redirect_resp := entries(io.redirect.ftq_idx)
     } .elsewhen (do_enq && !do_deq) {
       maybe_full := (enq_ptr + 1.U) % numEntries.U === deq_ptr
     }
@@ -102,13 +130,13 @@ class FetchTargetQueue(p: CoreParams) extends Module with CoreCacheable(p):
       deq_entry.valid := false.B
 
       io.bht_btb_update.valid := true.B
-      io.bht_btb_update.bits.pc := deq_entry.bits.pc
+      io.bht_btb_update.bits.pc := deq_entry.bits.pc + (deq_entry.bits.cfi_idx.bits << 2)
       io.bht_btb_update.bits.taken := deq_entry.bits.taken
       io.bht_btb_update.bits.target := deq_entry.bits.target
       io.bht_btb_update.bits.is_call := deq_entry.bits.is_call
       io.bht_btb_update.bits.is_ret := deq_entry.bits.is_ret
 
-      deq_ptr := bump_ptr(io.commit.ftq_idx)
+      deq_ptr := next_ptr(io.commit.ftq_idx)
       maybe_full := false.B
     }
 

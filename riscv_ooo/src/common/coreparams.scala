@@ -92,6 +92,8 @@ case class CoreParams(
       log2Ceil(coreInstBytes))
     ((1 << fetchWidth)-1).U << idx
   }
+  def fetchBundleIdx(addr: UInt)(using m: Module): UInt =
+    (addr - fetchAlign(addr)) >> 2
 
   assert((coreWidth & (coreWidth-1)) == 0)
   assert(icacheFetchInstCount == coreWidth)

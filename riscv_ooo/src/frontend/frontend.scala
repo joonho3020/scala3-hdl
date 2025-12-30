@@ -8,8 +8,25 @@ import riscv_inorder.Instructions._
 case class FetchBundle(
   pc: UInt,
   insts: Vec[Valid[UInt]],
-  next_pc: Valid[UInt],
+
   ftq_idx: UInt,
+
+  brjmp: BrJmpSignal,
+  is_call: Bool,
+  is_ret: Bool,
+
+  /* Predicted next PC */
+  target_pc: Valid[UInt],
+
+  ras_top: UInt,
+  ras_ptr: UInt,
+  ghist: UInt,
+
+  /* Control flow instructions */
+  cfi_mask: UInt,
+
+  /* First taken instruction index within this fetch bundle */
+  cfi_idx: Valid[UInt]
 ) extends Bundle[FetchBundle]
 
 object FetchBundle:
@@ -17,14 +34,26 @@ object FetchBundle:
     FetchBundle(
       pc = UInt(p.xlenBits.W),
       insts = Vec(Seq.fill(p.coreWidth)(Valid(UInt(32.W)))),
-      next_pc = Valid(UInt(p.pcBits.W)),
-      ftq_idx = UInt(p.ftqIdxBits.W)
+      target_pc = Valid(UInt(p.pcBits.W)),
+      ftq_idx = UInt(p.ftqIdxBits.W),
+
+      brjmp = BrJmpSignal(),
+      is_call = Bool(),
+      is_ret = Bool(),
+
+      ras_ptr = UInt(log2Ceil(p.bpu.rasEntries + 1).W),
+      ras_top = UInt(p.pcBits.W),
+      ghist = UInt(p.bpu.ghistBits.W),
+
+      cfi_mask = UInt(p.coreWidth.W),
+      cfi_idx  = Valid(UInt(log2Ceil(p.coreWidth + 1).W)),
     )
 
 case class RedirectIf(
   valid:  Bool,
   target: UInt,
   ftq_idx: UInt,
+  fb_idx: UInt,
   taken: Bool,
 ) extends Bundle[RedirectIf]
 
@@ -34,6 +63,7 @@ object RedirectIf:
       valid  = Input(Bool()),
       target = Input(UInt(p.pcBits.W)),
       ftq_idx = Input(UInt(p.ftqIdxBits.W)),
+      fb_idx = Input(UInt(log2Ceil(p.coreWidth+1).W)),
       taken   = Input(Bool()),
     )
 
@@ -91,24 +121,12 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     ftq.io.redirect.valid := io.core.redirect.valid
     ftq.io.redirect.target := io.core.redirect.target
     ftq.io.redirect.ftq_idx := io.core.redirect.ftq_idx
+    ftq.io.redirect.fb_idx := io.core.redirect.fb_idx
     ftq.io.redirect.taken := io.core.redirect.taken
 
     ftq.io.commit.valid := io.core.commit.valid
     ftq.io.commit.ftq_idx := io.core.commit.ftq_idx
 
-    bpu.io.restore_ghist.valid := false.B
-    bpu.io.restore_ghist.bits := DontCare
-
-    bpu.io.restore_ras.valid := false.B
-    bpu.io.restore_ras.bits := DontCare
-
-    when (io.core.redirect.valid) {
-      bpu.io.restore_ghist.valid := ftq.io.redirect_resp.valid
-      bpu.io.restore_ghist.bits := ftq.io.redirect_resp.bits.ghist
-      bpu.io.restore_ras.valid := ftq.io.redirect_resp.valid
-      bpu.io.restore_ras.bits.ras_ptr := ftq.io.redirect_resp.bits.ras_ptr
-      bpu.io.restore_ras.bits.ras_top := ftq.io.redirect_resp.bits.ras_top
-    }
 
     val f3_ready = Wire(Bool())
 
@@ -158,11 +176,14 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
 
     val f1_fetch_mask  = p.fetchMask(s1_vpc)
     val f1_next_fetch  = p.nextFetch(s1_vpc)
-    val f1_taken_hits = bpu.io.resp.zipWithIndex.map((x, i) => {
-        x.valid && x.bits.hit && x.bits.taken && f1_fetch_mask(i).asBool
+    val f1_taken_hits = Wire(Vec.fill(p.coreWidth)(Bool()))
+    bpu.io.resp.zipWithIndex.map((x, i) => {
+        f1_taken_hits(i) := x.valid && x.bits.hit && x.bits.taken && f1_fetch_mask(i).asBool
     })
+    dontTouch(f1_taken_hits)
     val f1_taken_hit  = f1_taken_hits.reduce(_ || _)
-    val f1_taken_hit_idx = PriorityEncoder(Cat(f1_taken_hits.reverse))
+    val f1_taken_hit_idx = PriorityEncoder(Cat(f1_taken_hits.reverse)).asWire
+    dontTouch(f1_taken_hit_idx)
     val f1_pred_target = Mux(f1_taken_hit, bpu.io.resp(f1_taken_hit_idx).bits.target, f1_next_fetch)
     val f1_ghist = bpu.io.ghist
 
@@ -196,6 +217,10 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
 
     fetch_bundle := DontCare
     fetch_bundle.pc := s2_vpc
+    fetch_bundle.brjmp.is_br := false.B
+    fetch_bundle.brjmp.is_jal := false.B
+    fetch_bundle.brjmp.is_jalr := false.B
+    fetch_bundle.cfi_idx.valid := false.B
 
     for (i <- 0 until p.coreWidth) {
       val inst = fetch_bundle.insts(i)
@@ -214,54 +239,60 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
       else
         s2_prev_brjmp_taken(i) := s2_prev_brjmp_taken(i-1) || s2_is_taken(i)
         inst.valid := s2_valid && s2_fetch_mask(i).asBool && !s2_prev_brjmp_taken(i-1)
+
+      when (s2_is_taken(i) && inst.valid) {
+        fetch_bundle.brjmp.is_br := brjmp(i).is_br
+        fetch_bundle.brjmp.is_jal := brjmp(i).is_jal
+        fetch_bundle.brjmp.is_jalr := brjmp(i).is_jalr
+        fetch_bundle.cfi_idx.bits := i.U
+        fetch_bundle.cfi_idx.valid := true.B
+      }
     }
 
-    fetch_bundle.next_pc.valid := s2_valid && s2_is_taken.reduce(_ || _)
-    fetch_bundle.next_pc.bits  := s2_pred_target
+    fetch_bundle.target_pc.valid := s2_valid && s2_is_taken.reduce(_ || _)
+    fetch_bundle.target_pc.bits  := s2_pred_target
 
-    val s2_has_cfi = brjmp.zipWithIndex.map { case (bj, i) =>
-      s2_fetch_mask(i).asBool && (bj.is_br || bj.is_jal || bj.is_jalr)
-    }.reduce(_ || _)
+    fetch_bundle.cfi_mask := Cat(fetch_bundle.insts.zip(brjmp).map((i, b) => {
+      i.valid && b.is_br || b.is_jal || b.is_jalr
+    }).reverse)
 
-    val s2_call_mask = brjmp.zipWithIndex.map { case (bj, i) =>
-      s2_fetch_mask(i).asBool && s2_is_taken(i) &&
-      ((bj.is_jal || bj.is_jalr) && lrd(ic.s2_insts(i)) === 1.U)
-    }
-    val s2_has_call = s2_call_mask.reduce(_ || _)
-
-    val s2_has_ret = brjmp.zipWithIndex.map { case (bj, i) =>
-      s2_fetch_mask(i).asBool && s2_is_taken(i) &&
-      (bj.is_jalr && lrs1(ic.s2_insts(i)) === 1.U) && lrd(ic.s2_insts(i)) === 0.U
-    }.reduce(_ || _)
-
-    val s2_call_idx = PriorityEncoder(Cat(s2_call_mask.reverse))
-
-    val s2_call_pc = Wire(UInt(p.pcBits.W))
-    s2_call_pc := p.fetchAlign(s2_vpc) + (s2_call_idx << 2)
+    val s2_cfi_idx = fetch_bundle.cfi_idx.bits
+    val s2_ti = fetch_bundle.insts(s2_cfi_idx)
+    val s2_taken_is_call = s2_ti.valid &&
+                          (lrd(s2_ti.bits) === 1.U) &&
+                          (fetch_bundle.brjmp.is_jal || fetch_bundle.brjmp.is_jalr)
+    val s2_taken_is_ret = s2_ti.valid &&
+                          (lrd(s2_ti.bits) === 0.U && lrs1(s2_ti.bits) === 1.U) &&
+                          fetch_bundle.brjmp.is_jalr
+    val s2_call_pc = p.fetchAlign(s2_vpc) + (s2_cfi_idx << 2)
 
     // Speculatively update RAS
-    bpu.io.ras_update.valid := s2_valid && ic.s2_valid && (s2_has_call || s2_has_ret)
+    bpu.io.ras_update.valid := s2_valid && ic.s2_valid && (s2_taken_is_ret || s2_taken_is_call)
     bpu.io.ras_update.bits := DontCare
     bpu.io.ras_update.bits.pc := s2_call_pc
-    bpu.io.ras_update.bits.is_call := s2_has_call
-    bpu.io.ras_update.bits.is_ret := s2_has_ret
+    bpu.io.ras_update.bits.is_call := s2_taken_is_call
+    bpu.io.ras_update.bits.is_ret := s2_taken_is_ret
 
-    // Enqueue ftq
-    ftq.io.enq.valid := s2_valid && ic.s2_valid && s2_has_cfi
-    ftq.io.enq.bits.pc := p.fetchAlign(s2_vpc)
-    ftq.io.enq.bits.target := s2_pred_target
-    ftq.io.enq.bits.ras_ptr := bpu.io.ras_snapshot.ras_ptr
-    ftq.io.enq.bits.ras_top := bpu.io.ras_snapshot.ras_top
-    ftq.io.enq.bits.ghist := s2_ghist
-    ftq.io.enq.bits.taken := fetch_bundle.next_pc.valid
-    ftq.io.enq.bits.is_call := s2_has_call
-    ftq.io.enq.bits.is_ret  := s2_has_ret
-
-
-
+    // Update BHT & BTB
     bpu.io.bht_btb_update := ftq.io.bht_btb_update
 
+    // Restore bpu
+    bpu.io.restore_ghist.valid := false.B
+    bpu.io.restore_ghist.bits := DontCare
 
+    bpu.io.restore_ras.valid := false.B
+    bpu.io.restore_ras.bits := DontCare
+
+    when (io.core.redirect.valid) {
+      bpu.io.restore_ghist.valid := ftq.io.redirect_resp.valid
+      bpu.io.restore_ghist.bits := ftq.io.redirect_resp.bits.ghist
+
+      bpu.io.restore_ras.valid := ftq.io.redirect_resp.valid
+      bpu.io.restore_ras.bits.ras_ptr := ftq.io.redirect_resp.bits.ras_ptr
+      bpu.io.restore_ras.bits.ras_top := ftq.io.redirect_resp.bits.ras_top
+    }
+
+    ftq.io.enq <> fetch_bundle
     fetch_bundle.ftq_idx := ftq.io.enq_idx.bits
 
     ic.s2_kill := f2_clear
@@ -271,7 +302,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
 
     fb.io.enq.valid := s2_valid && ic.s2_valid
     fb.io.enq.bits  := fetch_bundle
-    f3_ready := fb.io.enq.ready
+    f3_ready := fb.io.enq.ready && ftq.io.enq_ready
 
     io.core.fetch_uops.zip(fb.io.deq).foreach((io_uop, fb_uop) => {
       io_uop.valid := fb_uop.valid
@@ -289,7 +320,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
       f1_clear := true.B
     } .elsewhen (s2_valid && ic.s2_valid) {
       // Cache hit
-      when (fetch_bundle.next_pc.valid) {
+      when (fetch_bundle.target_pc.valid) {
         s0_vpc := s2_pred_target
         s0_valid := true.B
         f1_clear := true.B
@@ -322,4 +353,5 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(brjmp)
     dontTouch(s2_is_taken)
     dontTouch(fetch_bundle)
+    dontTouch(s2_taken_hit_idx)
   }
