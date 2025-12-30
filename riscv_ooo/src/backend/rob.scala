@@ -34,6 +34,7 @@ case class ROBIO(
   wb_data: Vec[UInt],
   commit: Vec[Valid[UOp]],
   commit_data: Vec[UInt],
+  head_idx: UInt,
   full:  Bool,
   empty: Bool,
   valid_entries: UInt,
@@ -49,6 +50,7 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
     wb_data = Input(Vec.fill(p.issueWidth)(UInt(p.xlenBits.W))),
     commit = Output(Vec.fill(p.retireWidth)(Valid(UOp(p)))),
     commit_data = Output(Vec.fill(p.retireWidth)(UInt(p.xlenBits.W))),
+    head_idx = Output(UInt(p.robIdxBits.W)),
     full = Output(Bool()),
     empty = Output(Bool()),
     valid_entries = Output(UInt(log2Ceil(p.robEntries + 1).W)),
@@ -80,6 +82,7 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
                               entries.U - (rob_head - rob_tail)))
 
     io.valid_entries := valid_entries
+    io.head_idx := rob_head
     io.full := (p.rob.numEntries.U - valid_entries) < coreWidth.U
     io.empty := empty
 

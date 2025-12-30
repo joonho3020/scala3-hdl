@@ -59,6 +59,7 @@ class FetchBuffer(p: CoreParams, depth: Int) extends Module with CoreCacheable(p
 
     when (io.enq.fire) {
       val next_offset = Vec.fill(p.coreWidth)(Wire(UInt(addrBits.W)))
+      val last_valid = Vec.fill(p.coreWidth)(Wire(Bool()))
       for (i <- 0 until p.coreWidth) {
         if i == 0 then
           next_offset(i) := 0.U
@@ -77,6 +78,8 @@ class FetchBuffer(p: CoreParams, depth: Int) extends Module with CoreCacheable(p
 
         mem(r)(c).bits.next_pc := io.enq.bits.target_pc
         mem(r)(c).bits.ftq_idx := io.enq.bits.ftq_idx
+        last_valid(i) := io.enq.bits.insts(i).valid && !(0 until p.coreWidth).filter(_ > i).map(j => io.enq.bits.insts(j).valid).reduceOption(_ || _).getOrElse(false.B)
+        mem(r)(c).bits.ftq_end := last_valid(i)
       }
       enq_ptr := (enq_ptr +
                   next_offset(p.coreWidth - 1) +

@@ -274,6 +274,9 @@ fn main() {
     let target_coverage = instructions_len;
     let mut stop_reason: Option<String> = None;
     let mut pc_history: VecDeque<u64> = VecDeque::with_capacity(PC_HISTORY_SIZE);
+    let debug = env::var("COSIM_DEBUG").is_ok();
+    let mut last_retire_cycle: usize = 0;
+    let mut last_retire_pc: u64 = 0;
 
     let disasm = Disassembler::new(rvdasm::disassembler::Xlen::XLEN64);
 
@@ -284,6 +287,8 @@ fn main() {
         for lane in 0..RETIRE_WIDTH {
             let retire = get_retire_info(&mut dut, lane);
             if retire.valid {
+                last_retire_cycle = cycle;
+                last_retire_pc = retire.pc;
                 if process_retire(
                     &retire,
                     lane,
@@ -385,6 +390,9 @@ fn main() {
     println!("  Mismatches: {}", mismatch_count);
     println!("  Stop reason: {}", stop_reason.unwrap());
     println!("  BPU preds: {} hits: {} rate: {:.3}", bpu_preds, bpu_hits, bpu_rate);
+    if debug {
+        println!("  Last retire: cycle {} pc 0x{:x}", last_retire_cycle, last_retire_pc);
+    }
     if mismatch_count == 0 {
         println!("  Status: PASSED");
     } else {

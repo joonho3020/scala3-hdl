@@ -188,9 +188,17 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     for (i <- 0 until issueWidth) {
       val iss_uop = iss_uops(i)
-      val br_invalidate = exe_resolve_info.valid &&
+
+      def robDist(idx: UInt): UInt =
+        Mux(idx >= rob.io.head_idx, idx - rob.io.head_idx, idx + p.robEntries.U - rob.io.head_idx)
+
+      def isYounger(idx: UInt, thanIdx: UInt): Bool =
+        robDist(idx) > robDist(thanIdx)
+
+      val br_invalidate = iss_uop.valid &&
+                          exe_resolve_info.valid &&
                           exe_resolve_info.mispredict &&
-                          ((exe_resolve_info.tag & iss_uop.bits.br_mask) =/= 0.U)
+                          isYounger(iss_uop.bits.rob_idx, exe_resolve_info.rob_idx)
       exe_uops(i).valid := iss_uops(i).valid && !br_invalidate
       exe_uops(i).bits  := iss_uops(i).bits
 
@@ -259,6 +267,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val resolve_target = Mux(mispred_not_taken, cfi_uop.bits.pc + p.instBytes.U, exe_cfi_target)
     exe_resolve_info.valid := exe_cfi_valid
     exe_resolve_info.tag := cfi_uop.bits.br_tag
+    exe_resolve_info.rob_idx := cfi_uop.bits.rob_idx
     exe_resolve_info.mispredict := has_mispred
     exe_resolve_info.taken := exe_cfi_taken
     exe_resolve_info.target := resolve_target
@@ -268,6 +277,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     br_tag_mgr.io.br_resolve  := exe_resolve_info
     renamer.io.br_resolve     := exe_resolve_info
     issue_queue.io.br_resolve := exe_resolve_info
+
+    issue_queue.io.rob_head := rob.io.head_idx
 
     rob.io.branch_update.valid   := exe_resolve_info.valid
     rob.io.branch_update.mispred := exe_resolve_info.mispredict
@@ -355,10 +366,10 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       renamer.io.comm_free_phys(i).bits  := comm_uops(i).bits.stale_prd
     }
 
-    val comm_cfi_mask = comm_uops.map(u => u.valid && u.bits.ctrl.is_cfi)
-    val comm_cfi_idx  = PriorityEncoder(Cat(comm_cfi_mask.reverse))
-    io.ifu.commit.valid := comm_cfi_mask.reduce(_ || _)
-    io.ifu.commit.ftq_idx := comm_uops(comm_cfi_idx).bits.ftq_idx
+    val comm_ftq_end_mask = comm_uops.map(u => u.valid && u.bits.ftq_end)
+    val comm_ftq_end_idx  = PriorityEncoder(Cat(comm_ftq_end_mask.reverse))
+    io.ifu.commit.valid := comm_ftq_end_mask.reduce(_ || _)
+    io.ifu.commit.ftq_idx := comm_uops(comm_ftq_end_idx).bits.ftq_idx
 
     // -----------------------------------------------------------------------
     // Reset
