@@ -85,7 +85,8 @@ class FetchTargetQueue(p: CoreParams) extends Module with CoreCacheable(p):
 
     io.enq_ready := !full
 
-    val do_enq = io.enq_ready && io.enq.insts.map(_.valid).reduce(_ || _) && io.enq.cfi_idx.valid
+    val do_enq = io.enq_ready && io.enq.insts.zipWithIndex.map((inst, i) =>
+        inst.valid && io.enq.cfi_mask(i).asBool).reduce(_ || _)
     val do_deq = io.commit.valid
     val do_redirect = io.redirect.valid
 
