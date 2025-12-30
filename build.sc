@@ -5,7 +5,10 @@ val SCALAVERSION = "3.7.0"
 
 object hdl extends ScalaModule {
   def scalaVersion = SCALAVERSION
-  def mvnDeps = Seq(mvn"org.ow2.asm:asm:9.7")
+  def mvnDeps = Seq(
+    mvn"org.ow2.asm:asm:9.7",
+    mvn"com.lihaoyi::ujson:4.0.2"
+  )
 
   object test extends ScalaTests {
     def mvnDeps = Seq(mvn"com.lihaoyi::utest:0.9.1")

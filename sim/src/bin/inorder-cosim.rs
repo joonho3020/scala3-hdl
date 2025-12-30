@@ -87,27 +87,27 @@ struct RetireInfo {
     bpu_hits: u64,
 }
 
-fn get_retire_info_0(dut: &Dut) -> RetireInfo {
+fn get_retire_info_0(dut: &mut Dut) -> RetireInfo {
     RetireInfo {
-        valid: dut.peek_io_retire_info_0_valid() != 0,
-        pc: dut.peek_io_retire_info_0_pc(),
-        wb_valid: dut.peek_io_retire_info_0_wb_valid() != 0,
-        wb_rd: dut.peek_io_retire_info_0_wb_rd(),
-        wb_data: dut.peek_io_retire_info_0_wb_data(),
-        bpu_preds: dut.peek_io_retire_info_0_bpu_preds(),
-        bpu_hits: dut.peek_io_retire_info_0_bpu_hits(),
+        valid: dut.io().retire_info().get(0).valid().peek() != 0,
+        pc: dut.io().retire_info().get(0).pc().peek(),
+        wb_valid: dut.io().retire_info().get(0).wb_valid().peek() != 0,
+        wb_rd: dut.io().retire_info().get(0).wb_rd().peek(),
+        wb_data: dut.io().retire_info().get(0).wb_data().peek(),
+        bpu_preds: dut.io().retire_info().get(0).bpu_preds().peek(),
+        bpu_hits: dut.io().retire_info().get(0).bpu_hits().peek(),
     }
 }
 
-fn get_retire_info_1(dut: &Dut) -> RetireInfo {
+fn get_retire_info_1(dut: &mut Dut) -> RetireInfo {
     RetireInfo {
-        valid: dut.peek_io_retire_info_1_valid() != 0,
-        pc: dut.peek_io_retire_info_1_pc(),
-        wb_valid: dut.peek_io_retire_info_1_wb_valid() != 0,
-        wb_rd: dut.peek_io_retire_info_1_wb_rd(),
-        wb_data: dut.peek_io_retire_info_1_wb_data(),
-        bpu_preds: dut.peek_io_retire_info_1_bpu_preds(),
-        bpu_hits: dut.peek_io_retire_info_1_bpu_hits(),
+        valid: dut.io().retire_info().get(1).valid().peek() != 0,
+        pc: dut.io().retire_info().get(1).pc().peek(),
+        wb_valid: dut.io().retire_info().get(1).wb_valid().peek() != 0,
+        wb_rd: dut.io().retire_info().get(1).wb_rd().peek(),
+        wb_data: dut.io().retire_info().get(1).wb_data().peek(),
+        bpu_preds: dut.io().retire_info().get(1).bpu_preds().peek(),
+        bpu_hits: dut.io().retire_info().get(1).bpu_hits().peek(),
     }
 }
 
@@ -192,44 +192,18 @@ fn process_retire(
     get_word_at_addr(memory, retire.pc) == HALT_OPCODE
 }
 
-fn read_mem_req_data(dut: &Dut) -> [u64; CACHE_LINE_WORDS] {
-    [
-        dut.peek_io_mem_req_bits_data_0(),
-        dut.peek_io_mem_req_bits_data_1(),
-        dut.peek_io_mem_req_bits_data_2(),
-        dut.peek_io_mem_req_bits_data_3(),
-        dut.peek_io_mem_req_bits_data_4(),
-        dut.peek_io_mem_req_bits_data_5(),
-        dut.peek_io_mem_req_bits_data_6(),
-        dut.peek_io_mem_req_bits_data_7(),
-        dut.peek_io_mem_req_bits_data_8(),
-        dut.peek_io_mem_req_bits_data_9(),
-        dut.peek_io_mem_req_bits_data_10(),
-        dut.peek_io_mem_req_bits_data_11(),
-        dut.peek_io_mem_req_bits_data_12(),
-        dut.peek_io_mem_req_bits_data_13(),
-        dut.peek_io_mem_req_bits_data_14(),
-        dut.peek_io_mem_req_bits_data_15(),
-    ]
+fn read_mem_req_data(dut: &mut Dut) -> [u64; CACHE_LINE_WORDS] {
+    let mut result = [0u64; CACHE_LINE_WORDS];
+    for i in 0..CACHE_LINE_WORDS {
+        result[i] = dut.io().mem().req().bits().data().get(i).peek();
+    }
+    result
 }
 
 fn poke_mem_resp_data(dut: &mut Dut, data: &[u64; CACHE_LINE_WORDS]) {
-    dut.poke_io_mem_resp_bits_lineWords_0(data[0]);
-    dut.poke_io_mem_resp_bits_lineWords_1(data[1]);
-    dut.poke_io_mem_resp_bits_lineWords_2(data[2]);
-    dut.poke_io_mem_resp_bits_lineWords_3(data[3]);
-    dut.poke_io_mem_resp_bits_lineWords_4(data[4]);
-    dut.poke_io_mem_resp_bits_lineWords_5(data[5]);
-    dut.poke_io_mem_resp_bits_lineWords_6(data[6]);
-    dut.poke_io_mem_resp_bits_lineWords_7(data[7]);
-    dut.poke_io_mem_resp_bits_lineWords_8(data[8]);
-    dut.poke_io_mem_resp_bits_lineWords_9(data[9]);
-    dut.poke_io_mem_resp_bits_lineWords_10(data[10]);
-    dut.poke_io_mem_resp_bits_lineWords_11(data[11]);
-    dut.poke_io_mem_resp_bits_lineWords_12(data[12]);
-    dut.poke_io_mem_resp_bits_lineWords_13(data[13]);
-    dut.poke_io_mem_resp_bits_lineWords_14(data[14]);
-    dut.poke_io_mem_resp_bits_lineWords_15(data[15]);
+    for i in 0..CACHE_LINE_WORDS {
+        dut.io().mem().resp().bits().lineWords().get(i).poke(data[i]);
+    }
 }
 
 fn main() {
@@ -282,11 +256,11 @@ fn main() {
 
     let disasm = Disassembler::new(rvdasm::disassembler::Xlen::XLEN64);
 
-    dut.poke_io_mem_req_ready(1);
+    dut.io().mem().req().ready().poke(1);
 
     for cycle in 0..1212000 {
-        let retire_0 = get_retire_info_0(&dut);
-        let retire_1 = get_retire_info_1(&dut);
+        let retire_0 = get_retire_info_0(&mut dut);
+        let retire_1 = get_retire_info_1(&mut dut);
 
 // if retire_0.valid {
 // println!("retire_0 pc 0x{:x}", retire_0.pc);
@@ -362,22 +336,22 @@ fn main() {
                 resp_data[i] = get_word_at_addr(&mut memory, word_addr) as u64;
             }
             poke_mem_resp_data(&mut dut, &resp_data);
-            dut.poke_io_mem_resp_valid(1);
+            dut.io().mem().resp().valid().poke(1);
             pending_mem_req = false;
         } else {
-            dut.poke_io_mem_resp_valid(0);
+            dut.io().mem().resp().valid().poke(0);
         }
 
-        let mem_req_valid = dut.peek_io_mem_req_valid();
+        let mem_req_valid = dut.io().mem().req().valid().peek();
         if mem_req_valid != 0 {
-            let addr = dut.peek_io_mem_req_bits_addr();
-            let req_type = dut.peek_io_mem_req_bits_tpe();
+            let addr = dut.io().mem().req().bits().addr().peek();
+            let req_type = dut.io().mem().req().bits().tpe().peek();
             pending_mem_req = true;
             pending_mem_addr = addr;
             pending_mem_is_write = req_type == MEM_TYPE_WRITE;
             if pending_mem_is_write {
-                pending_mem_data = read_mem_req_data(&dut);
-                pending_mem_mask = dut.peek_io_mem_req_bits_mask();
+                pending_mem_data = read_mem_req_data(&mut dut);
+                pending_mem_mask = dut.io().mem().req().bits().mask().peek();
             }
         }
 
@@ -403,7 +377,7 @@ fn main() {
         stop_reason = Some("cycle limit reached".to_string());
     }
 
-    let final_stats = get_retire_info_0(&dut);
+    let final_stats = get_retire_info_0(&mut dut);
     let bpu_preds = final_stats.bpu_preds;
     let bpu_hits = final_stats.bpu_hits;
     let bpu_rate = if bpu_preds == 0 {

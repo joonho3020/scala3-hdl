@@ -67,6 +67,9 @@ def runFirtool(firFile: String): (Int, String) =
 
   println("Elaboration Finished")
 
+  // Export IO schema for simulator codegen
+  IOSchemaExporter.exportIOSchema(designs, top_name_hashed)
+
   writeChirrtl(fir_filename, chirrtl)
   println("Wrote CHIRRTL File")
 

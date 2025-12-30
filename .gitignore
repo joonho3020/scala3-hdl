@@ -13,3 +13,4 @@ sim/target
 *.so
 **/.ooo-verilog-stamp
 **/.inorder-verilog-stamp
+**/.scala-build
