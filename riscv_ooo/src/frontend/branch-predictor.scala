@@ -130,24 +130,30 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       val top_idx = Mux(ptr === 0.U, (nras - 1).U, ptr - 1.U)
       stack(top_idx)
     def empty: Bool = count === 0.U
+
     def get_idx: UInt = ptr
+
     def get_snapshot: RASSnapshot =
       val snap = Wire(RASSnapshot(p))
       snap.ras_ptr := ptr
       snap.ras_top := top
       snap
+
     def restore(snapshot: RASSnapshot): Unit =
       ptr := snapshot.ras_ptr
-      val top_idx = Mux(snapshot.ras_ptr === 0.U, (nras - 1).U, ptr - 1.U)
+      val top_idx = Mux(snapshot.ras_ptr === 0.U, (nras - 1).U, snapshot.ras_ptr - 1.U)
       stack(top_idx) := snapshot.ras_top
+
     def clear: Unit =
       count := 0.U
       ptr := 0.U
+
     def pop: Unit =
       when (!empty) {
         ptr   := Mux(ptr === 0.U, (nras - 1).U, ptr - 1.U)
         count := count - 1.U
       }
+
     def push(addr: UInt): Unit =
       when (count < nras.U) {
         stack(ptr) := addr

@@ -34,7 +34,7 @@ case class LSUParams(
 ) derives StableHash
 
 case class ROBParams(
-  numEntries: Int = 32
+  numEntries: Int = 48
 ) derives StableHash
 
 case class PRFParams(
@@ -46,8 +46,8 @@ case class IssueQueueParams(
 ) derives StableHash
 
 case class BranchParams(
-  inFlightBranches: Int = 4,
-  ftqEntries: Int = 8,
+  inFlightBranches: Int = 6,
+  ftqEntries: Int = 24,
 ) derives StableHash
 
 case class CoreParams(

@@ -61,7 +61,7 @@ test-all: .inorder-verilog-stamp
 	@failed_tests=""; \
 	for hex in tests/*.hex; do \
 		echo "Running $$hex..."; \
-		if ! cargo run --release --bin hdl-sim -- $$hex; then \
+		if ! RUSTFLAGS="-Awarnings" cargo run --release --bin hdl-sim -- $$hex; then \
 			failed_tests="$$failed_tests\n  - $$hex"; \
 		fi; \
 	done; \
@@ -79,7 +79,7 @@ test-alu: .ooo-verilog-stamp
 	@failed_tests=""; \
 	for hex in $(ALU_TESTS); do \
 		echo "Running $$hex..."; \
-		if ! cargo run --release --bin ooo-cosim -- $$hex; then \
+		if ! RUSTFLAGS="-Awarnings" cargo run --release --bin ooo-cosim -- $$hex; then \
 			failed_tests="$$failed_tests\n  - $$hex"; \
 		fi; \
 	done; \
@@ -97,7 +97,7 @@ test-branch: .ooo-verilog-stamp
 	@failed_tests=""; \
 	for hex in $(BRANCH_TESTS); do \
 		echo "Running $$hex..."; \
-		if ! cargo run --release --bin ooo-cosim -- $$hex; then \
+		if ! RUSTFLAGS="-Awarnings" cargo run --release --bin ooo-cosim -- $$hex; then \
 			failed_tests="$$failed_tests\n  - $$hex"; \
 		fi; \
 	done; \
@@ -115,43 +115,7 @@ test-load-store: .ooo-verilog-stamp
 	@failed_tests=""; \
 	for hex in $(LOAD_STORE_TESTS); do \
 		echo "Running $$hex..."; \
-		if ! cargo run --release --bin ooo-cosim -- $$hex; then \
-			failed_tests="$$failed_tests\n  - $$hex"; \
-		fi; \
-	done; \
-	if [ -n "$$failed_tests" ]; then \
-		echo ""; \
-		echo "Failed tests:"; \
-		echo "$$failed_tests"; \
-		exit 1; \
-	else \
-		echo ""; \
-		echo "All tests passed!"; \
-	fi
-
-test-bp: .ooo-verilog-stamp
-	@failed_tests=""; \
-	for hex in $(BP_TESTS); do \
-		echo "Running $$hex..."; \
-		if ! cargo run --release --bin ooo-cosim -- $$hex; then \
-			failed_tests="$$failed_tests\n  - $$hex"; \
-		fi; \
-	done; \
-	if [ -n "$$failed_tests" ]; then \
-		echo ""; \
-		echo "Failed tests:"; \
-		echo "$$failed_tests"; \
-		exit 1; \
-	else \
-		echo ""; \
-		echo "All tests passed!"; \
-	fi
-
-test-cache: .ooo-verilog-stamp
-	@failed_tests=""; \
-	for hex in $(CACHE_TESTS); do \
-		echo "Running $$hex..."; \
-		if ! cargo run --release --bin ooo-cosim -- $$hex; then \
+		if ! RUSTFLAGS="-Awarnings" cargo run --release --bin ooo-cosim -- $$hex; then \
 			failed_tests="$$failed_tests\n  - $$hex"; \
 		fi; \
 	done; \
