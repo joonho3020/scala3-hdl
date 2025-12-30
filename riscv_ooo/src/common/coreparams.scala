@@ -22,6 +22,10 @@ case class BPUParams(
   rasEntries: Int = 8,
   ghistBits: Int = 8,
   ghtEntries: Int = 32,
+  lhtEntries: Int = 32,
+  lhistBits: Int = 8,
+  localPhtEntries: Int = 256,
+  metaEntries: Int = 32,
 ) derives StableHash
 
 case class LSUParams(

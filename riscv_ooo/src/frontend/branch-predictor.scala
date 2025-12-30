@@ -90,8 +90,10 @@ case class BranchPredictorIO(
   ras_update: Valid[BPUUpdate],
   flush: Bool,
   ghist: UInt,
+  lhist: UInt,
   ras_snapshot: RASSnapshot,
   restore_ghist: Valid[UInt],
+  restore_lhist: Valid[UInt],
   restore_ras: Valid[RASSnapshot],
 ) extends Bundle[BranchPredictorIO]
 
@@ -104,8 +106,10 @@ object BranchPredictorIO:
       ras_update = Flipped(Valid(BPUUpdate(p))),
       flush = Input(Bool()),
       ghist = Output(UInt(p.bpu.ghistBits.W)),
+      lhist = Output(UInt(p.bpu.lhistBits.W)),
       ras_snapshot = Output(RASSnapshot(p)),
       restore_ghist = Flipped(Valid(UInt(p.bpu.ghistBits.W))),
+      restore_lhist = Flipped(Valid(UInt(p.bpu.lhistBits.W))),
       restore_ras = Flipped(Valid(RASSnapshot(p))),
     )
 
@@ -218,6 +222,72 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
     def clear: Unit =
       ghist := 0.U
 
+  class LHT(entries: Int, lhistBits: Int):
+    val lhtIdxBits = log2Ceil(entries)
+    private val lht = Reg(Vec.fill(entries)(UInt(lhistBits.W)))
+
+    def lookup(pc: UInt): UInt =
+      val idx = if entries == 1 then 0.U else pc(lhtIdxBits + 1, 2)
+      lht(idx)
+
+    def update(pc: UInt, taken: Bool): Unit =
+      val idx = if entries == 1 then 0.U else pc(lhtIdxBits + 1, 2)
+      lht(idx) := (lht(idx) << 1) | taken.asUInt
+
+    def restore(pc: UInt, lhist: UInt): Unit =
+      val idx = if entries == 1 then 0.U else pc(lhtIdxBits + 1, 2)
+      lht(idx) := lhist
+
+    def clear: Unit =
+      lht.foreach(_ := 0.U)
+
+  class LocalPHT(entries: Int, lhistBits: Int):
+    val phtIdxBits = log2Ceil(entries)
+    private val pht = Reg(Vec.fill(entries)(UInt(2.W)))
+
+    def lookup(lhist: UInt): Bool =
+      val idx = lhist(phtIdxBits - 1, 0)
+      pht(idx)(1).asBool
+
+    def update(lhist: UInt, taken: Bool): Unit =
+      val idx = lhist(phtIdxBits - 1, 0)
+      val counter = pht(idx)
+      val next = Wire(UInt(2.W))
+      next := counter
+      when (taken && counter =/= 3.U) { next := counter + 1.U }
+      when (!taken && counter =/= 0.U) { next := counter - 1.U }
+      pht(idx) := next
+
+    def clear: Unit =
+      pht.foreach(_ := 1.U)
+
+  class MetaPredictor(entries: Int, ghistBits: Int):
+    val metaIdxBits = log2Ceil(entries)
+    private val meta_table = Reg(Vec.fill(entries)(UInt(2.W)))
+
+    def hash(pc: UInt, ghist: UInt): UInt =
+      val pc_bits = if entries == 1 then 0.U else pc(metaIdxBits + 1, 2)
+      val ghist_folded = ghist(metaIdxBits - 1, 0)
+      pc_bits ^ ghist_folded
+
+    def select(pc: UInt, ghist: UInt): Bool =
+      val idx = hash(pc, ghist)
+      meta_table(idx)(1).asBool
+
+    def update(pc: UInt, ghist: UInt, global_correct: Bool, local_correct: Bool): Unit =
+      when (global_correct =/= local_correct) {
+        val idx = hash(pc, ghist)
+        val counter = meta_table(idx)
+        val next = Wire(UInt(2.W))
+        next := counter
+        when (global_correct && counter =/= 3.U) { next := counter + 1.U }
+        when (local_correct && counter =/= 0.U) { next := counter - 1.U }
+        meta_table(idx) := next
+      }
+
+    def clear: Unit =
+      meta_table.foreach(_ := 1.U)
+
   val io = IO(BranchPredictorIO(p))
 
   body {
@@ -237,8 +307,12 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
     val btb = new BTB(btbEntries)
     val ght = new GHT(ghtEntries, ghistBits)
     val ghr = new GHR(ghistBits)
+    val lht = new LHT(p.bpu.lhtEntries, p.bpu.lhistBits)
+    val local_pht = new LocalPHT(p.bpu.localPhtEntries, p.bpu.lhistBits)
+    val meta = new MetaPredictor(p.bpu.metaEntries, p.bpu.ghistBits)
 
     io.ghist := ghr.read
+    io.lhist := lht.lookup(io.req.bits.pc)
     io.ras_snapshot := ras.get_snapshot
 
     for (i <- 0 until p.coreWidth) {
@@ -246,7 +320,14 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       io.resp(i).bits  := DontCare
 
       val pc = io.req.bits.pc + (4 * i).U
-      val pred_taken = ght.lookup(pc, ghr.read)
+
+      val global_pred = ght.lookup(pc, ghr.read)
+
+      val lhist = lht.lookup(pc)
+      val local_pred = local_pht.lookup(lhist)
+
+      val use_global = meta.select(pc, ghr.read)
+      val pred_taken = Mux(use_global, global_pred, local_pred)
 
       val (btb_hit, btb_entry) = btb.lookup(pc)
       val use_ras = btb_entry.is_ret && !ras.empty
@@ -263,9 +344,21 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
     when (io.bht_btb_update.valid) {
       val taken = io.bht_btb_update.bits.taken
       val pc = io.bht_btb_update.bits.pc
+
       val ghist_for_update = ghr.read
+      val lhist_for_update = lht.lookup(pc)
+
+      val global_pred = ght.lookup(pc, ghist_for_update)
+      val local_pred = local_pht.lookup(lhist_for_update)
+      val global_correct = (global_pred === taken)
+      val local_correct = (local_pred === taken)
+
       ght.update(pc, ghist_for_update, taken)
+      local_pht.update(lhist_for_update, taken)
+      meta.update(pc, ghist_for_update, global_correct, local_correct)
+
       ghr.update(taken)
+      lht.update(pc, taken)
 
       when (taken) {
         btb.update(
@@ -288,6 +381,10 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       ghr.restore(io.restore_ghist.bits)
     }
 
+    when (io.restore_lhist.valid) {
+      lht.restore(io.bht_btb_update.bits.pc, io.restore_lhist.bits)
+    }
+
     when (io.restore_ras.valid) {
       ras.restore(io.restore_ras.bits)
     }
@@ -297,5 +394,8 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       ras.clear
       ght.clear
       ghr.clear
+      lht.clear
+      local_pht.clear
+      meta.clear
     }
   }

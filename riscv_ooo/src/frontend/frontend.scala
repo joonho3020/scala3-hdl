@@ -21,6 +21,7 @@ case class FetchBundle(
   ras_top: UInt,
   ras_ptr: UInt,
   ghist: UInt,
+  lhist: UInt,
 
   /* Control flow instructions */
   cfi_mask: UInt,
@@ -44,6 +45,7 @@ object FetchBundle:
       ras_ptr = UInt(log2Ceil(p.bpu.rasEntries + 1).W),
       ras_top = UInt(p.pcBits.W),
       ghist = UInt(p.bpu.ghistBits.W),
+      lhist = UInt(p.bpu.lhistBits.W),
 
       cfi_mask = UInt(p.coreWidth.W),
       cfi_idx  = Valid(UInt(log2Ceil(p.coreWidth + 1).W)),
@@ -186,6 +188,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(f1_taken_hit_idx)
     val f1_pred_target = Mux(f1_taken_hit, bpu.io.resp(f1_taken_hit_idx).bits.target, f1_next_fetch)
     val f1_ghist = bpu.io.ghist
+    val f1_lhist = bpu.io.lhist
 
     when (s1_valid && !f1_clear) {
       s0_vpc := f1_pred_target
@@ -205,6 +208,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     val s2_pred_target = RegNext(f1_pred_target)
     val s2_taken_hits = RegNext(Cat(f1_taken_hits.reverse))
     val s2_ghist = RegNext(f1_ghist)
+    val s2_lhist = RegNext(f1_lhist)
 
     val fetch_bundle = Wire(FetchBundle(p))
 
@@ -266,6 +270,13 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
                           fetch_bundle.brjmp.is_jalr
     val s2_call_pc = p.fetchAlign(s2_vpc) + (s2_cfi_idx << 2)
 
+    fetch_bundle.ghist := s2_ghist
+    fetch_bundle.lhist := s2_lhist
+    fetch_bundle.ras_ptr := bpu.io.ras_snapshot.ras_ptr
+    fetch_bundle.ras_top := bpu.io.ras_snapshot.ras_top
+    fetch_bundle.is_call := s2_taken_is_call
+    fetch_bundle.is_ret := s2_taken_is_ret
+
     // Speculatively update RAS
     bpu.io.ras_update.valid := s2_valid && ic.s2_valid && (s2_taken_is_ret || s2_taken_is_call)
     bpu.io.ras_update.bits := DontCare
@@ -280,12 +291,18 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     bpu.io.restore_ghist.valid := false.B
     bpu.io.restore_ghist.bits := DontCare
 
+    bpu.io.restore_lhist.valid := false.B
+    bpu.io.restore_lhist.bits := DontCare
+
     bpu.io.restore_ras.valid := false.B
     bpu.io.restore_ras.bits := DontCare
 
     when (io.core.redirect.valid) {
       bpu.io.restore_ghist.valid := ftq.io.redirect_resp.valid
       bpu.io.restore_ghist.bits := ftq.io.redirect_resp.bits.ghist
+
+      bpu.io.restore_lhist.valid := ftq.io.redirect_resp.valid
+      bpu.io.restore_lhist.bits := ftq.io.redirect_resp.bits.lhist
 
       bpu.io.restore_ras.valid := ftq.io.redirect_resp.valid
       bpu.io.restore_ras.bits.ras_ptr := ftq.io.redirect_resp.bits.ras_ptr

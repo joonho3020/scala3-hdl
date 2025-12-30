@@ -8,11 +8,15 @@ case class FTQEntry(
   pc: UInt,
   target: UInt,
   taken: Bool,
+
   ras_ptr: UInt,
   ras_top: UInt,
   ghist: UInt,
+  lhist: UInt,
+
   is_call: Bool,
   is_ret: Bool,
+
   cfi_mask: UInt,
   cfi_idx: Valid[UInt],
 ) extends Bundle[FTQEntry]
@@ -27,6 +31,7 @@ object FTQEntry:
       ras_ptr = UInt(log2Ceil(p.bpu.rasEntries + 1).W),
       ras_top = UInt(p.pcBits.W),
       ghist = UInt(p.bpu.ghistBits.W),
+      lhist = UInt(p.bpu.lhistBits.W),
 
       is_call = Bool(),
       is_ret = Bool(),
@@ -96,7 +101,7 @@ class FetchTargetQueue(p: CoreParams) extends Module with CoreCacheable(p):
       entries(idx).bits.ras_ptr  := io.enq.ras_ptr
       entries(idx).bits.ras_top  := io.enq.ras_top
       entries(idx).bits.ghist    := io.enq.ghist
-      entries(idx).bits.ghist    := io.enq.ghist
+      entries(idx).bits.lhist    := io.enq.lhist
       entries(idx).bits.is_call  := io.enq.is_call
       entries(idx).bits.is_ret   := io.enq.is_ret
       entries(idx).bits.cfi_mask := io.enq.cfi_mask
