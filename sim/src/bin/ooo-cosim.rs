@@ -256,7 +256,7 @@ fn main() {
     ref_core.load_instructions(RESET_PC, &instructions);
 
     for i in 0..32 {
-        ref_core.set_reg(i, i);
+        ref_core.set_reg(i, 0);
     }
 
     dut.reset();
