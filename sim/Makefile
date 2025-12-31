@@ -16,9 +16,10 @@ BRANCH_TESTS := \
 	tests/riscv64i_shift_cf_test.hex \
 	tests/riscv64i_shift_cf_test_long.hex \
 	tests/riscv64i_bp_btb_ras_test.hex \
-	tests/rv64i_bp_alternating_4.hex \
-	tests/rv64i_bp_correlated_4.hex \
+	tests/rv64i_bp_alternating.hex \
+	tests/rv64i_bp_biased.hex \
 	tests/rv64i_bp_warmup_16.hex \
+	tests/rv64i_bp_global_history.hex \
 	tests/rv64i_btb_ring64_laps4.hex \
 	tests/rv64i_ras_depth16_reps4.hex \
 	tests/rv64i_integer_big_test.hex

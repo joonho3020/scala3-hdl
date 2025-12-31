@@ -356,17 +356,7 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       io.resp(i).bits.is_ret := btb_entry.is_ret
       io.resp(i).bits.uses_ras := use_ras
 
-      // Speculatively update RAS during prediction
-      when (io.req.valid && btb_hit && predicted_taken) {
-        when (btb_entry.is_call) {
-          ras.push(pc + p.instBytes.U)
-        } .elsewhen (btb_entry.is_ret) {
-          ras.pop
-        }
-      }
-
       // Speculatively update history based on BTB hit and prediction
-      // (cfi_mask comes from decode which happens AFTER prediction)
       val is_cfi = btb_hit
       val taken = predicted_taken
 
@@ -384,10 +374,36 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       spec_lhist(i + 1) := next_lhist
     }
 
-    // Commit speculative updates to actual GHR/LHT registers when valid request
+    // Find the first taken branch to know where to stop updating history/RAS
+    val taken_mask = Wire(Vec.fill(p.coreWidth)(Bool()))
+    for (i <- 0 until p.coreWidth) {
+      taken_mask(i) := io.resp(i).valid && io.resp(i).bits.taken
+    }
+
+    // Priority encode to find first taken position
+    val has_taken = taken_mask.reduce(_ || _)
+    val first_taken_idx = PriorityEncoder(Cat(taken_mask.reverse))
+    val commit_idx = Mux(has_taken, first_taken_idx + 1.U, p.coreWidth.U)
+
+    // Commit speculative updates only up to first taken branch
     when (io.req.valid) {
-      ghist := spec_ghist(p.coreWidth)
-      lht := spec_lhist(p.coreWidth)
+      ghist := spec_ghist(commit_idx)
+      lht := spec_lhist(commit_idx)
+
+      // Update RAS only for the first taken call/return
+      when (has_taken) {
+        val taken_pc = io.req.bits.pc + (first_taken_idx << 2)
+        val taken_resp = io.resp(first_taken_idx).bits
+        when (taken_resp.hit) {
+          // Use BTB entry for the taken position
+          val (_, taken_btb_entry) = btb.lookup(taken_pc)
+          when (taken_btb_entry.is_call) {
+            ras.push(taken_pc + p.instBytes.U)
+          } .elsewhen (taken_btb_entry.is_ret) {
+            ras.pop
+          }
+        }
+      }
     }
 
     when (io.bpu_update.valid) {
