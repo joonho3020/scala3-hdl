@@ -74,7 +74,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
   val XLEN = p.xlenBits
   val coreWidth = p.coreWidth
-  val issueWidth = p.issueWidth
+  val intIssueWidth = p.intIssueWidth
+  val lsuIssueWidth = p.lsuIssueWidth
   val retireWidth = p.retireWidth
 
   body {
@@ -103,11 +104,13 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val issue_queue   = Module(new IssueQueue(p))
     val prf           = Module(new PhysicalRegfile(p))
     val br_tag_mgr    = Module(new BranchTagManager(p))
+    val lsu           = Module(new LSU(p))
 
-    val imm_gens = (0 until issueWidth).map(_ => Module(new ImmGen(XLEN)))
-    val alus     = (0 until issueWidth).map(_ => Module(new ALU(ALUParams(XLEN))))
+    val imm_gens = (0 until intIssueWidth).map(_ => Module(new ImmGen(XLEN)))
+    val alus     = (0 until intIssueWidth).map(_ => Module(new ALU(ALUParams(XLEN))))
+    val agus     = (0 until lsuIssueWidth).map(_ => Module(new AGU(p)))
 
-    val wb_uops = Wire(Vec.fill(issueWidth)(Valid(UOp(p))))
+    val wb_uops = Wire(Vec.fill(retireWidth)(Valid(UOp(p))))
 
     // -----------------------------------------------------------------------
     // Decode
@@ -148,7 +151,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       dis_uops(i) := renamer.io.rn2_uops(i)
     }
 
-    dis_stall := rob.io.full || !issue_queue.io.dis_ready
+    dis_stall := rob.io.full || !issue_queue.io.dis_ready || !lsu.io.dispatch.map(_.ready).reduce(_ && _)
     renamer.io.dis_stall := dis_stall
 
     for (i <- 0 until coreWidth) {
@@ -158,6 +161,10 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       issue_queue.io.dis_uops(i).valid := dis_uops(i).valid && !dis_stall
       issue_queue.io.dis_uops(i).bits := dis_uops(i).bits
       issue_queue.io.dis_uops(i).bits.rob_idx := rob.io.dispatch_rob_idxs(i)
+
+      lsu.io.dispatch(i).valid := dis_uops(i).valid && !dis_stall
+      lsu.io.dispatch(i).bits := dis_uops(i).bits
+      lsu.io.dispatch(i).bits.rob_idx := rob.io.dispatch_rob_idxs(i)
     }
 
     when (dis_stall) {
@@ -173,7 +180,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val iss_uops = Wire(Vec.fill(coreWidth)(Valid(UOp(p))))
     iss_uops := di_compactor.io.deq
 
-    for (i <- 0 until issueWidth) {
+    for (i <- 0 until intIssueWidth) {
       prf.io.read_ports(i * 2 + 0).addr := iss_uops(i).bits.prs1
       prf.io.read_ports(i * 2 + 1).addr := iss_uops(i).bits.prs2
     }
@@ -181,12 +188,12 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     // -----------------------------------------------------------------------
     // Execute
     // -----------------------------------------------------------------------
-    val exe_uops = Reg(Vec.fill(issueWidth)(Valid(UOp(p))))
-    val exe_rs1_data = (0 until issueWidth).map(i => prf.io.read_ports(i * 2 + 0).data)
-    val exe_rs2_data = (0 until issueWidth).map(i => prf.io.read_ports(i * 2 + 1).data)
+    val exe_uops = Reg(Vec.fill(intIssueWidth)(Valid(UOp(p))))
+    val exe_rs1_data = (0 until intIssueWidth).map(i => prf.io.read_ports(i * 2 + 0).data)
+    val exe_rs2_data = (0 until intIssueWidth).map(i => prf.io.read_ports(i * 2 + 1).data)
     val exe_resolve_info = Wire(BranchResolve(p))
 
-    for (i <- 0 until issueWidth) {
+    for (i <- 0 until intIssueWidth) {
       val iss_uop = iss_uops(i)
       val br_invalidate = exe_resolve_info.valid &&
                           exe_resolve_info.mispredict &&
@@ -224,9 +231,19 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     }
 
     // -----------------------------------------------------------------------
+    // AGU (Address Generation Unit)
+    // -----------------------------------------------------------------------
+    for (i <- 0 until 2) {
+      agus(i).io.req       := RegNext(lsu.io.exe_req(i))
+      agus(i).io.prs1_data := prf.io.read_ports(lsu.io.exe_req(i).prs1).data
+      agus(i).io.prs2_data := prf.io.read_ports(lsu.io.exe_req(i).prs2).data
+      lsu.io.exe_resp(i) := agus(i).io.resp
+    }
+
+    // -----------------------------------------------------------------------
     // Branch Resolution (at end of execute)
     // -----------------------------------------------------------------------
-    val exe_wb_data = Wire(Vec.fill(issueWidth)(UInt(p.xlenBits.W)))
+    val exe_wb_data = Wire(Vec.fill(intIssueWidth)(UInt(p.xlenBits.W)))
     val exe_is_cfi = exe_uops.map(u => u.valid && u.bits.ctrl.is_cfi)
     val exe_cfi_valid = exe_is_cfi.reduce(_ || _)
     val exe_cfi_idx = PriorityEncoder(Cat(exe_is_cfi.reverse)).asWire
@@ -273,6 +290,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     br_tag_mgr.io.br_resolve  := exe_resolve_info
     renamer.io.br_resolve     := exe_resolve_info
     issue_queue.io.br_resolve := exe_resolve_info
+    lsu.io.br_resolve         := exe_resolve_info
 
     rob.io.branch_update.valid   := exe_resolve_info.valid
     rob.io.branch_update.mispred := exe_resolve_info.mispredict
@@ -293,7 +311,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       }
     }
 
-    for (i <- 0 until issueWidth) {
+    for (i <- 0 until intIssueWidth) {
       val is_link = exe_uops(i).bits.ctrl.jal || exe_uops(i).bits.ctrl.jalr
       exe_wb_data(i) := Mux(is_link, exe_uops(i).bits.pc + 4.U, alus(i).io.out)
     }
@@ -302,40 +320,52 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     // -----------------------------------------------------------------------
     // Writeback
     // -----------------------------------------------------------------------
-    val wb_data = Wire(Vec.fill(issueWidth)(UInt(XLEN.W)))
+    val wb_data = Wire(Vec.fill(retireWidth)(UInt(XLEN.W)))
 
-    for (i <- 0 until issueWidth) {
+    for (i <- 0 until intIssueWidth) {
       wb_uops(i) := exe_uops(i)
       wb_data(i) := exe_wb_data(i)
+    }
+
+    for (i <- 0 until lsuIssueWidth) {
+      val ld_resp_valid = lsu.io.ld_resp(i).valid
+      val ld_resp = lsu.io.ld_resp(i).bits
+
+      when (ld_resp_valid) {
+        wb_uops(i+intIssueWidth).valid := true.B
+        wb_uops(i+intIssueWidth).bits.prd := ld_resp.prd
+        wb_uops(i+intIssueWidth).bits.ctrl.rd_wen := true.B
+        wb_data(i+intIssueWidth) := ld_resp.data
+      }
     }
 
     rob.io.wb_req := wb_uops
     rob.io.wb_data := wb_data
 
-    for (i <- 0 until issueWidth) {
+    for (i <- 0 until retireWidth) {
       prf.io.write_ports(i).valid := wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen
       prf.io.write_ports(i).addr := wb_uops(i).bits.prd
       prf.io.write_ports(i).data := Mux(wb_uops(i).bits.lrd === 0.U, 0.U, wb_data(i))
     }
 
-    for (i <- 0 until issueWidth) {
+    for (i <- 0 until retireWidth) {
       issue_queue.io.wakeup_idx(i).valid := wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen
       issue_queue.io.wakeup_idx(i).bits := wb_uops(i).bits.prd
+
+      lsu.io.wakeup(i).valid := wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen
+      lsu.io.wakeup(i).bits := wb_uops(i).bits.prd
     }
 
     for (i <- 0 until coreWidth) {
       renamer.io.wb_wakeup(i).prd.valid := {
-        if (i < issueWidth) wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen
+        if (i < intIssueWidth) wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen
         else false.B
       }
       renamer.io.wb_wakeup(i).prd.bits := {
-        if (i < issueWidth) wb_uops(i).bits.prd
+        if (i < intIssueWidth) wb_uops(i).bits.prd
         else 0.U
       }
     }
-
-    val wbcomm_compactor = Module(new Compactor(p, issueWidth))
-    wbcomm_compactor.io.enq := wb_uops
 
     // -----------------------------------------------------------------------
     // Commit
@@ -352,6 +382,10 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       io.retire_info(i).wb_rd := comm_uops(i).bits.lrd
       io.retire_info(i).bpu_preds := bpu_pred_count
       io.retire_info(i).bpu_hits := bpu_hit_count
+
+      // Commit stores
+      lsu.io.commit_store(i).valid := comm_uops(i).valid && comm_uops(i).bits.ctrl.is_store
+      lsu.io.commit_store(i).bits := comm_uops(i).bits.rob_idx
     }
 
     renamer.io.comm_free_phys := DontCare
@@ -369,7 +403,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     // Reset
     // -----------------------------------------------------------------------
     when (reset.asBool) {
-      for (i <- 0 until issueWidth) {
+      for (i <- 0 until intIssueWidth) {
         exe_uops(i).valid := false.B
       }
     }

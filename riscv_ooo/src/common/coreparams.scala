@@ -57,7 +57,8 @@ case class CoreParams(
   paddrBits: Int,
 
   fetchWidth: Int,
-  issueWidth: Int,
+  intIssueWidth: Int,
+  lsuIssueWidth: Int,
 
   icacheFetchBytes: Int,
   instBytes: Int = 4,
@@ -82,9 +83,7 @@ case class CoreParams(
   def coreInstBytes: Int = instBytes
   def memLineBytes: Int = ic.cacheLineBytes
   def memLineWords: Int = memLineBytes / 4
-  def retireWidth: Int = issueWidth
-
-  require(retireWidth == issueWidth)
+  def retireWidth: Int = intIssueWidth + lsuIssueWidth
 
   def fetchOffset(addr: UInt)(using m: Module) = addr & (fetchBytes-1).U
   def fetchAlign(addr: UInt)(using m: Module) = ~(~addr | (fetchBytes-1).U)
@@ -116,12 +115,15 @@ case class CoreParams(
   def branchTagBits: Int = numBranchTags
   def ftqIdxBits: Int = log2Ceil(br.ftqEntries + 1)
 
+  val ldqIdxBits = log2Ceil(lsu.lqEntries + 1)
+  val stqIdxBits = log2Ceil(lsu.sqEntries + 1)
+
   // TODO: need better uarching to prevent prfReadPort count from
   // increasing linearly w.r.t the core width.
   // Probably there is a way of banking it & multiplexing the physical ports
   // across logical ports????
-  def prfReadPorts: Int = issueWidth * 2
-  def prfWritePorts: Int = issueWidth
+  def prfReadPorts: Int = intIssueWidth * 2 + lsuIssueWidth
+  def prfWritePorts: Int = intIssueWidth + lsuIssueWidth
 
 trait CoreCacheable(p: CoreParams) extends CacheableModule:
   this: Module =>

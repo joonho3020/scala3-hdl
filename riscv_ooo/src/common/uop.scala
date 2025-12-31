@@ -25,6 +25,8 @@ case class UOp(
 
   rob_idx: UInt,
   ftq_idx: UInt,
+  ldq_idx: UInt,
+  stq_idx: UInt,
 
   br_tag:  OneHot,
   br_mask: UInt,
@@ -78,6 +80,8 @@ object UOp:
 
       rob_idx = UInt(p.robIdxBits.W),
       ftq_idx = UInt(p.ftqIdxBits.W),
+      ldq_idx = UInt(p.ldqIdxBits.W),
+      stq_idx = UInt(p.stqIdxBits.W),
 
       br_tag  = OneHot(p.branchTagBits.W),
       br_mask = UInt(p.branchTagBits.W),
