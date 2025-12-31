@@ -110,7 +110,6 @@ class FetchTargetQueue(p: CoreParams) extends Module with CoreCacheable(p):
     io.bpu_restore.valid := RegNext(do_redirect)
 
     when (do_redirect) {
-      enq_ptr := next_ptr(io.redirect.ftq_idx)
       val redirect_entry = entries(io.redirect.ftq_idx)
       redirect_entry.cfi_taken := io.redirect.taken
       redirect_entry.target_pc := io.redirect.target
@@ -127,6 +126,8 @@ class FetchTargetQueue(p: CoreParams) extends Module with CoreCacheable(p):
       io.bpu_restore.ras.top := RegNext(redirect_entry.ras_top)
 
       maybe_full := false.B
+      enq_ptr := next_ptr(io.redirect.ftq_idx)
+      bpd_ptr := next_ptr(io.redirect.ftq_idx)
     }
 
 
@@ -141,6 +142,10 @@ class FetchTargetQueue(p: CoreParams) extends Module with CoreCacheable(p):
     val bpd_entry = RegNext(entries(bpd_ptr))
     val do_bpd_update = (bpd_ptr =/= deq_ptr) && !do_redirect && !full
 
+    when (do_bpd_update) {
+      bpd_ptr := next_ptr(bpd_ptr)
+    }
+
     when (RegNext(do_bpd_update)) {
       io.bpu_update.valid := bpd_entry.cfi_mask =/= 0.U
       io.bpu_update.bits.pc := bpd_entry.pc
@@ -148,6 +153,10 @@ class FetchTargetQueue(p: CoreParams) extends Module with CoreCacheable(p):
       io.bpu_update.bits.target := bpd_entry.target_pc
       io.bpu_update.bits.is_call := bpd_entry.is_call
       io.bpu_update.bits.is_ret := bpd_entry.is_ret
+      io.bpu_update.bits.cfi_mask := bpd_entry.cfi_mask
+      io.bpu_update.bits.cfi_idx := bpd_entry.cfi_idx
+      io.bpu_update.bits.ghist := bpd_entry.ghist
+      io.bpu_update.bits.lhist := bpd_entry.lhist
     }
 
 

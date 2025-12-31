@@ -26,13 +26,19 @@ object BTBEntry:
     )
 
 case class BPUReq(
-  pc: UInt
+  pc: UInt,
+  cfi_mask: UInt,
+  cfi_idx: UInt,
+  cfi_taken: Bool
 ) extends Bundle[BPUReq]
 
 object BPUReq:
   def apply(p: CoreParams): BPUReq =
     BPUReq(
-      pc = UInt(p.pcBits.W)
+      pc = UInt(p.pcBits.W),
+      cfi_mask = UInt(p.coreWidth.W),
+      cfi_idx = UInt(log2Ceil(p.coreWidth + 1).W),
+      cfi_taken = Bool()
     )
 
 case class BPUResp(
@@ -61,6 +67,8 @@ case class BPUUpdate(
   is_ret: Bool,
   cfi_mask: UInt,
   cfi_idx: UInt,
+  ghist: UInt,
+  lhist: UInt,
 ) extends Bundle[BPUUpdate]
 
 object BPUUpdate:
@@ -73,6 +81,8 @@ object BPUUpdate:
       is_ret = Bool(),
       cfi_mask = UInt(p.coreWidth.W),
       cfi_idx = UInt(log2Ceil(p.coreWidth+1).W),
+      ghist = UInt(p.bpu.ghistBits.W),
+      lhist = UInt(p.bpu.lhistBits.W),
     )
 
 case class RASSnapshot(
@@ -232,39 +242,6 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
     def clear: Unit =
       pht.foreach(_ := 1.U)
 
-  class GHR(ghistBits: Int):
-    private val ghist = RegInit(0.U(ghistBits.W))
-
-    def read: UInt = ghist
-
-    def update(taken: Bool): Unit =
-      ghist := (ghist << 1) | taken.asUInt
-
-    def restore(value: UInt): Unit =
-      ghist := value
-
-    def clear: Unit =
-      ghist := 0.U
-
-  class LHT(entries: Int, lhistBits: Int):
-    val lhtIdxBits = log2Ceil(entries)
-    private val lht = Reg(Vec.fill(entries)(UInt(lhistBits.W)))
-
-    def lookup(pc: UInt): UInt =
-      val idx = if entries == 1 then 0.U else pc(lhtIdxBits + 1, 2)
-      lht(idx)
-
-    def update(pc: UInt, taken: Bool): Unit =
-      val idx = if entries == 1 then 0.U else pc(lhtIdxBits + 1, 2)
-      lht(idx) := (lht(idx) << 1) | taken.asUInt
-
-    def restore(pc: UInt, lhist: UInt): Unit =
-      val idx = if entries == 1 then 0.U else pc(lhtIdxBits + 1, 2)
-      lht(idx) := lhist
-
-    def clear: Unit =
-      lht.foreach(_ := 0.U)
-
   class LocalPHT(entries: Int, lhistBits: Int):
     val phtIdxBits = log2Ceil(entries)
     private val pht = Reg(Vec.fill(entries)(UInt(2.W)))
@@ -276,8 +253,7 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
     def update(lhist: UInt, taken: Bool): Unit =
       val idx = lhist(phtIdxBits - 1, 0)
       val counter = pht(idx)
-      val next = Wire(UInt(2.W))
-      next := counter
+      val next = WireInit(counter)
       when (taken && counter =/= 3.U) { next := counter + 1.U }
       when (!taken && counter =/= 0.U) { next := counter - 1.U }
       pht(idx) := next
@@ -330,27 +306,44 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
     val ras = new RAS(rasEntries)
     val btb = new BTB(btbEntries)
     val ght = new GHT(ghtEntries, ghistBits)
-    val ghr = new GHR(ghistBits)
-    val lht = new LHT(p.bpu.lhtEntries, p.bpu.lhistBits)
-    val local_pht = new LocalPHT(p.bpu.localPhtEntries, p.bpu.lhistBits)
+    val lht = new LocalPHT(p.bpu.localPhtEntries, p.bpu.lhistBits)
     val meta = new MetaPredictor(p.bpu.metaEntries, p.bpu.ghistBits)
 
-    io.ghist := ghr.read
-    io.lhist := lht.lookup(io.req.bits.pc)
+    val ghist = RegInit(0.U(p.bpu.ghistBits.W))
+
+    // LHT (Local History Table)
+    val lhtEntries = p.bpu.lhtEntries
+    val lhtIdxBits = log2Ceil(lhtEntries)
+    val lhists = Reg(Vec.fill(lhtEntries)(UInt(p.bpu.lhistBits.W)))
+
+    io.ghist := ghist
+    io.lhist := {
+      val idx = if lhtEntries == 1 then 0.U else io.req.bits.pc(lhtIdxBits + 1, 2)
+      lhists(idx)
+    }
     io.ras_snapshot := ras.get_snapshot
 
-    for (i <- 0 until p.coreWidth) {
-      io.resp(i).valid := io.req.valid
-      io.resp(i).bits  := DontCare
+    // Track speculative history within fetch packet
+    // Create a chain of speculative ghist values, one per fetch position
+    val spec_ghist = Wire(Vec.fill(p.coreWidth + 1)(UInt(p.bpu.ghistBits.W)))
+    val spec_lhist = Wire(Vec.fill(p.coreWidth + 1)(Vec.fill(lhtEntries)(UInt(p.bpu.lhistBits.W))))
 
+    spec_ghist(0) := ghist
+    spec_lhist(0) := lhists
+
+    for (i <- 0 until p.coreWidth) {
       val pc = io.req.bits.pc + (4 * i).U
 
-      val global_pred = ght.lookup(pc, ghr.read)
+      val current_ghist = spec_ghist(i)
+      val current_lhist = spec_lhist(i)
 
-      val lhist = lht.lookup(pc)
-      val local_pred = local_pht.lookup(lhist)
+      val global_pred = ght.lookup(pc, current_ghist)
 
-      val use_global = meta.select(pc, ghr.read)
+      val lht_idx = if lhtEntries == 1 then 0.U else pc(lhtIdxBits + 1, 2)
+      val lhist = current_lhist(lht_idx)
+      val local_pred = lht.lookup(lhist)
+
+      val use_global = meta.select(pc, current_ghist)
       val pred_taken = Mux(use_global, global_pred, local_pred)
 
       val (btb_hit, btb_entry) = btb.lookup(pc)
@@ -358,38 +351,82 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       val predicted_target = Mux(use_ras, ras.top, btb_entry.target)
       val predicted_taken = btb_hit && (use_ras || pred_taken)
 
+      io.resp(i).valid := io.req.valid
       io.resp(i).bits.hit := btb_hit
       io.resp(i).bits.taken := predicted_taken
       io.resp(i).bits.target := predicted_target
       io.resp(i).bits.is_ret := btb_entry.is_ret
       io.resp(i).bits.uses_ras := use_ras
+
+      // Determine if this position has a CFI
+      // Use cfi_mask from request if available (from decode), otherwise use BTB hit
+      val is_cfi = io.req.bits.cfi_mask(i).asBool
+      val taken = (i.U === io.req.bits.cfi_idx) && io.req.bits.cfi_taken
+
+      // Speculatively update history for next position in fetch packet
+      val next_ghist = Wire(UInt(p.bpu.ghistBits.W))
+      val next_lhist = Wire(Vec.fill(lhtEntries)(UInt(p.bpu.lhistBits.W)))
+
+      next_ghist := Mux(is_cfi, (current_ghist << 1) | taken.asUInt, current_ghist)
+      next_lhist := current_lhist
+      when (is_cfi) {
+        next_lhist(lht_idx) := (current_lhist(lht_idx) << 1) | taken.asUInt
+      }
+
+      spec_ghist(i + 1) := next_ghist
+      spec_lhist(i + 1) := next_lhist
+    }
+
+    // Commit speculative updates to actual GHR/LHT registers when valid request
+    when (io.req.valid) {
+      ghist := spec_ghist(p.coreWidth)
+      lhists := spec_lhist(p.coreWidth)
     }
 
     when (io.bpu_update.valid) {
-      val taken = io.bpu_update.bits.taken
-      val pc = io.bpu_update.bits.pc
+      val cfi_mask = io.bpu_update.bits.cfi_mask
+      val cfi_idx = io.bpu_update.bits.cfi_idx
+      val cfi_taken = io.bpu_update.bits.taken
+      val base_pc = io.bpu_update.bits.pc
 
-      val ghist_for_update = ghr.read
-      val lhist_for_update = lht.lookup(pc)
+      val update_ghist = Wire(Vec.fill(p.coreWidth + 1)(UInt(p.bpu.ghistBits.W)))
+      update_ghist(0) := io.bpu_update.bits.ghist
 
-      val global_pred = ght.lookup(pc, ghist_for_update)
-      val local_pred = local_pht.lookup(lhist_for_update)
-      val global_correct = (global_pred === taken)
-      val local_correct = (local_pred === taken)
+      // Process all CFIs in the fetch packet, respecting cfi_mask
+      for (i <- 0 until p.coreWidth) {
+        val is_cfi = cfi_mask(i).asBool
+        val cfi_pc = base_pc + (i << 2).U
+        val current_ghist = update_ghist(i)
 
-      ght.update(pc, ghist_for_update, taken)
-      local_pht.update(lhist_for_update, taken)
-      meta.update(pc, ghist_for_update, global_correct, local_correct)
+        // CFIs before cfi_idx are not-taken, CFI at cfi_idx uses cfi_taken
+        val is_this_cfi_taken = (i.U === cfi_idx) && cfi_taken
 
-      ghr.update(taken)
-      lht.update(pc, taken)
+        when (is_cfi) {
+          val global_pred = ght.lookup(cfi_pc, current_ghist)
 
-      when (taken) {
-        btb.update(
-          io.bpu_update.bits.pc + (io.bpu_update.bits.cfi_idx << 2),
-          io.bpu_update.bits.target,
-          io.bpu_update.bits.is_ret,
-          io.bpu_update.bits.is_call)
+          val cfi_lhist = io.bpu_update.bits.lhist
+          val local_pred = lht.lookup(cfi_lhist)
+
+          val global_correct = (global_pred === is_this_cfi_taken)
+          val local_correct = (local_pred === is_this_cfi_taken)
+
+          // Update GHT, Local PHT, and Meta predictor for this CFI
+          ght.update(cfi_pc, current_ghist, is_this_cfi_taken)
+          lht.update(cfi_lhist, is_this_cfi_taken)
+          meta.update(cfi_pc, current_ghist, global_correct, local_correct)
+
+          // Update BTB when this CFI is taken
+          when (is_this_cfi_taken) {
+            btb.update(
+              cfi_pc,
+              io.bpu_update.bits.target,
+              io.bpu_update.bits.is_ret,
+              io.bpu_update.bits.is_call)
+          }
+        }
+
+        // Update ghist for next position (only if this position had a CFI)
+        update_ghist(i + 1) := Mux(is_cfi, (current_ghist << 1) | is_this_cfi_taken.asUInt, current_ghist)
       }
     }
 
@@ -402,18 +439,19 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
     }
 
     when (io.restore.valid) {
-      ghr.restore(io.restore.ghist)
+      ghist := io.restore.ghist
       ras.restore(io.restore.ras)
-      lht.restore(io.restore.pc, io.restore.lhist)
+      val lht_idx = if lhtEntries == 1 then 0.U else io.restore.pc(lhtIdxBits + 1, 2)
+      lhists(lht_idx) := io.restore.lhist
     }
 
     when (reset.asBool || io.flush) {
       btb.clear
       ras.clear
       ght.clear
-      ghr.clear
+      ghist := 0.U
+      lhists.foreach(_ := 0.U)
       lht.clear
-      local_pht.clear
       meta.clear
     }
   }

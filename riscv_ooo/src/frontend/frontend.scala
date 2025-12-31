@@ -124,6 +124,9 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     bpu.io.flush := false.B
     bpu.io.req.valid := false.B
     bpu.io.req.bits.pc := 0.U(p.pcBits.W)
+    bpu.io.req.bits.cfi_mask := 0.U(p.coreWidth.W)
+    bpu.io.req.bits.cfi_idx := 0.U
+    bpu.io.req.bits.cfi_taken := false.B
 
     ftq.io.redirect.valid := io.core.redirect.valid
     ftq.io.redirect.target := io.core.redirect.target
