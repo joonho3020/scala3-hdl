@@ -15,9 +15,6 @@ case class FetchBundle(
   is_call: Bool,
   is_ret: Bool,
 
-  /* Predicted next PC */
-  target_pc: Valid[UInt],
-
   ras_top: UInt,
   ras_ptr: UInt,
   ghist: UInt,
@@ -26,8 +23,15 @@ case class FetchBundle(
   /* Control flow instructions */
   cfi_mask: UInt,
 
+  /* When set, cfi_idx is taken */
+  cfi_taken: Bool,
+
   /* First taken instruction index within this fetch bundle */
-  cfi_idx: Valid[UInt]
+  cfi_idx: UInt,
+
+  /* Predicted next PC */
+  target_pc: UInt,
+
 ) extends Bundle[FetchBundle]
 
 object FetchBundle:
@@ -35,7 +39,6 @@ object FetchBundle:
     FetchBundle(
       pc = UInt(p.xlenBits.W),
       insts = Vec(Seq.fill(p.coreWidth)(Valid(UInt(32.W)))),
-      target_pc = Valid(UInt(p.pcBits.W)),
       ftq_idx = UInt(p.ftqIdxBits.W),
 
       brjmp = BrJmpSignal(),
@@ -48,14 +51,16 @@ object FetchBundle:
       lhist = UInt(p.bpu.lhistBits.W),
 
       cfi_mask = UInt(p.coreWidth.W),
-      cfi_idx  = Valid(UInt(log2Ceil(p.coreWidth + 1).W)),
+      cfi_taken    = Bool(),
+      cfi_idx  = UInt(log2Ceil(p.coreWidth + 1).W),
+      target_pc = UInt(p.pcBits.W),
     )
 
 case class RedirectIf(
   valid:  Bool,
   target: UInt,
   ftq_idx: UInt,
-  fb_idx: UInt,
+  cfi_idx: UInt,
   taken: Bool,
 ) extends Bundle[RedirectIf]
 
@@ -65,7 +70,7 @@ object RedirectIf:
       valid  = Input(Bool()),
       target = Input(UInt(p.pcBits.W)),
       ftq_idx = Input(UInt(p.ftqIdxBits.W)),
-      fb_idx = Input(UInt(log2Ceil(p.coreWidth+1).W)),
+      cfi_idx = Input(UInt(log2Ceil(p.coreWidth+1).W)),
       taken   = Input(Bool()),
     )
 
@@ -123,7 +128,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     ftq.io.redirect.valid := io.core.redirect.valid
     ftq.io.redirect.target := io.core.redirect.target
     ftq.io.redirect.ftq_idx := io.core.redirect.ftq_idx
-    ftq.io.redirect.fb_idx := io.core.redirect.fb_idx
+    ftq.io.redirect.cfi_idx := io.core.redirect.cfi_idx
     ftq.io.redirect.taken := io.core.redirect.taken
 
     ftq.io.commit.valid := io.core.commit.valid
@@ -224,7 +229,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     fetch_bundle.brjmp.is_br := false.B
     fetch_bundle.brjmp.is_jal := false.B
     fetch_bundle.brjmp.is_jalr := false.B
-    fetch_bundle.cfi_idx.valid := false.B
+    fetch_bundle.cfi_taken := false.B
 
     for (i <- 0 until p.coreWidth) {
       val inst = fetch_bundle.insts(i)
@@ -248,19 +253,18 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
         fetch_bundle.brjmp.is_br := brjmp(i).is_br
         fetch_bundle.brjmp.is_jal := brjmp(i).is_jal
         fetch_bundle.brjmp.is_jalr := brjmp(i).is_jalr
-        fetch_bundle.cfi_idx.bits := i.U
-        fetch_bundle.cfi_idx.valid := true.B
+        fetch_bundle.cfi_idx := i.U
+        fetch_bundle.cfi_taken := true.B
       }
     }
 
-    fetch_bundle.target_pc.valid := s2_valid && s2_is_taken.reduce(_ || _)
-    fetch_bundle.target_pc.bits  := s2_pred_target
+    fetch_bundle.target_pc := s2_pred_target
 
     fetch_bundle.cfi_mask := Cat(fetch_bundle.insts.zip(brjmp).map((i, b) => {
       i.valid && b.is_br || b.is_jal || b.is_jalr
     }).reverse)
 
-    val s2_cfi_idx = fetch_bundle.cfi_idx.bits
+    val s2_cfi_idx = fetch_bundle.cfi_idx
     val s2_ti = fetch_bundle.insts(s2_cfi_idx)
     val s2_taken_is_call = s2_ti.valid &&
                           (lrd(s2_ti.bits) === 1.U) &&
@@ -272,8 +276,8 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
 
     fetch_bundle.ghist := s2_ghist
     fetch_bundle.lhist := s2_lhist
-    fetch_bundle.ras_ptr := bpu.io.ras_snapshot.ras_ptr
-    fetch_bundle.ras_top := bpu.io.ras_snapshot.ras_top
+    fetch_bundle.ras_ptr := bpu.io.ras_snapshot.ptr
+    fetch_bundle.ras_top := bpu.io.ras_snapshot.top
     fetch_bundle.is_call := s2_taken_is_call
     fetch_bundle.is_ret := s2_taken_is_ret
 
@@ -284,33 +288,13 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     bpu.io.ras_update.bits.is_call := s2_taken_is_call
     bpu.io.ras_update.bits.is_ret := s2_taken_is_ret
 
-    // Update BHT & BTB
-    bpu.io.bht_btb_update := ftq.io.bht_btb_update
+    // BHT & BTB Updates & Restores
+    bpu.io.bpu_update <> ftq.io.bpu_update
+    bpu.io.restore <> ftq.io.bpu_restore
 
-    // Restore bpu
-    bpu.io.restore_ghist.valid := false.B
-    bpu.io.restore_ghist.bits := DontCare
-
-    bpu.io.restore_lhist.valid := false.B
-    bpu.io.restore_lhist.bits := DontCare
-
-    bpu.io.restore_ras.valid := false.B
-    bpu.io.restore_ras.bits := DontCare
-
-    when (io.core.redirect.valid) {
-      bpu.io.restore_ghist.valid := ftq.io.redirect_resp.valid
-      bpu.io.restore_ghist.bits := ftq.io.redirect_resp.bits.ghist
-
-      bpu.io.restore_lhist.valid := ftq.io.redirect_resp.valid
-      bpu.io.restore_lhist.bits := ftq.io.redirect_resp.bits.lhist
-
-      bpu.io.restore_ras.valid := ftq.io.redirect_resp.valid
-      bpu.io.restore_ras.bits.ras_ptr := ftq.io.redirect_resp.bits.ras_ptr
-      bpu.io.restore_ras.bits.ras_top := ftq.io.redirect_resp.bits.ras_top
-    }
-
-    ftq.io.enq <> fetch_bundle
-    fetch_bundle.ftq_idx := ftq.io.enq_idx.bits
+    ftq.io.enq.valid := fetch_bundle.insts.map(_.valid).reduce(_ || _)
+    ftq.io.enq.bits := fetch_bundle
+    fetch_bundle.ftq_idx := ftq.io.enq_idx
 
     ic.s2_kill := f2_clear
 
@@ -319,7 +303,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
 
     fb.io.enq.valid := s2_valid && ic.s2_valid
     fb.io.enq.bits  := fetch_bundle
-    f3_ready := fb.io.enq.ready && ftq.io.enq_ready
+    f3_ready := fb.io.enq.ready && ftq.io.enq.ready
 
     io.core.fetch_uops.zip(fb.io.deq).foreach((io_uop, fb_uop) => {
       io_uop.valid := fb_uop.valid
@@ -337,7 +321,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
       f1_clear := true.B
     } .elsewhen (s2_valid && ic.s2_valid) {
       // Cache hit
-      when (fetch_bundle.target_pc.valid) {
+      when (fetch_bundle.cfi_taken) {
         s0_vpc := s2_pred_target
         s0_valid := true.B
         f1_clear := true.B

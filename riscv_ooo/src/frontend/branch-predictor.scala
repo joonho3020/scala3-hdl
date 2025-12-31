@@ -58,7 +58,9 @@ case class BPUUpdate(
   target: UInt,
   taken: Bool,
   is_call: Bool,
-  is_ret: Bool
+  is_ret: Bool,
+  cfi_mask: UInt,
+  cfi_idx: UInt,
 ) extends Bundle[BPUUpdate]
 
 object BPUUpdate:
@@ -68,33 +70,51 @@ object BPUUpdate:
       target = UInt(p.pcBits.W),
       taken = Bool(),
       is_call = Bool(),
-      is_ret = Bool()
+      is_ret = Bool(),
+      cfi_mask = UInt(p.coreWidth.W),
+      cfi_idx = UInt(log2Ceil(p.coreWidth+1).W),
     )
 
 case class RASSnapshot(
-  ras_ptr: UInt,
-  ras_top: UInt
+  ptr: UInt,
+  top: UInt
 ) extends Bundle[RASSnapshot]
 
 object RASSnapshot:
   def apply(p: CoreParams): RASSnapshot =
     RASSnapshot(
-      ras_ptr = UInt(log2Ceil(p.bpu.rasEntries + 1).W),
-      ras_top = UInt(p.pcBits.W)
+      ptr = UInt(log2Ceil(p.bpu.rasEntries + 1).W),
+      top = UInt(p.pcBits.W)
+    )
+
+case class BPURestoreIf(
+  valid: Bool,
+  pc: UInt,
+  ghist: UInt,
+  lhist: UInt,
+  ras: RASSnapshot
+) extends Bundle[BPURestoreIf]
+
+object BPURestoreIf:
+  def apply(p: CoreParams): BPURestoreIf =
+    BPURestoreIf(
+      valid = Bool(),
+      pc = UInt(p.pcBits.W),
+      ghist = UInt(p.bpu.ghistBits.W),
+      lhist = UInt(p.bpu.lhistBits.W),
+      ras   = RASSnapshot(p),
     )
 
 case class BranchPredictorIO(
   req: Valid[BPUReq],
   resp: Vec[Valid[BPUResp]],
-  bht_btb_update: Valid[BPUUpdate],
+  bpu_update: Valid[BPUUpdate],
   ras_update: Valid[BPUUpdate],
   flush: Bool,
   ghist: UInt,
   lhist: UInt,
   ras_snapshot: RASSnapshot,
-  restore_ghist: Valid[UInt],
-  restore_lhist: Valid[UInt],
-  restore_ras: Valid[RASSnapshot],
+  restore: BPURestoreIf,
 ) extends Bundle[BranchPredictorIO]
 
 object BranchPredictorIO:
@@ -102,15 +122,13 @@ object BranchPredictorIO:
     BranchPredictorIO(
       req = Input(Valid(BPUReq(p))),
       resp = Output(Vec.fill(p.coreWidth)(Valid(BPUResp(p)))),
-      bht_btb_update = Flipped(Valid(BPUUpdate(p))),
+      bpu_update = Flipped(Valid(BPUUpdate(p))),
       ras_update = Flipped(Valid(BPUUpdate(p))),
       flush = Input(Bool()),
       ghist = Output(UInt(p.bpu.ghistBits.W)),
       lhist = Output(UInt(p.bpu.lhistBits.W)),
       ras_snapshot = Output(RASSnapshot(p)),
-      restore_ghist = Flipped(Valid(UInt(p.bpu.ghistBits.W))),
-      restore_lhist = Flipped(Valid(UInt(p.bpu.lhistBits.W))),
-      restore_ras = Flipped(Valid(RASSnapshot(p))),
+      restore = Input(BPURestoreIf(p)),
     )
 
 // TODO: Bank BTB, BHT memory structures
@@ -135,14 +153,14 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
 
     def get_snapshot: RASSnapshot =
       val snap = Wire(RASSnapshot(p))
-      snap.ras_ptr := ptr
-      snap.ras_top := top
+      snap.ptr := ptr
+      snap.top := top
       snap
 
     def restore(snapshot: RASSnapshot): Unit =
-      ptr := snapshot.ras_ptr
-      val top_idx = Mux(snapshot.ras_ptr === 0.U, (nras - 1).U, snapshot.ras_ptr - 1.U)
-      stack(top_idx) := snapshot.ras_top
+      ptr := snapshot.ptr
+      val top_idx = Mux(snapshot.ptr === 0.U, (nras - 1).U, snapshot.ptr - 1.U)
+      stack(top_idx) := snapshot.top
 
     def clear: Unit =
       count := 0.U
@@ -347,9 +365,9 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       io.resp(i).bits.uses_ras := use_ras
     }
 
-    when (io.bht_btb_update.valid) {
-      val taken = io.bht_btb_update.bits.taken
-      val pc = io.bht_btb_update.bits.pc
+    when (io.bpu_update.valid) {
+      val taken = io.bpu_update.bits.taken
+      val pc = io.bpu_update.bits.pc
 
       val ghist_for_update = ghr.read
       val lhist_for_update = lht.lookup(pc)
@@ -368,10 +386,10 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
 
       when (taken) {
         btb.update(
-          io.bht_btb_update.bits.pc,
-          io.bht_btb_update.bits.target,
-          io.bht_btb_update.bits.is_ret,
-          io.bht_btb_update.bits.is_call)
+          io.bpu_update.bits.pc + (io.bpu_update.bits.cfi_idx << 2),
+          io.bpu_update.bits.target,
+          io.bpu_update.bits.is_ret,
+          io.bpu_update.bits.is_call)
       }
     }
 
@@ -383,16 +401,10 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       }
     }
 
-    when (io.restore_ghist.valid) {
-      ghr.restore(io.restore_ghist.bits)
-    }
-
-    when (io.restore_lhist.valid) {
-      lht.restore(io.bht_btb_update.bits.pc, io.restore_lhist.bits)
-    }
-
-    when (io.restore_ras.valid) {
-      ras.restore(io.restore_ras.bits)
+    when (io.restore.valid) {
+      ghr.restore(io.restore.ghist)
+      ras.restore(io.restore.ras)
+      lht.restore(io.restore.pc, io.restore.lhist)
     }
 
     when (reset.asBool || io.flush) {
