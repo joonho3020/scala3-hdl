@@ -29,7 +29,6 @@ case class UOp(
   br_tag:  OneHot,
   br_mask: UInt,
 
-  taken: Bool,
   next_pc: Valid[UInt],
   ctrl: CtrlSignals,
 ) extends Bundle[UOp]:
@@ -83,7 +82,6 @@ object UOp:
       br_tag  = OneHot(p.branchTagBits.W),
       br_mask = UInt(p.branchTagBits.W),
 
-      taken  = Bool(),
       next_pc = Valid(UInt(p.pcBits.W)),
       ctrl   = CtrlSignals()
     )

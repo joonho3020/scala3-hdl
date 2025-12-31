@@ -36,7 +36,6 @@ class Decoder(p: CoreParams) extends Module with CoreCacheable(p):
       deq_uop.lrs1   := lrs1(inst)
       deq_uop.lrs2   := lrs2(inst)
       deq_uop.lrd    := lrd(inst)
-      deq_uop.taken  := false.B
       CtrlSignals.decode(deq_uop.ctrl, enq_uop.inst)
     })
   }

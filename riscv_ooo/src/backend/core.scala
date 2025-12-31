@@ -229,26 +229,31 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val exe_wb_data = Wire(Vec.fill(issueWidth)(UInt(p.xlenBits.W)))
     val exe_is_cfi = exe_uops.map(u => u.valid && u.bits.ctrl.is_cfi)
     val exe_cfi_valid = exe_is_cfi.reduce(_ || _)
-    val exe_cfi_idx = PriorityEncoder(Cat(exe_is_cfi.reverse))
-    val cfi_uop = exe_uops(exe_cfi_idx)
+    val exe_cfi_idx = PriorityEncoder(Cat(exe_is_cfi.reverse)).asWire
+    val exe_cfi_uop = exe_uops(exe_cfi_idx).asWire
     val exe_cfi_cnt = exe_is_cfi.map(_.asUInt).reduce(_ +& _)
     Assert(exe_cfi_cnt <= 1.U, s"Cannot issue more than one CFI, got ${exe_cfi_cnt}")
 
-    val exe_cfi_cmp_out = MuxOneHot(PriorityEncoderOH(Cat(exe_is_cfi.reverse)), alus.map(_.io.cmp_out).toSeq)
+    val exe_cfi_cmp_out = Wire(Bool())
+    exe_cfi_cmp_out := MuxOneHot(PriorityEncoderOH(Cat(exe_is_cfi.reverse)), alus.map(_.io.cmp_out).toSeq)
+    dontTouch(exe_cfi_cmp_out)
+    dontTouch(exe_cfi_idx)
+    dontTouch(exe_cfi_uop)
+
     val exe_cfi_imm = MuxOneHot(PriorityEncoderOH(Cat(exe_is_cfi.reverse)), imm_gens.map(_.io.out).toSeq)
     val exe_cfi_alu_out = MuxOneHot(PriorityEncoderOH(Cat(exe_is_cfi.reverse)), alus.map(_.io.out).toSeq)
 
-    val branch_taken = cfi_uop.bits.ctrl.br && exe_cfi_cmp_out
-    val jump_taken = cfi_uop.bits.ctrl.jal || cfi_uop.bits.ctrl.jalr
+    val branch_taken = exe_cfi_uop.bits.ctrl.br && exe_cfi_cmp_out
+    val jump_taken = exe_cfi_uop.bits.ctrl.jal || exe_cfi_uop.bits.ctrl.jalr
 
-    val exe_branch_target = cfi_uop.bits.pc + exe_cfi_imm(p.pcBits-1, 0)
+    val exe_branch_target = exe_cfi_uop.bits.pc + exe_cfi_imm(p.pcBits-1, 0)
     val exe_jump_target = exe_cfi_alu_out(p.pcBits-1, 0)
-    val exe_cfi_target = Mux(cfi_uop.bits.ctrl.br, exe_branch_target, exe_jump_target)(p.pcBits-1, 0)
+    val exe_cfi_target = Mux(exe_cfi_uop.bits.ctrl.br, exe_branch_target, exe_jump_target)(p.pcBits-1, 0)
     val exe_cfi_taken = branch_taken || jump_taken
 
-    val wrong_next_pc = (cfi_uop.bits.next_pc.bits =/= exe_cfi_target).asWire
-    val mispred_taken = (exe_cfi_taken && (wrong_next_pc || !cfi_uop.bits.next_pc.valid)).asWire
-    val mispred_not_taken = (cfi_uop.bits.ctrl.br && !exe_cfi_taken && cfi_uop.bits.next_pc.valid).asWire
+    val wrong_next_pc = (exe_cfi_uop.bits.next_pc.bits =/= exe_cfi_target).asWire
+    val mispred_taken = (exe_cfi_taken && (wrong_next_pc || !exe_cfi_uop.bits.next_pc.valid)).asWire
+    val mispred_not_taken = (exe_cfi_uop.bits.ctrl.br && !exe_cfi_taken && exe_cfi_uop.bits.next_pc.valid).asWire
     val has_mispred = (exe_cfi_valid && (mispred_taken || mispred_not_taken)).asWire
 
     dontTouch(wrong_next_pc)
@@ -256,9 +261,9 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(mispred_not_taken)
     dontTouch(has_mispred)
 
-    val resolve_target = Mux(mispred_not_taken, cfi_uop.bits.pc + p.instBytes.U, exe_cfi_target)
+    val resolve_target = Mux(mispred_not_taken, exe_cfi_uop.bits.pc + p.instBytes.U, exe_cfi_target)
     exe_resolve_info.valid := exe_cfi_valid
-    exe_resolve_info.tag := cfi_uop.bits.br_tag
+    exe_resolve_info.tag := exe_cfi_uop.bits.br_tag
     exe_resolve_info.mispredict := has_mispred
     exe_resolve_info.taken := exe_cfi_taken
     exe_resolve_info.target := resolve_target
@@ -271,14 +276,14 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     rob.io.branch_update.valid   := exe_resolve_info.valid
     rob.io.branch_update.mispred := exe_resolve_info.mispredict
-    rob.io.branch_update.rob_idx := cfi_uop.bits.rob_idx
+    rob.io.branch_update.rob_idx := exe_cfi_uop.bits.rob_idx
 
     kill_on_mispred := exe_resolve_info.valid && exe_resolve_info.mispredict
 
     io.ifu.redirect.valid := has_mispred
     io.ifu.redirect.target := resolve_target
-    io.ifu.redirect.ftq_idx := cfi_uop.bits.ftq_idx
-    io.ifu.redirect.cfi_idx := p.fetchBundleIdx(cfi_uop.bits.pc)
+    io.ifu.redirect.ftq_idx := exe_cfi_uop.bits.ftq_idx
+    io.ifu.redirect.cfi_idx := p.fetchBundleIdx(exe_cfi_uop.bits.pc)
     io.ifu.redirect.taken := exe_cfi_taken
 
     when (exe_cfi_valid) {

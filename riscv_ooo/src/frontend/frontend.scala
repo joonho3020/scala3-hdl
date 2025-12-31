@@ -239,10 +239,9 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
       inst.bits  := ic.s2_insts(i)
 
       BrJmpSignal.predecode(brjmp(i), inst.bits)
-      val brjmp_taken = s2_taken_hit &&
-                        (brjmp(i).is_jal  ||
+      val brjmp_taken = (brjmp(i).is_jal  ||
                          brjmp(i).is_jalr ||
-                         (brjmp(i).is_br && (i.U === s2_taken_hit_idx)))
+                         (brjmp(i).is_br && s2_taken_hit && (i.U === s2_taken_hit_idx)))
       s2_is_taken(i) := brjmp_taken && s2_fetch_mask(i).asBool
 
       if i == 0 then
@@ -263,8 +262,11 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
 
     fetch_bundle.target_pc := s2_pred_target
 
-    fetch_bundle.cfi_mask := Cat(fetch_bundle.insts.zip(brjmp).map((i, b) => {
-      i.valid && b.is_br || b.is_jal || b.is_jalr
+    fetch_bundle.cfi_mask := Cat(fetch_bundle.insts.zip(brjmp).zipWithIndex.map( (x, idx) => {
+      val inst = x._1
+      val b    = x._2
+      inst.valid && (b.is_br || b.is_jal || b.is_jalr) &&
+      (if idx == 0 then true.B else !s2_prev_brjmp_taken(idx-1))
     }).reverse)
 
     val s2_cfi_idx = fetch_bundle.cfi_idx
@@ -275,7 +277,6 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     val s2_taken_is_ret = s2_ti.valid &&
                           (lrd(s2_ti.bits) === 0.U && lrs1(s2_ti.bits) === 1.U) &&
                           fetch_bundle.brjmp.is_jalr
-    val s2_call_pc = p.fetchAlign(s2_vpc) + (s2_cfi_idx << 2)
 
     fetch_bundle.ghist := s2_ghist
     fetch_bundle.lhist := s2_lhist
@@ -284,18 +285,9 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     fetch_bundle.is_call := s2_taken_is_call
     fetch_bundle.is_ret := s2_taken_is_ret
 
-    // Speculatively update RAS
-    bpu.io.ras_update.valid := s2_valid && ic.s2_valid && (s2_taken_is_ret || s2_taken_is_call)
-    bpu.io.ras_update.bits := DontCare
-    bpu.io.ras_update.bits.pc := s2_call_pc
-    bpu.io.ras_update.bits.is_call := s2_taken_is_call
-    bpu.io.ras_update.bits.is_ret := s2_taken_is_ret
-
     // BHT & BTB Updates & Restores
     bpu.io.bpu_update <> ftq.io.bpu_update
     bpu.io.restore <> ftq.io.bpu_restore
-
-
 
     val fb = Module(new FetchBuffer(p, depth = 4))
     val s2_valid_insts = fetch_bundle.insts.map(_.valid).reduce(_ || _)
@@ -363,6 +355,7 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(s2_vpc)
     dontTouch(s2_valid)
     dontTouch(s2_fetch_mask)
+    dontTouch(s2_prev_brjmp_taken)
     dontTouch(f2_clear)
     dontTouch(brjmp)
     dontTouch(s2_is_taken)

@@ -114,7 +114,7 @@ class FetchTargetQueue(p: CoreParams) extends Module with CoreCacheable(p):
       redirect_entry.cfi_taken := io.redirect.taken
       redirect_entry.target_pc := io.redirect.target
       redirect_entry.cfi_idx := io.redirect.cfi_idx
-      redirect_entry.cfi_mask := redirect_entry.cfi_mask & ((1.U << io.redirect.cfi_idx) - 1.U)
+      redirect_entry.cfi_mask := redirect_entry.cfi_mask & Fill(1, io.redirect.cfi_idx + 1.U)
       redirect_entry.is_call := redirect_entry.is_call && (redirect_entry.cfi_idx === io.redirect.cfi_idx)
       redirect_entry.is_ret  := redirect_entry.is_ret  && (redirect_entry.cfi_idx === io.redirect.cfi_idx)
 
@@ -127,7 +127,6 @@ class FetchTargetQueue(p: CoreParams) extends Module with CoreCacheable(p):
 
       maybe_full := false.B
       enq_ptr := next_ptr(io.redirect.ftq_idx)
-      bpd_ptr := next_ptr(io.redirect.ftq_idx)
     }
 
 

@@ -119,7 +119,6 @@ case class BranchPredictorIO(
   req: Valid[BPUReq],
   resp: Vec[Valid[BPUResp]],
   bpu_update: Valid[BPUUpdate],
-  ras_update: Valid[BPUUpdate],
   flush: Bool,
   ghist: UInt,
   lhist: UInt,
@@ -133,7 +132,6 @@ object BranchPredictorIO:
       req = Input(Valid(BPUReq(p))),
       resp = Output(Vec.fill(p.coreWidth)(Valid(BPUResp(p)))),
       bpu_update = Flipped(Valid(BPUUpdate(p))),
-      ras_update = Flipped(Valid(BPUUpdate(p))),
       flush = Input(Bool()),
       ghist = Output(UInt(p.bpu.ghistBits.W)),
       lhist = Output(UInt(p.bpu.lhistBits.W)),
@@ -358,10 +356,19 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       io.resp(i).bits.is_ret := btb_entry.is_ret
       io.resp(i).bits.uses_ras := use_ras
 
-      // Determine if this position has a CFI
-      // Use cfi_mask from request if available (from decode), otherwise use BTB hit
-      val is_cfi = io.req.bits.cfi_mask(i).asBool
-      val taken = (i.U === io.req.bits.cfi_idx) && io.req.bits.cfi_taken
+      // Speculatively update RAS during prediction
+      when (io.req.valid && btb_hit && predicted_taken) {
+        when (btb_entry.is_call) {
+          ras.push(pc + p.instBytes.U)
+        } .elsewhen (btb_entry.is_ret) {
+          ras.pop
+        }
+      }
+
+      // Speculatively update history based on BTB hit and prediction
+      // (cfi_mask comes from decode which happens AFTER prediction)
+      val is_cfi = btb_hit
+      val taken = predicted_taken
 
       // Speculatively update history for next position in fetch packet
       val next_ghist = Wire(UInt(p.bpu.ghistBits.W))
@@ -427,14 +434,6 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
 
         // Update ghist for next position (only if this position had a CFI)
         update_ghist(i + 1) := Mux(is_cfi, (current_ghist << 1) | is_this_cfi_taken.asUInt, current_ghist)
-      }
-    }
-
-    when (io.ras_update.valid) {
-      when (io.ras_update.bits.is_call) {
-        ras.push(io.ras_update.bits.pc + p.instBytes.U)
-      } .elsewhen (io.ras_update.bits.is_ret) {
-        ras.pop
       }
     }
 
