@@ -8,7 +8,6 @@ import hdl.elaboration._
 case class BranchResolve(
   valid: Bool,
   tag: OneHot,
-  rob_idx: UInt,
   mispredict: Bool,
   taken: Bool,
   target: UInt,
@@ -19,7 +18,6 @@ object BranchResolve:
     BranchResolve(
       valid = Bool(),
       tag = OneHot(p.branchTagBits.W),
-      rob_idx = UInt(p.robIdxBits.W),
       mispredict = Bool(),
       taken = Bool(),
       target = UInt(p.pcBits.W),

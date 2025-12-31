@@ -22,7 +22,6 @@ case class IssueQueueIO(
   dis_ready: Bool,
   wakeup_idx: Vec[Valid[UInt]],
   issue_uops: Vec[Valid[UOp]],
-  rob_head: UInt,
   br_resolve: BranchResolve
 ) extends Bundle[IssueQueueIO]
 
@@ -37,7 +36,6 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
     dis_ready   = Output(Bool()),
     wakeup_idx  = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.pRegIdxBits.W)))),
     issue_uops  = Output(Vec.fill(issueWidth)(Valid(UOp(p)))),
-    rob_head    = Input(UInt(p.robIdxBits.W)),
     br_resolve  = Input(BranchResolve(p))
   ))
 
@@ -67,23 +65,20 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
       }
     }
 
-    def robDist(idx: UInt): UInt =
-      Mux(idx >= io.rob_head, idx - io.rob_head, idx + p.robEntries.U - io.rob_head)
-
-    def isYounger(idx: UInt, thanIdx: UInt): Bool =
-      robDist(idx) > robDist(thanIdx)
-
     when (io.br_resolve.valid) {
-      entries.foreach(e => {
-        when (e.valid) {
-          e.uop.br_mask := e.uop.br_mask & ~io.br_resolve.tag
-        }
-      })
-
+      // Kill Logic (on misprediction)
       when (io.br_resolve.mispredict) {
         entries.foreach(e => {
-          when (e.valid && isYounger(e.uop.rob_idx, io.br_resolve.rob_idx)) {
+          when (e.valid && (e.uop.br_mask & io.br_resolve.tag) =/= 0.U) {
             e.valid := false.B
+          }
+        })
+      }
+      // Clear resolved branch tag from masks
+      .otherwise {
+        entries.foreach(e => {
+          when (e.valid) {
+            e.uop.br_mask := e.uop.br_mask & ~io.br_resolve.tag
           }
         })
       }
