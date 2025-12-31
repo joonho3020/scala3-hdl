@@ -357,7 +357,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     val comm_cfi_mask = comm_uops.map(u => u.valid && u.bits.ctrl.is_cfi)
     val comm_cfi_idx  = PriorityEncoder(Cat(comm_cfi_mask.reverse))
-    io.ifu.commit.valid := comm_cfi_mask.reduce(_ || _)
+    io.ifu.commit.valid := comm_uops.map(_.valid).reduce(_ || _)
     io.ifu.commit.ftq_idx := comm_uops(comm_cfi_idx).bits.ftq_idx
 
     // -----------------------------------------------------------------------

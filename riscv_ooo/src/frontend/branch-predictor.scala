@@ -306,20 +306,20 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
     val ras = new RAS(rasEntries)
     val btb = new BTB(btbEntries)
     val ght = new GHT(ghtEntries, ghistBits)
-    val lht = new LocalPHT(p.bpu.localPhtEntries, p.bpu.lhistBits)
+    val local_pht = new LocalPHT(p.bpu.localPhtEntries, p.bpu.lhistBits)
     val meta = new MetaPredictor(p.bpu.metaEntries, p.bpu.ghistBits)
 
     val ghist = RegInit(0.U(p.bpu.ghistBits.W))
 
-    // LHT (Local History Table)
+    // LHT (Local History Table) - stores history per PC
     val lhtEntries = p.bpu.lhtEntries
     val lhtIdxBits = log2Ceil(lhtEntries)
-    val lhists = Reg(Vec.fill(lhtEntries)(UInt(p.bpu.lhistBits.W)))
+    val lht = Reg(Vec.fill(lhtEntries)(UInt(p.bpu.lhistBits.W)))
 
     io.ghist := ghist
     io.lhist := {
       val idx = if lhtEntries == 1 then 0.U else io.req.bits.pc(lhtIdxBits + 1, 2)
-      lhists(idx)
+      lht(idx)
     }
     io.ras_snapshot := ras.get_snapshot
 
@@ -329,7 +329,7 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
     val spec_lhist = Wire(Vec.fill(p.coreWidth + 1)(Vec.fill(lhtEntries)(UInt(p.bpu.lhistBits.W))))
 
     spec_ghist(0) := ghist
-    spec_lhist(0) := lhists
+    spec_lhist(0) := lht
 
     for (i <- 0 until p.coreWidth) {
       val pc = io.req.bits.pc + (4 * i).U
@@ -341,7 +341,7 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
 
       val lht_idx = if lhtEntries == 1 then 0.U else pc(lhtIdxBits + 1, 2)
       val lhist = current_lhist(lht_idx)
-      val local_pred = lht.lookup(lhist)
+      val local_pred = local_pht.lookup(lhist)
 
       val use_global = meta.select(pc, current_ghist)
       val pred_taken = Mux(use_global, global_pred, local_pred)
@@ -380,7 +380,7 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
     // Commit speculative updates to actual GHR/LHT registers when valid request
     when (io.req.valid) {
       ghist := spec_ghist(p.coreWidth)
-      lhists := spec_lhist(p.coreWidth)
+      lht := spec_lhist(p.coreWidth)
     }
 
     when (io.bpu_update.valid) {
@@ -405,14 +405,14 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
           val global_pred = ght.lookup(cfi_pc, current_ghist)
 
           val cfi_lhist = io.bpu_update.bits.lhist
-          val local_pred = lht.lookup(cfi_lhist)
+          val local_pred = local_pht.lookup(cfi_lhist)
 
           val global_correct = (global_pred === is_this_cfi_taken)
           val local_correct = (local_pred === is_this_cfi_taken)
 
           // Update GHT, Local PHT, and Meta predictor for this CFI
           ght.update(cfi_pc, current_ghist, is_this_cfi_taken)
-          lht.update(cfi_lhist, is_this_cfi_taken)
+          local_pht.update(cfi_lhist, is_this_cfi_taken)
           meta.update(cfi_pc, current_ghist, global_correct, local_correct)
 
           // Update BTB when this CFI is taken
@@ -442,7 +442,7 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       ghist := io.restore.ghist
       ras.restore(io.restore.ras)
       val lht_idx = if lhtEntries == 1 then 0.U else io.restore.pc(lhtIdxBits + 1, 2)
-      lhists(lht_idx) := io.restore.lhist
+      lht(lht_idx) := io.restore.lhist
     }
 
     when (reset.asBool || io.flush) {
@@ -450,8 +450,10 @@ class BranchPredictor(p: CoreParams) extends Module with CoreCacheable(p):
       ras.clear
       ght.clear
       ghist := 0.U
-      lhists.foreach(_ := 0.U)
-      lht.clear
+      lht.foreach(_ := 0.U)
+      local_pht.clear
       meta.clear
     }
+
+    dontTouch(io)
   }

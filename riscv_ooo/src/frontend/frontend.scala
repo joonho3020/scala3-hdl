@@ -295,18 +295,28 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     bpu.io.bpu_update <> ftq.io.bpu_update
     bpu.io.restore <> ftq.io.bpu_restore
 
-    ftq.io.enq.valid := fetch_bundle.insts.map(_.valid).reduce(_ || _)
+
+
+    val fb = Module(new FetchBuffer(p, depth = 4))
+    val s2_valid_insts = fetch_bundle.insts.map(_.valid).reduce(_ || _)
+    val fb_fire = DecoupledHelper(
+      fb.io.enq.ready,
+      ftq.io.enq.ready,
+      s2_valid,
+      s2_valid_insts,
+      ic.s2_valid)
+
+    ftq.io.enq.valid := fb_fire.fire(ftq.io.enq.ready)
     ftq.io.enq.bits := fetch_bundle
     fetch_bundle.ftq_idx := ftq.io.enq_idx
 
-    ic.s2_kill := f2_clear
-
-    val fb = Module(new FetchBuffer(p, depth = 4))
-    fb.io.clear := f2_clear
-
-    fb.io.enq.valid := s2_valid && ic.s2_valid
+    fb.io.enq.valid := fb_fire.fire(fb.io.enq.ready)
     fb.io.enq.bits  := fetch_bundle
+
+    ic.s2_kill := f2_clear
+    fb.io.clear := f2_clear
     f3_ready := fb.io.enq.ready && ftq.io.enq.ready
+
 
     io.core.fetch_uops.zip(fb.io.deq).foreach((io_uop, fb_uop) => {
       io_uop.valid := fb_uop.valid
@@ -358,4 +368,5 @@ class Frontend(p: CoreParams) extends Module with CoreCacheable(p):
     dontTouch(s2_is_taken)
     dontTouch(fetch_bundle)
     dontTouch(s2_taken_hit_idx)
+    dontTouch(f3_ready)
   }
