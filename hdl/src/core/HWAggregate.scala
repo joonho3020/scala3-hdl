@@ -10,6 +10,7 @@ private[hdl] object HWAggregate:
         f(h, path)
         h match
           case v: Vec[?] => visitIterable(v.elems, path, f)
+          case tb: TupleBundle[?, ?] => visitProduct(tb.toProduct, path, f)
           case b: Bundle[?] => visitProduct(b.asInstanceOf[Product], path, f)
           case _ => ()
       case opt: Option[?] =>
@@ -71,6 +72,18 @@ private[hdl] object HWAggregate:
           transformAny(e, indexPath(path, idx), ctx.map(expr => IR.SubIndex(expr, idx)), f).asInstanceOf[HWData]
         }
         Vec(elems.asInstanceOf[Seq[HWData]])
+      case tb: TupleBundle[?, ?] =>
+        val prod = tb.toProduct
+        val arity = prod.productArity
+        val values = Array.ofDim[Any](arity)
+        var i = 0
+        while i < arity do
+          val name = productElementNameSafe(prod, i)
+          val childPath = if path.isEmpty then name else s"$path.$name"
+          val childCtx = ctx.map(expr => IR.SubField(expr, IR.Identifier(name)))
+          values(i) = transformAny(prod.productElement(i), childPath, childCtx, f)
+          i += 1
+        rebuildTupleBundle(tb, values)
       case b: Bundle[?] =>
         val prod = b.asInstanceOf[Product]
         val arity = prod.productArity
@@ -152,6 +165,13 @@ private[hdl] object HWAggregate:
           .getOrElse(throw new IllegalArgumentException(s"No apply method for ${cls.getName}"))
         apply.invoke(module, args*)
       }
+
+  private def rebuildTupleBundle(tb: TupleBundle[?, ?], values: Array[Any]): TupleBundle[?, ?] =
+    import scala.NamedTuple.NamedTuple
+    type N = tb.elems.type match { case NamedTuple[n, ?] => n }
+    type V = tb.elems.type match { case NamedTuple[?, v] => v }
+    val newTuple = Tuple.fromArray(values).asInstanceOf[NamedTuple[N, V]]
+    new TupleBundle[N, V](newTuple, tb.fieldNames)
 
   private def productElementNameSafe(p: Product, idx: Int): String =
     try p.productElementName(idx)
