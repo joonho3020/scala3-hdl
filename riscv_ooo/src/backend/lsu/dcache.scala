@@ -212,11 +212,17 @@ class NonBlockingDCache(p: CoreParams) extends Module:
 
     val s1_valid = Reg(Vec.fill(lsuWidth)(Bool()))
     val s1_req   = Reg(Vec.fill(lsuWidth)(DCacheReq(p)))
+
     val s2_valid = Reg(Vec.fill(lsuWidth)(Bool()))
     val s2_req   = Reg(Vec.fill(lsuWidth)(DCacheReq(p)))
     val s2_tag_hit_way = Reg(Vec.fill(lsuWidth)(OneHot(nWays.W)))
     val s2_tag_hit = Reg(Vec.fill(lsuWidth)(Bool()))
     val s2_data_array = Reg(Vec.fill(lsuWidth)(Vec.fill(nWays)(UInt(lineBits.W))))
+
+    val s3_valid = Reg(Vec.fill(lsuWidth)(Bool()))
+    val s3_req   = Reg(Vec.fill(lsuWidth)(DCacheReq(p)))
+    val s3_way = Reg(Vec.fill(lsuWidth)(OneHot(nWays.W)))
+    val s3_set_idx = Reg(Vec.fill(lsuWidth)(UInt(idxBits.W)))
 
     val s1_meta_array = Wire(Vec.fill(lsuWidth)(Vec.fill(nWays)(L1Metadata(p))))
     val s1_data_array = Wire(Vec.fill(lsuWidth)(Vec.fill(nWays)(UInt(lineBits.W))))
@@ -283,9 +289,62 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       io.lsu.nack(w).bits := s2_req(w)
     }
 
+    for (w <- 0 until lsuWidth) {
+      s3_valid(w) := false.B
+      for (w <- 0 until lsuWidth) {
+        when (s2_valid(w) && s2_req(w).is_store && s2_tag_hit(w)) {
+          s3_valid(w) := true.B
+          s3_req(w) := s2_req(w)
+          s3_way(w) := s2_tag_hit_way(w)
+          s3_set_idx(w) := getSetIdx(s2_req(w).addr)
+        }
+      }
+
+      when (s3_valid(w)) {
+        val offset = getOffset(s3_req(w).addr)
+        val byte_offset = offset(log2Ceil(lineBytes) - 1, 0)
+
+        val wmask = Wire(Vec.fill(lineBytes)(Bool()))
+        for (i <- 0 until lineBytes) {
+          wmask(i) := false.B
+        }
+
+        val num_bytes = Mux(s3_req(w).size === MemWidth.B.EN, 1.U,
+                          Mux(s3_req(w).size === MemWidth.H.EN, 2.U,
+                            Mux(s3_req(w).size === MemWidth.W.EN, 4.U, 8.U)))
+
+        for (i <- 0 until lineBytes) {
+          when (i.U >= byte_offset && i.U < (byte_offset + num_bytes)) {
+            wmask(i) := true.B
+          }
+        }
+
+        val write_data = s3_req(w).data << (byte_offset << 3.U)
+
+        for (way <- 0 until nWays) {
+          when (s3_way.asUInt(way).asBool) {
+            for (w <- 0 until lsuWidth) {
+              data_arrays(w)(way).writePorts(0).write(s3_set_idx(w), write_data, wmask)
+
+              val new_meta = Wire(L1Metadata(p))
+              new_meta.tag := getTag(s3_req(w).addr)
+              new_meta.valid := true.B
+              new_meta.dirty := true.B
+              meta_arrays(w)(way).writePorts(0).write(s3_set_idx(w), new_meta)
+            }
+          }
+        }
+      }
+    }
+
     io.lsu.ll_resp.valid := false.B
     io.lsu.ll_resp.bits := DontCare
 
     io.mem <> DontCare
+
+    when (reset.asBool) {
+      s1_valid.foreach(_ := false.B)
+      s2_valid.foreach(_ := false.B)
+    }
 
   }
