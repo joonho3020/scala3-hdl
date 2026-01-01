@@ -14,6 +14,16 @@ const RETIRE_WIDTH: usize = 2;
 const MAX_MISMATCHES: usize = 10;
 const PC_HISTORY_SIZE: usize = 20;
 
+#[derive(Clone)]
+struct MemReq {
+    addr: u64,
+    tpe: u64,
+    tag: u64,
+    is_write: bool,
+    data: [u64; CACHE_LINE_WORDS],
+    mask: u64,
+}
+
 struct SparseMemory {
     pages: HashMap<u64, Box<[u8; PAGE_SIZE]>>,
 }
@@ -207,6 +217,12 @@ fn poke_mem_resp_data(dut: &mut Dut, data: &[u64; CACHE_LINE_WORDS]) {
     }
 }
 
+fn poke_mem_resp(dut: &mut Dut, req: &MemReq, data: &[u64; CACHE_LINE_WORDS]) {
+    dut.io().mem().resp().bits().tag().poke(req.tag);
+    dut.io().mem().resp().bits().tpe().poke(req.tpe);
+    poke_mem_resp_data(dut, data);
+}
+
 fn poke_cosim_info(
     dut: &mut Dut,
     idx: usize,
@@ -263,11 +279,7 @@ fn main() {
 
     println!("Starting OOO co-simulation with reference core comparison...\n");
 
-    let mut pending_mem_req = false;
-    let mut pending_mem_addr = 0u64;
-    let mut pending_mem_is_write = false;
-    let mut pending_mem_data: [u64; CACHE_LINE_WORDS] = [0; CACHE_LINE_WORDS];
-    let mut pending_mem_mask: u64 = 0;
+    let mut pending_mem_reqs: VecDeque<MemReq> = VecDeque::new();
     let mut retired_count: usize = 0;
     let mut mismatch_count: usize = 0;
     let mut coverage = HashSet::new();
@@ -305,14 +317,15 @@ fn main() {
             }
         }
 
-        if pending_mem_req {
-            let line_base_addr = pending_mem_addr & !(((CACHE_LINE_WORDS * WORD_SIZE as usize) - 1) as u64);
-            if pending_mem_is_write {
+        if let Some(mem_req) = pending_mem_reqs.pop_front() {
+            let line_base_addr =
+                mem_req.addr & !(((CACHE_LINE_WORDS * WORD_SIZE as usize) - 1) as u64);
+            if mem_req.is_write {
                 for i in 0..CACHE_LINE_WORDS {
-                    let word_mask = (pending_mem_mask >> (i * 4)) & 0xF;
+                    let word_mask = (mem_req.mask >> (i * 4)) & 0xF;
                     if word_mask != 0 {
                         let word_addr = line_base_addr + (i as u64 * WORD_SIZE);
-                        let data_word = pending_mem_data[i] as u32;
+                        let data_word = mem_req.data[i] as u32;
                         let existing = memory.read_u32(word_addr);
                         let mut new_val = existing;
                         for byte_idx in 0..4 {
@@ -331,9 +344,8 @@ fn main() {
                 let word_addr = line_base_addr + (i as u64 * WORD_SIZE);
                 resp_data[i] = get_word_at_addr(&mut memory, word_addr) as u64;
             }
-            poke_mem_resp_data(&mut dut, &resp_data);
+            poke_mem_resp(&mut dut, &mem_req, &resp_data);
             dut.io().mem().resp().valid().poke(1);
-            pending_mem_req = false;
         } else {
             dut.io().mem().resp().valid().poke(0);
         }
@@ -342,13 +354,24 @@ fn main() {
         if mem_req_valid != 0 {
             let addr = dut.io().mem().req().bits().addr().peek();
             let req_type = dut.io().mem().req().bits().tpe().peek();
-            pending_mem_req = true;
-            pending_mem_addr = addr;
-            pending_mem_is_write = req_type == MEM_TYPE_WRITE;
-            if pending_mem_is_write {
-                pending_mem_data = read_mem_req_data(&mut dut);
-                pending_mem_mask = dut.io().mem().req().bits().mask().peek();
-            }
+            let tag = dut.io().mem().req().bits().tag().peek();
+            let is_write = req_type == MEM_TYPE_WRITE;
+            let (data, mask) = if is_write {
+                (
+                    read_mem_req_data(&mut dut),
+                    dut.io().mem().req().bits().mask().peek(),
+                )
+            } else {
+                ([0u64; CACHE_LINE_WORDS], 0)
+            };
+            pending_mem_reqs.push_back(MemReq {
+                addr,
+                tpe: req_type,
+                tag,
+                is_write,
+                data,
+                mask,
+            });
         }
 
         let coverage_complete = coverage.len() >= target_coverage;

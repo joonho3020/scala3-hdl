@@ -30,6 +30,7 @@ case class LSUParams(
 ) derives StableHash
 
 case class CoreParams(
+  magic_mem_outstanding: Int,
   pcBits: Int,
   xlenBits: Int,
   paddrBits: Int,

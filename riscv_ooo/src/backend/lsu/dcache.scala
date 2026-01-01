@@ -49,7 +49,7 @@ case class LSUDCacheIO(
   req: Vec[Decoupled[DCacheReq]],
   s1_kill: Vec[Bool],
   resp: Vec[Valid[DCacheResp]],
-  nack: Vec[Valid[DCacheReq]],
+  store_nack: Vec[Valid[DCacheReq]],
   store_ack: Vec[Valid[DCacheReq]],
   ll_resp: Decoupled[DCacheResp],
 ) extends Bundle[LSUDCacheIO]
@@ -60,55 +60,9 @@ object LSUDCacheIO:
       req = Vec.fill(p.lsuIssueWidth)(Decoupled(DCacheReq(p))),
       s1_kill = Output(Vec.fill(p.lsuIssueWidth)(Bool())),
       resp = Input(Vec.fill(p.lsuIssueWidth)(Valid(DCacheResp(p)))),
-      nack = Input(Vec.fill(p.lsuIssueWidth)(Valid(DCacheReq(p)))),
+      store_nack = Input(Vec.fill(p.lsuIssueWidth)(Valid(DCacheReq(p)))),
       store_ack = Input(Vec.fill(p.lsuIssueWidth)(Valid(DCacheReq(p)))),
       ll_resp = Flipped(Decoupled(DCacheResp(p))),
-    )
-
-enum MSHRState:
-  case Invalid,       // MSHR not allocated
-       TagRead,       // Reading victim tag/data for potential writeback
-       WaitEvict,     // Waiting for writeback to complete
-       RefillReq,     // Sending refill request to memory
-       RefillWait,    // Waiting for refill data
-       RefillResp,    // Processing refill response
-       WriteCache,    // Writing refilled data to cache
-       Replay         // Replaying request to cache pipeline
-
-case class MSHREntry(
-  valid: Bool,
-  state: HWEnum[MSHRState],
-
-  req: DCacheReq,
-
-  set_idx: UInt,
-  tag: UInt,
-  way_en: OneHot,
-
-  victim_tag: UInt,
-  victim_dirty: Bool,
-  victim_valid: Bool,
-
-  refill_data: UInt,
-) extends Bundle[MSHREntry]
-
-object MSHREntry:
-  def apply(p: CoreParams): MSHREntry =
-    val dc = p.dc
-    val idxBits = log2Ceil(dc.nSets)
-    val tagBits = p.paddrBits - idxBits - log2Ceil(dc.cacheLineBytes)
-
-    MSHREntry(
-      valid = Bool(),
-      state = HWEnum(MSHRState),
-      req = DCacheReq(p),
-      set_idx = UInt(idxBits.W),
-      tag = UInt(tagBits.W),
-      way_en = OneHot(dc.nWays.W),
-      victim_tag = UInt(tagBits.W),
-      victim_dirty = Bool(),
-      victim_valid = Bool(),
-      refill_data = UInt((dc.cacheLineBytes * 8).W),
     )
 
 case class L1Metadata(
@@ -200,8 +154,6 @@ class NonBlockingDCache(p: CoreParams) extends Module:
   val tagBits = p.paddrBits - idxBits - offsetBits
 
   body {
-    import MSHRState._
-
     def getSetIdx(addr: UInt): UInt = addr(offsetBits + idxBits - 1, offsetBits)
     def getTag(addr: UInt): UInt = addr(p.paddrBits - 1, offsetBits + idxBits)
     def getOffset(addr: UInt): UInt = addr(offsetBits - 1, 0)
@@ -213,14 +165,15 @@ class NonBlockingDCache(p: CoreParams) extends Module:
             (reads = 1, writes = 1, readwrites = 0, masked = true)
       ))
 
-    // Data SRAMs: one SRAM per port per way
     val data_arrays = Seq.fill(lsuWidth)(
       Seq.fill(nWays)(
         SRAM(UInt(lineBits.W), nSets)
             (reads = 1, writes = 1, readwrites = 0, masked = true)
       ))
 
-    val mshrs = Reg(Vec.fill(nMSHRs)(MSHREntry(p)))
+    val mshrFile = Module(new DCacheMSHRFile(p))
+    io.mem.req <> mshrFile.io.mem.req
+    mshrFile.io.mem.resp <> io.mem.resp
 
     // Tag write arbiter: MSHR refills + S3 stores
     // Priority: MSHR (input 0) > S3 stores (inputs 1..lsuWidth)
@@ -243,10 +196,9 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     val s0_set_idx = Wire(Vec.fill(lsuWidth)(UInt(idxBits.W)))
     val s0_replay = Wire(Vec.fill(lsuWidth)(Bool()))
 
-    // Replay request signals (defined later in the code)
-    val replay_valid = Wire(Bool())
-    val replay_req = Wire(DCacheReq(p))
-    val replay_mshr_idx = Wire(UInt(log2Ceil(nMSHRs).W))
+    val replay_valid = mshrFile.io.replay.valid
+    val replay_req = mshrFile.io.replay.bits.req
+    val replay_mshr_idx = mshrFile.io.replay.bits.idx
 
     for (w <- 0 until lsuWidth) {
       // Port 0 gives priority to replay requests
@@ -365,55 +317,24 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     }
 
     // Sad path, misses
-    val mshr_alloc_idx = Wire(Vec.fill(lsuWidth)(UInt(log2Ceil(nMSHRs).W)))
-    val can_allocate_mshr = Wire(Vec.fill(lsuWidth)(Bool()))
-
-    var free_mshrs = Seq.fill(lsuWidth)(Wire(Vec.fill(nMSHRs)(Bool())))
-    free_mshrs(0).zip(mshrs).foreach((f, m) => f := !m.valid)
-
     for (w <- 0 until lsuWidth) {
-      can_allocate_mshr(w) := free_mshrs(w).reduce(_ || _)
-      mshr_alloc_idx(w) := PriorityEncoder(Cat(free_mshrs.reverse))
+      val victim_way = getReplacementWay()
+      val victim_way_oh = UIntToOH(victim_way)
+      val victim_meta = MuxOneHot(victim_way_oh, s2_meta_array(w).elems)
+      val victim_data = MuxOneHot(victim_way_oh, s2_data_array(w).elems)
 
-      io.lsu.nack(w).valid := s2_valid(w) && !s2_tag_hit(w) && !can_allocate_mshr(w)
-      io.lsu.nack(w).bits := s2_req(w)
+      mshrFile.io.alloc(w).valid := s2_valid(w) && !s2_tag_hit(w)
+      mshrFile.io.alloc(w).bits.req := s2_req(w)
+      mshrFile.io.alloc(w).bits.set_idx := getSetIdx(s2_req(w).addr)
+      mshrFile.io.alloc(w).bits.tag := getTag(s2_req(w).addr)
+      mshrFile.io.alloc(w).bits.way_en := victim_way_oh
+      mshrFile.io.alloc(w).bits.victim_tag := victim_meta.tag
+      mshrFile.io.alloc(w).bits.victim_dirty := victim_meta.dirty
+      mshrFile.io.alloc(w).bits.victim_valid := victim_meta.valid
+      mshrFile.io.alloc(w).bits.victim_data := victim_data
 
-      val allocate_mshr = s2_valid(w) && !s2_tag_hit(w) && can_allocate_mshr(w)
-      when (allocate_mshr) {
-        val idx = mshr_alloc_idx(w)
-        val victim_way = getReplacementWay()
-        val victim_way_oh = UIntToOH(victim_way)
-
-        // Extract victim metadata and data
-        val victim_meta = MuxOneHot(victim_way_oh, s2_meta_array(w).elems)
-        val victim_data = MuxOneHot(victim_way_oh, s2_data_array(w).elems)
-
-        mshrs(idx).valid := true.B
-        mshrs(idx).req := s2_req(w)
-        mshrs(idx).set_idx := getSetIdx(s2_req(w).addr)
-        mshrs(idx).tag := getTag(s2_req(w).addr)
-        mshrs(idx).way_en := victim_way_oh
-
-        // Store victim information for potential writeback
-        mshrs(idx).victim_tag := victim_meta.tag
-        mshrs(idx).victim_dirty := victim_meta.dirty
-        mshrs(idx).victim_valid := victim_meta.valid
-        mshrs(idx).refill_data := victim_data  // Temporarily store victim data
-
-        // If victim is dirty, we must writeback before refill
-        when (victim_meta.valid && victim_meta.dirty) {
-          mshrs(idx).state := MSHRState.WaitEvict.EN
-        }.otherwise {
-          mshrs(idx).state := MSHRState.RefillReq.EN
-        }
-      }
-      if w > 0 then {
-        for (i <- 0 until nMSHRs) {
-          free_mshrs(w)(i) := Mux(allocate_mshr && i.U === mshr_alloc_idx(w),
-                                  false.B,
-                                  free_mshrs(w-1)(i))
-        }
-      }
+      io.lsu.store_nack(w).valid := s2_valid(w) && !s2_tag_hit(w) && !mshrFile.io.can_allocate(w)
+      io.lsu.store_nack(w).bits  := s2_req(w)
     }
 
     // S2 -> S3: Advance store hits to S3 for tag/data write arbitration
@@ -432,8 +353,9 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     // S3: Tag write arbitration
     // Input 0: MSHR refills (highest priority)
     // Inputs 1..lsuWidth: S3 store hits
-    tagWriteArb.io.in(0).valid := false.B  // Will be set by MSHR refill logic
-    tagWriteArb.io.in(0).bits := DontCare
+    tagWriteArb.io.in(0).valid := mshrFile.io.tag_write.valid
+    tagWriteArb.io.in(0).bits := mshrFile.io.tag_write.bits
+    mshrFile.io.tag_write.ready := tagWriteArb.io.in(0).ready
 
     for (w <- 0 until lsuWidth) {
       val s3_store = s3_valid(w) && s3_tag_hit(w)
@@ -460,8 +382,9 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     }
 
     // S3: Data write arbitration
-    dataWriteArb.io.in(0).valid := false.B  // Will be set by MSHR refill logic
-    dataWriteArb.io.in(0).bits := DontCare
+    dataWriteArb.io.in(0).valid := mshrFile.io.data_write.valid
+    dataWriteArb.io.in(0).bits := mshrFile.io.data_write.bits
+    mshrFile.io.data_write.ready := dataWriteArb.io.in(0).ready
 
     for (w <- 0 until lsuWidth) {
       val s3_store = s3_valid(w) && s3_tag_hit(w)
@@ -522,123 +445,15 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       // NOTE: We keep the S2 nack for misses, add S3 nack for arbitration conflicts
       val s3_nack = s3_store && (!s3_won_tag_arb || !s3_won_data_arb)
       when (s3_nack) {
-        io.lsu.nack(w).valid := true.B
-        io.lsu.nack(w).bits := s3_req(w)
+        io.lsu.store_nack(w).valid := true.B
+        io.lsu.store_nack(w).bits := s3_req(w)
       }
     }
 
     io.lsu.ll_resp.valid := false.B
     io.lsu.ll_resp.bits := DontCare
-
-    // Memory request generation: Handle both writebacks (WaitEvict) and refills (RefillReq)
-    var found_mem_req = false.B
-    val mem_req_valid = Wire(Vec.fill(nMSHRs)(Bool()))
-    val mem_req_addr = Wire(UInt(p.paddrBits.W))
-    val mem_req_tag = Wire(UInt(log2Ceil(nMSHRs).W))
-    val mem_req_tpe = Wire(HWEnum(MagicMemMsg))
-    val mem_req_data = Wire(Vec.fill(p.memLineWords)(UInt(32.W)))
-
-    mem_req_addr := DontCare
-    mem_req_tag := DontCare
-    mem_req_tpe := MagicMemMsg.Read.EN
-    mem_req_data.foreach(_ := DontCare)
-    mem_req_valid.foreach(_ := false.B)
-
-    // Priority: Writebacks before refills
-    for (i <- 0 until nMSHRs) {
-      // Handle writeback (dirty eviction)
-      when (mshrs(i).valid && mshrs(i).state === MSHRState.WaitEvict.EN && !found_mem_req) {
-        mem_req_valid(i) := true.B
-        mem_req_addr := blockAlign(Cat(Seq(mshrs(i).victim_tag, mshrs(i).set_idx, 0.U(offsetBits.W))))
-        mem_req_tag := i.U
-        mem_req_tpe := MagicMemMsg.Write.EN
-
-        // Convert cache line to memory format (Vec of 32-bit words)
-        val victim_data_spliced = Splice(mshrs(i).refill_data, 32)
-        mem_req_data := victim_data_spliced
-
-        when (io.mem.req.ready) {
-          // Writeback sent, now proceed to refill
-          mshrs(i).state := MSHRState.RefillReq.EN
-        }
-      }
-      // Handle refill request
-      .elsewhen (mshrs(i).valid && mshrs(i).state === MSHRState.RefillReq.EN && !found_mem_req) {
-        mem_req_valid(i) := true.B
-        mem_req_addr := blockAlign(Cat(Seq(mshrs(i).tag, mshrs(i).set_idx, 0.U(offsetBits.W))))
-        mem_req_tag := i.U
-        mem_req_tpe := MagicMemMsg.Read.EN
-
-        when (io.mem.req.ready) {
-          mshrs(i).state := MSHRState.RefillWait.EN
-        }
-      }
-      found_mem_req = found_mem_req || mem_req_valid(i)
-    }
-
-    io.mem.req.valid := found_mem_req
-    io.mem.req.bits.addr := mem_req_addr
-    io.mem.req.bits.tpe := mem_req_tpe
-    io.mem.req.bits.data := mem_req_data
-    io.mem.req.bits.mask := Fill(p.memLineBytes, true.B)  // Write entire cache line
-    io.mem.req.bits.tag := mem_req_tag
-
-    when (io.mem.resp.valid) {
-      val resp_data = Cat(io.mem.resp.bits.lineWords.reverse)
-      val resp_tag = io.mem.resp.bits.tag
-
-      val mshr_idx = resp_tag(log2Ceil(nMSHRs) - 1, 0)
-      when (mshrs(mshr_idx).valid && mshrs(mshr_idx).state === MSHRState.RefillWait.EN) {
-        mshrs(mshr_idx).refill_data := resp_data
-        mshrs(mshr_idx).state := MSHRState.WriteCache.EN
-      }
-    }
-
-    // MSHR Refill Write: Connect to arbiters (highest priority, input 0)
-    var found_refill = false.B
-    for (i <- 0 until nMSHRs) {
-      when (mshrs(i).valid && mshrs(i).state === MSHRState.WriteCache.EN && !found_refill) {
-        // Tag write request
-        tagWriteArb.io.in(0).valid := true.B
-        tagWriteArb.io.in(0).bits.set_idx := mshrs(i).set_idx
-        tagWriteArb.io.in(0).bits.way_en := mshrs(i).way_en
-        tagWriteArb.io.in(0).bits.meta.tag := mshrs(i).tag
-        tagWriteArb.io.in(0).bits.meta.valid := true.B
-        tagWriteArb.io.in(0).bits.meta.dirty := false.B
-
-        // Data write request (full cache line, no mask)
-        dataWriteArb.io.in(0).valid := true.B
-        dataWriteArb.io.in(0).bits.set_idx := mshrs(i).set_idx
-        dataWriteArb.io.in(0).bits.way_en := mshrs(i).way_en
-        dataWriteArb.io.in(0).bits.data := mshrs(i).refill_data
-        dataWriteArb.io.in(0).bits.wmask.foreach(_ := true.B)  // Write entire cache line
-
-        // Transition to Replay when write completes
-        // Since arbiter out.ready is always true, write completes immediately
-        when (tagWriteArb.io.in(0).ready && dataWriteArb.io.in(0).ready) {
-          mshrs(i).state := MSHRState.Replay.EN
-        }
-
-        found_refill = true.B
-      }
-    }
-
-    // MSHR Replay Logic - find an MSHR ready to replay
-    replay_valid := false.B
-    replay_req := DontCare
-    replay_mshr_idx := DontCare
-
-    for (i <- 0 until nMSHRs) {
-      when (mshrs(i).valid && mshrs(i).state === MSHRState.Replay.EN && !replay_valid) {
-        replay_valid := true.B
-        replay_req := mshrs(i).req
-        replay_mshr_idx := i.U
-      }
-    }
-
-    // Send replay response on ll_resp and free MSHR
-    io.lsu.ll_resp.valid := false.B
-    io.lsu.ll_resp.bits := DontCare
+    mshrFile.io.free.valid := false.B
+    mshrFile.io.free.bits := DontCare
 
     when (s2_replay(0) && s2_tag_hit(0)) {
       val s2_data = MuxOneHot(s2_tag_hit_way(0), s2_data_array(0).elems)
@@ -665,9 +480,8 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       io.lsu.ll_resp.bits.data := load_data
       io.lsu.ll_resp.bits.ldq_idx := s2_req(0).ldq_idx
 
-      // Free the MSHR
-      mshrs(s2_replay_mshr_idx(0)).valid := false.B
-      mshrs(s2_replay_mshr_idx(0)).state := MSHRState.Invalid.EN
+      mshrFile.io.free.valid := true.B
+      mshrFile.io.free.bits := s2_replay_mshr_idx(0)
     }
 
     when (reset.asBool) {
@@ -676,10 +490,5 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       s3_valid.foreach(_ := false.B)
       s1_replay.foreach(_ := false.B)
       s2_replay.foreach(_ := false.B)
-
-      for (i <- 0 until nMSHRs) {
-        mshrs(i).valid := false.B
-        mshrs(i).state := MSHRState.Invalid.EN
-      }
     }
   }

@@ -556,8 +556,8 @@ class LSU(p: CoreParams) extends Module:
 
     // Handle nacks - need to retry
     for (w <- 0 until lsuWidth) {
-      when (io.dcache.nack(w).valid) {
-        val nack_req = io.dcache.nack(w).bits
+      when (io.dcache.store_nack(w).valid) {
+        val nack_req = io.dcache.store_nack(w).bits
         when (nack_req.is_load) {
           val idx = nack_req.ldq_idx
           ldq(idx).executed := false.B

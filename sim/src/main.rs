@@ -17,6 +17,16 @@ const LOGICAL_REGS: usize = 32;
 const PHYSICAL_REGS: usize = 64;
 const CORE_WIDTH: usize = 2;
 
+#[derive(Clone)]
+struct MemReq {
+    addr: u64,
+    tpe: u64,
+    tag: u64,
+    is_write: bool,
+    data: [u64; CACHE_LINE_WORDS],
+    mask: u64,
+}
+
 struct SimConfig {
     asm_file: String,
     rename_trace: bool,
@@ -365,6 +375,12 @@ fn poke_mem_resp_data(dut: &mut Dut, data: &[u64; CACHE_LINE_WORDS]) {
     dut.poke_io_mem_resp_bits_lineWords_15(data[15]);
 }
 
+fn poke_mem_resp(dut: &mut Dut, req: &MemReq, data: &[u64; CACHE_LINE_WORDS]) {
+    dut.poke_io_mem_resp_bits_tag(req.tag);
+    dut.poke_io_mem_resp_bits_tpe(req.tpe);
+    poke_mem_resp_data(dut, data);
+}
+
 fn get_rn2_uops(dut: &Dut) -> [RenamedUop; CORE_WIDTH] {
     [
         RenamedUop {
@@ -435,11 +451,7 @@ fn main() {
 
     println!("Starting co-simulation with reference core comparison...\n");
 
-    let mut pending_mem_req = false;
-    let mut pending_mem_addr = 0u64;
-    let mut pending_mem_is_write = false;
-    let mut pending_mem_data: [u64; CACHE_LINE_WORDS] = [0; CACHE_LINE_WORDS];
-    let mut pending_mem_mask: u64 = 0;
+    let mut pending_mem_reqs: VecDeque<MemReq> = VecDeque::new();
     let mut retired_count: usize = 0;
     let mut mismatch_count: usize = 0;
     let mut rename_model = if config.rename_trace || config.rename_check {
@@ -535,16 +547,17 @@ fn main() {
 // }
 // }
 
-        if pending_mem_req {
-            let line_base_addr = pending_mem_addr & !(((CACHE_LINE_WORDS * WORD_SIZE as usize) - 1) as u64);
+        if let Some(mem_req) = pending_mem_reqs.pop_front() {
+            let line_base_addr =
+                mem_req.addr & !(((CACHE_LINE_WORDS * WORD_SIZE as usize) - 1) as u64);
 // println!("pending mem req 0x{:x} is_write {}", line_base_addr, pending_mem_is_write);
 
-            if pending_mem_is_write {
+            if mem_req.is_write {
                 for i in 0..CACHE_LINE_WORDS {
-                    let word_mask = (pending_mem_mask >> (i * 4)) & 0xF;
+                    let word_mask = (mem_req.mask >> (i * 4)) & 0xF;
                     if word_mask != 0 {
                         let word_addr = line_base_addr + (i as u64 * WORD_SIZE);
-                        let data_word = pending_mem_data[i] as u32;
+                        let data_word = mem_req.data[i] as u32;
                         let existing = memory.read_u32(word_addr);
                         let mut new_val = existing;
                         for byte_idx in 0..4 {
@@ -563,9 +576,8 @@ fn main() {
                 let word_addr = line_base_addr + (i as u64 * WORD_SIZE);
                 resp_data[i] = get_word_at_addr(&mut memory, word_addr) as u64;
             }
-            poke_mem_resp_data(&mut dut, &resp_data);
+            poke_mem_resp(&mut dut, &mem_req, &resp_data);
             dut.poke_io_mem_resp_valid(1);
-            pending_mem_req = false;
         } else {
             dut.poke_io_mem_resp_valid(0);
         }
@@ -574,13 +586,21 @@ fn main() {
         if mem_req_valid != 0 {
             let addr = dut.peek_io_mem_req_bits_addr();
             let req_type = dut.peek_io_mem_req_bits_tpe();
-            pending_mem_req = true;
-            pending_mem_addr = addr;
-            pending_mem_is_write = req_type == MEM_TYPE_WRITE;
-            if pending_mem_is_write {
-                pending_mem_data = read_mem_req_data(&dut);
-                pending_mem_mask = dut.peek_io_mem_req_bits_mask();
-            }
+            let tag = dut.peek_io_mem_req_bits_tag();
+            let is_write = req_type == MEM_TYPE_WRITE;
+            let (data, mask) = if is_write {
+                (read_mem_req_data(&dut), dut.peek_io_mem_req_bits_mask())
+            } else {
+                ([0u64; CACHE_LINE_WORDS], 0)
+            };
+            pending_mem_reqs.push_back(MemReq {
+                addr,
+                tpe: req_type,
+                tag,
+                is_write,
+                data,
+                mask,
+            });
         }
 
 // let coverage_complete = coverage.len() >= target_coverage;
