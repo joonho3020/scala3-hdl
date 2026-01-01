@@ -64,8 +64,8 @@ object CoreIf:
     CoreIf(
       ifu            = Flipped(FrontendCoreIf(p)),
       mem            = MagicMemIf(p),
-      retire_info    = Vec.fill(p.coreWidth)(RetireTraceIf(p)),
-      cosim_info     = Vec.fill(p.coreWidth)(CoSimInfoIf(p))
+      retire_info    = Vec.fill(p.retireWidth)(RetireTraceIf(p)),
+      cosim_info     = Vec.fill(p.retireWidth)(CoSimInfoIf(p))
     )
 
 class Core(p: CoreParams) extends Module with CoreCacheable(p):
@@ -165,7 +165,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       issue_queue.io.dis_uops(i).valid := dis_uops(i).valid && !dis_stall
       issue_queue.io.dis_uops(i).bits := dis_uop
 
-      lsu.io.dispatch(i).valid := dis_uops(i).valid && !dis_stall
+      lsu.io.dispatch(i).valid := dis_uops(i).valid
       lsu.io.dispatch(i).bits := dis_uop
     }
 
@@ -399,7 +399,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     // -----------------------------------------------------------------------
     // LSU Memory Interface
     // -----------------------------------------------------------------------
-    lsu.io.mem <> io.mem
+    io.mem <> lsu.io.mem
 
     renamer.io.comm_free_phys := DontCare
     for (i <- 0 until retireWidth) {

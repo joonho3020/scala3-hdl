@@ -138,7 +138,7 @@ private[hdl] object ModuleOps:
         case (dv: Vec[?], sv: Vec[?]) =>
           val dElems = dv.elems
           val sElems = sv.elems
-          assert(dElems.length == sElems.length, s"d ${dElems.length} s ${sElems.length}")
+          assert(dElems.length == sElems.length, s"destination ${dElems.length} source ${sElems.length} vector length mismatch")
           val len = dElems.length
           var i = 0
           while i < len do

@@ -150,9 +150,9 @@ class DCacheMSHRFile(p: CoreParams) extends Module:
         }
       }
 
-      if w > 0 then {
+      if w < lsuWidth-1 then {
         for (i <- 0 until nMSHRs) {
-          free_mshrs(w)(i) := Mux(allocate_mshr && i.U === mshr_alloc_idx(w), false.B, free_mshrs(w - 1)(i))
+          free_mshrs(w+1)(i) := Mux(allocate_mshr && i.U === mshr_alloc_idx(w), false.B, free_mshrs(w)(i))
         }
       }
     }
@@ -201,17 +201,30 @@ class DCacheMSHRFile(p: CoreParams) extends Module:
       }
     }
 
-    val writeCacheArb = Module(new RRArbiter(UInt(log2Ceil(nMSHRs).W), nMSHRs))
+    type writeBundleIf = (tag: TagWriteReq, data: DataWriteReq)
+    val writeBundle = Bundle((
+      tag = TagWriteReq(p),
+      data = DataWriteReq(p)
+    ))
+
+    val writeCacheArb = Module(new RRArbiter(writeBundle, nMSHRs))
     for (i <- 0 until nMSHRs) {
       writeCacheArb.io.in(i).valid := mshrs(i).valid && mshrs(i).state === MSHRState.WriteCache.EN
-      writeCacheArb.io.in(i).bits := i.U
+      writeCacheArb.io.in(i).bits.tag.set_idx := mshrs(i).set_idx
+      writeCacheArb.io.in(i).bits.tag.way_en := mshrs(i).way_en
+      writeCacheArb.io.in(i).bits.tag.meta.tag := mshrs(i).tag
+      writeCacheArb.io.in(i).bits.tag.meta.valid := true.B
+      writeCacheArb.io.in(i).bits.tag.meta.dirty := false.B
+      writeCacheArb.io.in(i).bits.data.set_idx := mshrs(i).set_idx
+      writeCacheArb.io.in(i).bits.data.way_en := mshrs(i).way_en
+      writeCacheArb.io.in(i).bits.data.data := mshrs(i).refill_data
+      for (b <- 0 until lineBytes) {
+        writeCacheArb.io.in(i).bits.data.wmask(b) := true.B
+      }
     }
 
     val writeCacheReady = io.tag_write.ready && io.data_write.ready
     writeCacheArb.io.out.ready := writeCacheReady
-
-    val writeCacheIdx = writeCacheArb.io.out.bits
-    val writeCacheEntry = mshrs(writeCacheIdx)
 
     io.tag_write.valid := writeCacheArb.io.out.valid
     io.tag_write.bits := DontCare
@@ -219,20 +232,12 @@ class DCacheMSHRFile(p: CoreParams) extends Module:
     io.data_write.bits := DontCare
 
     when (writeCacheArb.io.out.valid) {
-      io.tag_write.bits.set_idx := writeCacheEntry.set_idx
-      io.tag_write.bits.way_en := writeCacheEntry.way_en
-      io.tag_write.bits.meta.tag := writeCacheEntry.tag
-      io.tag_write.bits.meta.valid := true.B
-      io.tag_write.bits.meta.dirty := false.B
-
-      io.data_write.bits.set_idx := writeCacheEntry.set_idx
-      io.data_write.bits.way_en := writeCacheEntry.way_en
-      io.data_write.bits.data := writeCacheEntry.refill_data
-      io.data_write.bits.wmask.foreach(_ := true.B) // Refill writes, don't mask
+      io.tag_write.bits  := writeCacheArb.io.out.bits.tag
+      io.data_write.bits := writeCacheArb.io.out.bits.data
     }
 
     when (writeCacheArb.io.out.fire) {
-      mshrs(writeCacheIdx).state := MSHRState.Replay.EN
+      mshrs(writeCacheArb.io.chosen).state := MSHRState.Replay.EN
     }
 
     val replayArb = Module(new RRArbiter(DCacheMSHRReplay(p), nMSHRs))

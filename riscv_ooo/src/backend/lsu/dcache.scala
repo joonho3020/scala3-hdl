@@ -162,12 +162,12 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     val meta_arrays = Seq.fill(lsuWidth)(
       Seq.fill(nWays)(
         SRAM(L1Metadata(p), nSets)
-            (reads = 1, writes = 1, readwrites = 0, masked = true)
+            (reads = 1, writes = 1, readwrites = 0, masked = false)
       ))
 
     val data_arrays = Seq.fill(lsuWidth)(
       Seq.fill(nWays)(
-        SRAM(UInt(lineBits.W), nSets)
+        SRAM(Vec.fill(lineBytes)(UInt(8.W)), nSets)
             (reads = 1, writes = 1, readwrites = 0, masked = true)
       ))
 
@@ -254,7 +254,7 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     for (w <- 0 until lsuWidth) {
       for (x <- 0 until nWays) {
         s1_meta_array(w)(x) := meta_arrays(w)(x).readPorts(0).data
-        s1_data_array(w)(x) := data_arrays(w)(x).readPorts(0).data
+        s1_data_array(w)(x) := Cat(data_arrays(w)(x).readPorts(0).data.reverse)
       }
     }
 
@@ -320,7 +320,9 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     for (w <- 0 until lsuWidth) {
       val victim_way = getReplacementWay()
       val victim_way_oh = UIntToOH(victim_way)
-      val victim_meta = MuxOneHot(victim_way_oh, s2_meta_array(w).elems)
+      val victim_tag = MuxOneHot(victim_way_oh, s2_meta_array(w).elems.map(_.tag))
+      val victim_dirty = MuxOneHot(victim_way_oh, s2_meta_array(w).elems.map(_.dirty))
+      val victim_valid = MuxOneHot(victim_way_oh, s2_meta_array(w).elems.map(_.valid))
       val victim_data = MuxOneHot(victim_way_oh, s2_data_array(w).elems)
 
       mshrFile.io.alloc(w).valid := s2_valid(w) && !s2_tag_hit(w)
@@ -328,9 +330,9 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       mshrFile.io.alloc(w).bits.set_idx := getSetIdx(s2_req(w).addr)
       mshrFile.io.alloc(w).bits.tag := getTag(s2_req(w).addr)
       mshrFile.io.alloc(w).bits.way_en := victim_way_oh
-      mshrFile.io.alloc(w).bits.victim_tag := victim_meta.tag
-      mshrFile.io.alloc(w).bits.victim_dirty := victim_meta.dirty
-      mshrFile.io.alloc(w).bits.victim_valid := victim_meta.valid
+      mshrFile.io.alloc(w).bits.victim_tag := victim_tag
+      mshrFile.io.alloc(w).bits.victim_dirty := victim_dirty
+      mshrFile.io.alloc(w).bits.victim_valid := victim_valid
       mshrFile.io.alloc(w).bits.victim_data := victim_data
 
       io.lsu.store_nack(w).valid := s2_valid(w) && !s2_tag_hit(w) && !mshrFile.io.can_allocate(w)
@@ -391,7 +393,8 @@ class NonBlockingDCache(p: CoreParams) extends Module:
 
       val offset = getOffset(s3_req(w).addr)
       val byte_offset = offset(log2Ceil(lineBytes) - 1, 0)
-      val write_data = s3_req(w).data << (byte_offset << 3.U)
+      val store_data_ext = Cat(Seq(0.U((lineBits - p.xlenBits).W), s3_req(w).data))
+      val write_data = (store_data_ext << (byte_offset << 3.U))(lineBits - 1, 0)
 
       val wmask = Wire(Vec.fill(lineBytes)(Bool()))
       for (i <- 0 until lineBytes) {
@@ -420,7 +423,7 @@ class NonBlockingDCache(p: CoreParams) extends Module:
           when (dataWriteArb.io.out.bits.way_en.asUInt(way).asBool) {
             data_arrays(w)(way).writePorts(0).write(
               dataWriteArb.io.out.bits.set_idx,
-              dataWriteArb.io.out.bits.data,
+              Splice(dataWriteArb.io.out.bits.data, 8),
               dataWriteArb.io.out.bits.wmask
             )
           }

@@ -15,8 +15,8 @@ object TileIO:
   def apply(p: CoreParams): TileIO =
     TileIO(
       mem = MagicMemIf(p),
-      retire_info = Vec.fill(p.coreWidth)(RetireTraceIf(p)),
-      cosim_info = Vec.fill(p.coreWidth)(CoSimInfoIf(p))
+      retire_info = Vec.fill(p.retireWidth)(RetireTraceIf(p)),
+      cosim_info = Vec.fill(p.retireWidth)(CoSimInfoIf(p))
     )
 
 class Tile(p: CoreParams) extends Module:
