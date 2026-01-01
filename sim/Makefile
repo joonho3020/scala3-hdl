@@ -62,7 +62,7 @@ test-all: .inorder-verilog-stamp
 	@failed_tests=""; \
 	for hex in tests/*.hex; do \
 		echo "Running $$hex..."; \
-		if ! RUSTFLAGS="-Awarnings" cargo run --release --bin hdl-sim -- $$hex; then \
+		if ! RUSTFLAGS="-Awarnings" cargo run --release --bin inorder-cosim -- $$hex; then \
 			failed_tests="$$failed_tests\n  - $$hex"; \
 		fi; \
 	done; \
