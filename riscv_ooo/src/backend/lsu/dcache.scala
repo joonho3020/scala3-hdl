@@ -199,14 +199,35 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     val s0_valid = Wire(Vec.fill(lsuWidth)(Bool()))
     val s0_req = Wire(Vec.fill(lsuWidth)(DCacheReq(p)))
     val s0_set_idx = Wire(Vec.fill(lsuWidth)(UInt(idxBits.W)))
+    val s0_replay = Wire(Vec.fill(lsuWidth)(Bool()))
+
+    // Replay request signals (defined later in the code)
+    val replay_valid = Wire(Bool())
+    val replay_req = Wire(DCacheReq(p))
+    val replay_mshr_idx = Wire(UInt(log2Ceil(nMSHRs).W))
 
     for (w <- 0 until lsuWidth) {
-      s0_valid(w) := io.lsu.req(w).valid
-      s0_req(w) := io.lsu.req(w).bits
-      s0_set_idx(w) := getSetIdx(io.lsu.req(w).bits.addr)
+      // Port 0 gives priority to replay requests
+      if (w == 0) {
+        when (replay_valid) {
+          s0_valid(w) := true.B
+          s0_req(w) := replay_req
+          s0_replay(w) := true.B
+          io.lsu.req(w).ready := false.B
+        }.otherwise {
+          s0_valid(w) := io.lsu.req(w).valid
+          s0_req(w) := io.lsu.req(w).bits
+          s0_replay(w) := false.B
+          io.lsu.req(w).ready := true.B
+        }
+      } else {
+        s0_valid(w) := io.lsu.req(w).valid
+        s0_req(w) := io.lsu.req(w).bits
+        s0_replay(w) := false.B
+        io.lsu.req(w).ready := true.B
+      }
 
-      // FIXME: mshr full
-      io.lsu.req(w).ready := true.B
+      s0_set_idx(w) := getSetIdx(s0_req(w).addr)
 
       for (way <- 0 until nWays) {
         meta_arrays(w)(way).readPorts(0).read(s0_set_idx(w), s0_valid(w))
@@ -216,12 +237,16 @@ class NonBlockingDCache(p: CoreParams) extends Module:
 
     val s1_valid = Reg(Vec.fill(lsuWidth)(Bool()))
     val s1_req   = Reg(Vec.fill(lsuWidth)(DCacheReq(p)))
+    val s1_replay = Reg(Vec.fill(lsuWidth)(Bool()))
+    val s1_replay_mshr_idx = Reg(Vec.fill(lsuWidth)(UInt(log2Ceil(nMSHRs).W)))
 
     val s2_valid = Reg(Vec.fill(lsuWidth)(Bool()))
     val s2_req   = Reg(Vec.fill(lsuWidth)(DCacheReq(p)))
     val s2_tag_hit_way = Reg(Vec.fill(lsuWidth)(OneHot(nWays.W)))
     val s2_tag_hit = Reg(Vec.fill(lsuWidth)(Bool()))
     val s2_data_array = Reg(Vec.fill(lsuWidth)(Vec.fill(nWays)(UInt(lineBits.W))))
+    val s2_replay = Reg(Vec.fill(lsuWidth)(Bool()))
+    val s2_replay_mshr_idx = Reg(Vec.fill(lsuWidth)(UInt(log2Ceil(nMSHRs).W)))
 
     val s3_valid = Reg(Vec.fill(lsuWidth)(Bool()))
     val s3_req   = Reg(Vec.fill(lsuWidth)(DCacheReq(p)))
@@ -240,6 +265,10 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     for (w <- 0 until lsuWidth) {
       s1_valid(w) := s0_valid(w)
       s1_req(w) := s0_req(w)
+      s1_replay(w) := s0_replay(w)
+      when (s0_replay(w)) {
+        s1_replay_mshr_idx(w) := replay_mshr_idx
+      }
 
       val tag_hit_oh = Cat(s1_meta_array(w).map(m => {
         s1_valid(w) &&
@@ -256,6 +285,8 @@ class NonBlockingDCache(p: CoreParams) extends Module:
         s2_tag_hit_way(w) := tag_hit_way
         s2_tag_hit(w) := tag_hit
         s2_data_array(w) := s1_data_array(w)
+        s2_replay(w) := s1_replay(w)
+        s2_replay_mshr_idx(w) := s1_replay_mshr_idx(w)
       }.otherwise {
         s2_valid(w) := false.B
       }
@@ -378,14 +409,17 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     var found_mem_req = false.B
     val mem_req_valid = Wire(Vec.fill(nMSHRs)(Bool()))
     val mem_req_addr = Wire(UInt(p.paddrBits.W))
+    val mem_req_tag = Wire(UInt(log2Ceil(nMSHRs).W))
 
     mem_req_addr := DontCare
+    mem_req_tag := DontCare
     mem_req_valid.foreach(_ := false.B)
 
     for (i <- 0 until nMSHRs) {
       when (mshrs(i).valid && mshrs(i).state === MSHRState.RefillReq.EN && !found_mem_req) {
         mem_req_valid(i) := true.B
         mem_req_addr := blockAlign(Cat(Seq(mshrs(i).tag, mshrs(i).set_idx, 0.U(offsetBits.W))))
+        mem_req_tag := i.U
 
         when (io.mem.req.ready) {
           mshrs(i).state := MSHRState.RefillWait.EN
@@ -399,10 +433,91 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     io.mem.req.bits.tpe := MagicMemMsg.Read.EN
     io.mem.req.bits.data := DontCare
     io.mem.req.bits.mask := DontCare
+    io.mem.req.bits.tag := mem_req_tag
+
+    when (io.mem.resp.valid) {
+      val resp_data = Cat(io.mem.resp.bits.lineWords.reverse)
+      val resp_tag = io.mem.resp.bits.tag
+
+      val mshr_idx = resp_tag(log2Ceil(nMSHRs) - 1, 0)
+      when (mshrs(mshr_idx).valid && mshrs(mshr_idx).state === MSHRState.RefillWait.EN) {
+        mshrs(mshr_idx).refill_data := resp_data
+        mshrs(mshr_idx).state := MSHRState.WriteCache.EN
+      }
+    }
+
+    for (i <- 0 until nMSHRs) {
+      when (mshrs(i).valid && mshrs(i).state === MSHRState.WriteCache.EN) {
+        for (way <- 0 until nWays) {
+          when (mshrs(i).way_en.asUInt(way).asBool) {
+            for (w <- 0 until lsuWidth) {
+              data_arrays(w)(way).writePorts(0).write(mshrs(i).set_idx, mshrs(i).refill_data)
+
+              val new_meta = Wire(L1Metadata(p))
+              new_meta.tag := mshrs(i).tag
+              new_meta.valid := true.B
+              new_meta.dirty := false.B
+              meta_arrays(w)(way).writePorts(0).write(mshrs(i).set_idx, new_meta)
+            }
+          }
+        }
+
+        mshrs(i).state := MSHRState.Replay.EN
+      }
+    }
+
+    // MSHR Replay Logic - find an MSHR ready to replay
+    replay_valid := false.B
+    replay_req := DontCare
+    replay_mshr_idx := DontCare
+
+    for (i <- 0 until nMSHRs) {
+      when (mshrs(i).valid && mshrs(i).state === MSHRState.Replay.EN && !replay_valid) {
+        replay_valid := true.B
+        replay_req := mshrs(i).req
+        replay_mshr_idx := i.U
+      }
+    }
+
+    // Send replay response on ll_resp and free MSHR
+    io.lsu.ll_resp.valid := false.B
+    io.lsu.ll_resp.bits := DontCare
+
+    when (s2_replay(0) && s2_tag_hit(0)) {
+      val s2_data = MuxOneHot(s2_tag_hit_way(0), s2_data_array(0).elems)
+
+      val offset = getOffset(s2_req(0).addr)
+      val byte_offset = offset(log2Ceil(lineBytes) - 1, 0)
+      val shifted_data = s2_data >> (byte_offset << 3.U)
+
+      val sign_bit_byte = Mux(s2_req(0).signed, shifted_data(7), false.B).asUInt
+      val sign_bit_half = Mux(s2_req(0).signed, shifted_data(15), false.B).asUInt
+      val sign_bit_word = Mux(s2_req(0).signed, shifted_data(31), false.B).asUInt
+
+      val load_data_byte = Cat(Seq(Seq.fill(p.xlenBits - 8)(sign_bit_byte), Seq(shifted_data(7, 0))).flatten)
+      val load_data_half = Cat(Seq(Seq.fill(p.xlenBits - 16)(sign_bit_half), Seq(shifted_data(15, 0))).flatten)
+      val load_data_word = Cat(Seq(Seq.fill(p.xlenBits - 32)(sign_bit_word), Seq(shifted_data(31, 0))).flatten)
+      val load_data_dword = shifted_data(p.xlenBits - 1, 0)
+
+      val load_data = Mux(s2_req(0).size === MemWidth.B.EN, load_data_byte,
+                      Mux(s2_req(0).size === MemWidth.H.EN, load_data_half,
+                      Mux(s2_req(0).size === MemWidth.W.EN, load_data_word,
+                          load_data_dword)))
+
+      io.lsu.ll_resp.valid := true.B
+      io.lsu.ll_resp.bits.data := load_data
+      io.lsu.ll_resp.bits.ldq_idx := s2_req(0).ldq_idx
+
+      // Free the MSHR
+      mshrs(s2_replay_mshr_idx(0)).valid := false.B
+      mshrs(s2_replay_mshr_idx(0)).state := MSHRState.Invalid.EN
+    }
 
     when (reset.asBool) {
       s1_valid.foreach(_ := false.B)
       s2_valid.foreach(_ := false.B)
+      s1_replay.foreach(_ := false.B)
+      s2_replay.foreach(_ := false.B)
 
       for (i <- 0 until nMSHRs) {
         mshrs(i).valid := false.B

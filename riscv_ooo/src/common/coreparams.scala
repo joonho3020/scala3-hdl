@@ -51,6 +51,7 @@ case class BranchParams(
 ) derives StableHash
 
 case class CoreParams(
+  magic_mem_outstanding: Int,
   debug: Boolean,
   pcBits: Int,
   xlenBits: Int,
