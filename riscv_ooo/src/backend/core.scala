@@ -141,6 +141,25 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val dis_stall = Wire(Bool())
     val dis_uops  = Wire(Vec.fill(coreWidth)(Valid(UOp(p))))
 
+
+    def clearBrMask(uop: Valid[UOp], resolve: BranchResolve): Valid[UOp] =
+      val ret = Wire(Valid(UOp(p)))
+      ret := uop
+      when (resolve.valid) {
+        when (resolve.mispredict) {
+          when (ret.valid && (ret.bits.br_mask & resolve.tag) =/= 0.U) {
+            ret.valid := false.B
+          }
+        } .otherwise {
+          when (ret.valid) {
+            ret.bits.br_mask := uop.bits.br_mask & ~resolve.tag
+          }
+        }
+      }
+      ret
+
+    val exe_resolve_info = Wire(BranchResolve(p))
+
     for (i <- 0 until coreWidth) {
       dis_uops(i) := renamer.io.rn2_uops(i)
     }
@@ -159,13 +178,26 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
         dis_uop.stq_idx := lsu.io.dispatch_stq_idx(i)
       }
 
-      rob.io.dispatch_req(i).valid := dis_uops(i).valid && !dis_stall
+      val clear_br = WireInit(false.B)
+
+      when (exe_resolve_info.valid) {
+        when (dis_uops(i).valid &&
+              (dis_uops(i).bits.br_mask & exe_resolve_info.tag) =/= 0.U) {
+          when (exe_resolve_info.mispredict) {
+            clear_br := true.B
+          } .otherwise {
+            dis_uop.br_mask := dis_uops(i).bits.br_mask & ~exe_resolve_info.tag
+          }
+        }
+      }
+
+      rob.io.dispatch_req(i).valid := dis_uops(i).valid && !dis_stall && !clear_br
       rob.io.dispatch_req(i).bits  := dis_uop
 
-      issue_queue.io.dis_uops(i).valid := dis_uops(i).valid && !dis_stall
+      issue_queue.io.dis_uops(i).valid := dis_uops(i).valid && !dis_stall && !clear_br
       issue_queue.io.dis_uops(i).bits := dis_uop
 
-      lsu.io.dispatch(i).valid := dis_uops(i).valid
+      lsu.io.dispatch(i).valid := dis_uops(i).valid && !clear_br
       lsu.io.dispatch(i).bits := dis_uop
     }
 
@@ -193,7 +225,6 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val exe_uops = Reg(Vec.fill(intIssueWidth)(Valid(UOp(p))))
     val exe_rs1_data = (0 until intIssueWidth).map(i => prf.io.read_ports(i * 2 + 0).data)
     val exe_rs2_data = (0 until intIssueWidth).map(i => prf.io.read_ports(i * 2 + 1).data)
-    val exe_resolve_info = Wire(BranchResolve(p))
 
     for (i <- 0 until intIssueWidth) {
       val iss_uop = iss_uops(i)

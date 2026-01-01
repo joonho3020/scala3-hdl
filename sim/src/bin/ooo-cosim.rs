@@ -10,7 +10,7 @@ const WORD_SIZE: u64 = 4;
 const HALT_OPCODE: u32 = 0x0000006f;
 const PAGE_SIZE: usize = 4096;
 const MEM_TYPE_WRITE: u64 = 1;
-const RETIRE_WIDTH: usize = 2;
+const RETIRE_WIDTH: usize = 4;
 const MAX_MISMATCHES: usize = 10;
 const PC_HISTORY_SIZE: usize = 20;
 
