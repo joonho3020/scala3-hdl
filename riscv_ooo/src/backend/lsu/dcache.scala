@@ -206,6 +206,7 @@ class NonBlockingDCache(p: CoreParams) extends Module:
 
       for (way <- 0 until nWays) {
         meta_arrays(w)(way).readPorts(0).read(s0_set_idx(w), s0_valid(w))
+        data_arrays(w)(way).readPorts(0).read(s0_set_idx(w), s0_valid(w))
       }
     }
 
@@ -213,20 +214,22 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     val s1_req   = Reg(Vec.fill(lsuWidth)(DCacheReq(p)))
     val s2_valid = Reg(Vec.fill(lsuWidth)(Bool()))
     val s2_req   = Reg(Vec.fill(lsuWidth)(DCacheReq(p)))
+    val s2_tag_hit_way = Reg(Vec.fill(lsuWidth)(OneHot(nWays.W)))
+    val s2_tag_hit = Reg(Vec.fill(lsuWidth)(Bool()))
+    val s2_data_array = Reg(Vec.fill(lsuWidth)(Vec.fill(nWays)(UInt(lineBits.W))))
 
     val s1_meta_array = Wire(Vec.fill(lsuWidth)(Vec.fill(nWays)(L1Metadata(p))))
+    val s1_data_array = Wire(Vec.fill(lsuWidth)(Vec.fill(nWays)(UInt(lineBits.W))))
     for (w <- 0 until lsuWidth) {
       for (x <- 0 until nWays) {
         s1_meta_array(w)(x) := meta_arrays(w)(x).readPorts(0).data
+        s1_data_array(w)(x) := data_arrays(w)(x).readPorts(0).data
       }
     }
 
     for (w <- 0 until lsuWidth) {
       s1_valid(w) := s0_valid(w)
       s1_req(w) := s0_req(w)
-
-      s2_valid(w) := s1_valid(w)
-      s2_req(w) := s1_req(w)
 
       val tag_hit_oh = Cat(s1_meta_array(w).map(m => {
         s1_valid(w) &&
@@ -235,19 +238,51 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       }).reverse)
 
       val tag_hit = tag_hit_oh =/= 0.U
-      val tag_hit_way = PriorityEncoder(tag_hit_oh)
+      val tag_hit_way = tag_hit_oh.asOH
+
+      when (!io.lsu.s1_kill(w)) {
+        s2_valid(w) := s1_valid(w)
+        s2_req(w) := s1_req(w)
+        s2_tag_hit_way(w) := tag_hit_way
+        s2_tag_hit(w) := tag_hit
+        s2_data_array(w) := s1_data_array(w)
+      }.otherwise {
+        s2_valid(w) := false.B
+      }
     }
 
-    // Placeholder outputs for now
     for (w <- 0 until lsuWidth) {
-      io.lsu.req(w).ready := false.B
-      io.lsu.resp(w).valid := false.B
-      io.lsu.resp(w).bits := DontCare
-      io.lsu.nack(w).valid := false.B
-      io.lsu.nack(w).bits := DontCare
-      io.lsu.store_ack(w).valid := false.B
-      io.lsu.store_ack(w).bits := DontCare
+      val s2_data = MuxOneHot(s2_tag_hit_way(w), s2_data_array(w).elems)
+
+      val offset = getOffset(s2_req(w).addr)
+      val byte_offset = offset(log2Ceil(lineBytes) - 1, 0)
+      val shifted_data = s2_data >> (byte_offset << 3.U)
+
+      val sign_bit_byte = Mux(s2_req(w).signed, shifted_data(7), false.B).asUInt
+      val sign_bit_half = Mux(s2_req(w).signed, shifted_data(15), false.B).asUInt
+      val sign_bit_word = Mux(s2_req(w).signed, shifted_data(31), false.B).asUInt
+
+      val load_data_byte = Cat(Seq(Seq.fill(p.xlenBits - 8)(sign_bit_byte), Seq(shifted_data(7, 0))).flatten)
+      val load_data_half = Cat(Seq(Seq.fill(p.xlenBits - 16)(sign_bit_half), Seq(shifted_data(15, 0))).flatten)
+      val load_data_word = Cat(Seq(Seq.fill(p.xlenBits - 32)(sign_bit_word), Seq(shifted_data(31, 0))).flatten)
+      val load_data_dword = shifted_data(p.xlenBits - 1, 0)
+
+      val load_data = Mux(s2_req(w).size === MemWidth.B.EN, load_data_byte,
+                      Mux(s2_req(w).size === MemWidth.H.EN, load_data_half,
+                      Mux(s2_req(w).size === MemWidth.W.EN, load_data_word,
+                          load_data_dword)))
+
+      io.lsu.resp(w).valid := s2_valid(w) && s2_req(w).is_load && s2_tag_hit(w)
+      io.lsu.resp(w).bits.data := load_data
+      io.lsu.resp(w).bits.ldq_idx := s2_req(w).ldq_idx
+
+      io.lsu.store_ack(w).valid := s2_valid(w) && s2_req(w).is_store && s2_tag_hit(w)
+      io.lsu.store_ack(w).bits := s2_req(w)
+
+      io.lsu.nack(w).valid := s2_valid(w) && !s2_tag_hit(w)
+      io.lsu.nack(w).bits := s2_req(w)
     }
+
     io.lsu.ll_resp.valid := false.B
     io.lsu.ll_resp.bits := DontCare
 
