@@ -30,7 +30,7 @@ class Renamer(p: CoreParams) extends Module with CoreCacheable(p):
 
     rn2_uops = Output(Vec.fill(p.coreWidth)(Valid(UOp(p)))),
 
-    wb_wakeup = Input(Vec.fill(p.coreWidth)(BusyTableWBReq(
+    wb_wakeup = Input(Vec.fill(p.retireWidth)(BusyTableWBReq(
       prd = Valid(UInt(p.pRegIdxBits.W))
     ))),
 

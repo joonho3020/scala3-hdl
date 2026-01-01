@@ -83,11 +83,6 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     val bpu_hit_count = RegInit(0.U(p.xlenBits.W))
     val kill_on_mispred = Wire(Bool())
 
-    io.mem.req.valid := false.B
-    io.mem.req.bits.addr := 0.U
-    io.mem.req.bits.tpe := Read.EN
-    io.mem.req.bits.data.foreach(_ := 0.U)
-    io.mem.req.bits.mask := 0.U
 
     io.retire_info.foreach(ri => {
       ri.valid := false.B
@@ -108,7 +103,6 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
     val imm_gens = (0 until intIssueWidth).map(_ => Module(new ImmGen(XLEN)))
     val alus     = (0 until intIssueWidth).map(_ => Module(new ALU(ALUParams(XLEN))))
-    val agus     = (0 until lsuIssueWidth).map(_ => Module(new AGU(p)))
 
     val wb_uops = Wire(Vec.fill(retireWidth)(Valid(UOp(p))))
 
@@ -155,16 +149,24 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     renamer.io.dis_stall := dis_stall
 
     for (i <- 0 until coreWidth) {
+      val dis_uop = Wire(UOp(p))
+      dis_uop := dis_uops(i).bits
+      dis_uop.rob_idx := rob.io.dispatch_rob_idxs(i)
+      when (dis_uops(i).valid && dis_uops(i).bits.ctrl.is_load) {
+        dis_uop.ldq_idx := lsu.io.dispatch_ldq_idx(i)
+      }
+      when (dis_uops(i).valid && dis_uops(i).bits.ctrl.is_store) {
+        dis_uop.stq_idx := lsu.io.dispatch_stq_idx(i)
+      }
+
       rob.io.dispatch_req(i).valid := dis_uops(i).valid && !dis_stall
-      rob.io.dispatch_req(i).bits  := dis_uops(i).bits
+      rob.io.dispatch_req(i).bits  := dis_uop
 
       issue_queue.io.dis_uops(i).valid := dis_uops(i).valid && !dis_stall
-      issue_queue.io.dis_uops(i).bits := dis_uops(i).bits
-      issue_queue.io.dis_uops(i).bits.rob_idx := rob.io.dispatch_rob_idxs(i)
+      issue_queue.io.dis_uops(i).bits := dis_uop
 
       lsu.io.dispatch(i).valid := dis_uops(i).valid && !dis_stall
-      lsu.io.dispatch(i).bits := dis_uops(i).bits
-      lsu.io.dispatch(i).bits.rob_idx := rob.io.dispatch_rob_idxs(i)
+      lsu.io.dispatch(i).bits := dis_uop
     }
 
     when (dis_stall) {
@@ -230,14 +232,14 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       alus(i).io.dw := DontCare
     }
 
-    // -----------------------------------------------------------------------
-    // AGU (Address Generation Unit)
-    // -----------------------------------------------------------------------
-    for (i <- 0 until 2) {
-      agus(i).io.req       := RegNext(lsu.io.exe_req(i))
-      agus(i).io.prs1_data := prf.io.read_ports(lsu.io.exe_req(i).prs1).data
-      agus(i).io.prs2_data := prf.io.read_ports(lsu.io.exe_req(i).prs2).data
-      lsu.io.exe_resp(i) := agus(i).io.resp
+    for (i <- 0 until intIssueWidth) {
+      lsu.io.exe_update(i).valid := exe_uops(i).valid && exe_uops(i).bits.ctrl.is_mem
+      lsu.io.exe_update(i).bits.is_load := exe_uops(i).valid && exe_uops(i).bits.ctrl.is_load
+      lsu.io.exe_update(i).bits.is_store := exe_uops(i).valid && exe_uops(i).bits.ctrl.is_store
+      lsu.io.exe_update(i).bits.ldq_idx := exe_uops(i).bits.ldq_idx
+      lsu.io.exe_update(i).bits.stq_idx := exe_uops(i).bits.stq_idx
+      lsu.io.exe_update(i).bits.addr := alus(i).io.out(p.paddrBits-1, 0)
+      lsu.io.exe_update(i).bits.data := exe_rs2_data(i)
     }
 
     // -----------------------------------------------------------------------
@@ -322,8 +324,16 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     // -----------------------------------------------------------------------
     val wb_data = Wire(Vec.fill(retireWidth)(UInt(XLEN.W)))
 
+    wb_uops.foreach(u => {
+      u.valid := false.B
+      u.bits := DontCare
+    })
+    wb_data.foreach(_ := 0.U)
+
     for (i <- 0 until intIssueWidth) {
-      wb_uops(i) := exe_uops(i)
+      val is_load = exe_uops(i).valid && exe_uops(i).bits.ctrl.is_load
+      wb_uops(i).valid := exe_uops(i).valid && !is_load
+      wb_uops(i).bits := exe_uops(i).bits
       wb_data(i) := exe_wb_data(i)
     }
 
@@ -333,7 +343,10 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
 
       when (ld_resp_valid) {
         wb_uops(i+intIssueWidth).valid := true.B
+        wb_uops(i+intIssueWidth).bits := DontCare
         wb_uops(i+intIssueWidth).bits.prd := ld_resp.prd
+        wb_uops(i+intIssueWidth).bits.lrd := ld_resp.lrd
+        wb_uops(i+intIssueWidth).bits.rob_idx := ld_resp.rob_idx
         wb_uops(i+intIssueWidth).bits.ctrl.rd_wen := true.B
         wb_data(i+intIssueWidth) := ld_resp.data
       }
@@ -352,20 +365,11 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       issue_queue.io.wakeup_idx(i).valid := wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen
       issue_queue.io.wakeup_idx(i).bits := wb_uops(i).bits.prd
 
-      lsu.io.wakeup(i).valid := wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen
-      lsu.io.wakeup(i).bits := wb_uops(i).bits.prd
+      renamer.io.wb_wakeup(i).prd.valid := wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen
+      renamer.io.wb_wakeup(i).prd.bits := wb_uops(i).bits.prd
     }
 
-    for (i <- 0 until coreWidth) {
-      renamer.io.wb_wakeup(i).prd.valid := {
-        if (i < intIssueWidth) wb_uops(i).valid && wb_uops(i).bits.ctrl.rd_wen
-        else false.B
-      }
-      renamer.io.wb_wakeup(i).prd.bits := {
-        if (i < intIssueWidth) wb_uops(i).bits.prd
-        else 0.U
-      }
-    }
+    dontTouch(renamer.io.wb_wakeup)
 
     // -----------------------------------------------------------------------
     // Commit
@@ -387,6 +391,11 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       lsu.io.commit_store(i).valid := comm_uops(i).valid && comm_uops(i).bits.ctrl.is_store
       lsu.io.commit_store(i).bits := comm_uops(i).bits.rob_idx
     }
+
+    // -----------------------------------------------------------------------
+    // LSU Memory Interface
+    // -----------------------------------------------------------------------
+    lsu.io.mem <> io.mem
 
     renamer.io.comm_free_phys := DontCare
     for (i <- 0 until retireWidth) {

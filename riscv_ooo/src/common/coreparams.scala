@@ -122,7 +122,7 @@ case class CoreParams(
   // increasing linearly w.r.t the core width.
   // Probably there is a way of banking it & multiplexing the physical ports
   // across logical ports????
-  def prfReadPorts: Int = intIssueWidth * 2 + lsuIssueWidth
+  def prfReadPorts: Int = intIssueWidth * 2
   def prfWritePorts: Int = intIssueWidth + lsuIssueWidth
 
 trait CoreCacheable(p: CoreParams) extends CacheableModule:

@@ -34,7 +34,7 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
   val io = IO(IssueQueueIO(
     dis_uops    = Input(Vec.fill(p.coreWidth)(Valid(UOp(p)))),
     dis_ready   = Output(Bool()),
-    wakeup_idx  = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.pRegIdxBits.W)))),
+    wakeup_idx  = Input(Vec.fill(p.retireWidth)(Valid(UInt(p.pRegIdxBits.W)))),
     issue_uops  = Output(Vec.fill(issueWidth)(Valid(UOp(p)))),
     br_resolve  = Input(BranchResolve(p))
   ))

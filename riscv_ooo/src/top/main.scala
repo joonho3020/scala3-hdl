@@ -38,6 +38,7 @@ def runFirtool(firFile: String): (Int, String) =
     paddrBits = 64,
     fetchWidth = 2,
     intIssueWidth = 2,
+    lsuIssueWidth = 2,
     icacheFetchBytes = 2 * 4,
     instBytes = 4,
     ic = ICacheParams(

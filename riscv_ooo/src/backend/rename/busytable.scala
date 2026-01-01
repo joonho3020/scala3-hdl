@@ -38,7 +38,7 @@ class BusyTable(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
       prs2_busy = Bool(),
     ))),
 
-    wb_req = Input(Vec.fill(p.coreWidth)(BusyTableWBReq(
+    wb_req = Input(Vec.fill(p.retireWidth)(BusyTableWBReq(
       prd = Valid(UInt(p.pRegIdxBits.W))
     ))),
     rn1_set = Input(Vec.fill(p.coreWidth)(Valid(UInt(p.pRegIdxBits.W)))),
@@ -75,4 +75,3 @@ class BusyTable(p: CoreParams) extends BitMaskModule with CoreCacheable(p):
 
     dontTouch(io)
   }
-
