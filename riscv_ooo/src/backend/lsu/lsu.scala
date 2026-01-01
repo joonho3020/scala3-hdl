@@ -373,6 +373,60 @@ class LSU(p: CoreParams) extends Module:
     }
 
     // ------------------------------------------------------------------------
+    // Memory Disambiguation: Check for address conflicts with older stores
+    // ------------------------------------------------------------------------
+    def addr_match(ld_addr: UInt, ld_size: HWEnum[MemWidth],
+                   st_addr: UInt, st_size: HWEnum[MemWidth]): Bool = {
+      val ld_size_bytes = Mux(ld_size === MemWidth.Byte, 1.U,
+                          Mux(ld_size === MemWidth.Half, 2.U,
+                          Mux(ld_size === MemWidth.Word, 4.U, 8.U)))
+      val st_size_bytes = Mux(st_size === MemWidth.Byte, 1.U,
+                          Mux(st_size === MemWidth.Half, 2.U,
+                          Mux(st_size === MemWidth.Word, 4.U, 8.U)))
+
+      val ld_end = ld_addr + ld_size_bytes
+      val st_end = st_addr + st_size_bytes
+
+      val no_overlap = (ld_end <= st_addr) || (st_end <= ld_addr)
+      !no_overlap
+    }
+
+    def stores_between(start_idx: UInt, end_idx: UInt): Vec[Bool] = {
+      val in_range = Wire(Vec.fill(numStqEntries)(Bool()))
+      for (i <- 0 until numStqEntries) {
+        val i_u = i.U
+        when (start_idx <= end_idx) {
+          in_range(i) := (i_u >= start_idx) && (i_u < end_idx)
+        } .otherwise {
+          in_range(i) := (i_u >= start_idx) || (i_u < end_idx)
+        }
+      }
+      in_range
+    }
+
+    val ld_has_conflict = Wire(Vec.fill(numLdqEntries)(Bool()))
+    for (i <- 0 until numLdqEntries) {
+      val older_stores = stores_between(stq_head, ldq(i).next_stq_idx)
+
+      var has_unknown_addr = false.B
+      var has_addr_match = false.B
+
+      for (s <- 0 until numStqEntries) {
+        when (older_stores(s) && stq(s).valid) {
+          when (!stq(s).addr.valid) {
+            has_unknown_addr = true.B
+          } .elsewhen (ldq(i).addr.valid &&
+                       addr_match(ldq(i).addr.bits, ldq(i).uop.ctrl.mem_width,
+                                  stq(s).addr.bits, stq(s).uop.ctrl.mem_width)) {
+            has_addr_match = true.B
+          }
+        }
+      }
+
+      ld_has_conflict(i) := has_unknown_addr || has_addr_match
+    }
+
+    // ------------------------------------------------------------------------
     // Select loads to fire to DCache
     // ------------------------------------------------------------------------
     val lsuWidth = p.lsuIssueWidth
@@ -383,7 +437,8 @@ class LSU(p: CoreParams) extends Module:
         ldq(i).valid &&
         ldq(i).addr.valid &&
         !ldq(i).executed &&
-        !brKill(ldq(i).uop.br_mask)
+        !brKill(ldq(i).uop.br_mask) &&
+        !ld_has_conflict(i)
     }
 
     val can_fire_store = Wire(Vec.fill(numStqEntries)(Bool()))
