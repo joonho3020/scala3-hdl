@@ -261,6 +261,7 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       }
     }
 
+    // Happy path, hits
     for (w <- 0 until lsuWidth) {
       val s2_data = MuxOneHot(s2_tag_hit_way(w), s2_data_array(w).elems)
 
@@ -290,6 +291,7 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       io.lsu.store_ack(w).bits := s2_req(w)
     }
 
+    // Sad path, misses
     val mshr_alloc_idx = Wire(Vec.fill(lsuWidth)(UInt(log2Ceil(nMSHRs).W)))
     val can_allocate_mshr = Wire(Vec.fill(lsuWidth)(Bool()))
 
@@ -373,7 +375,30 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     io.lsu.ll_resp.valid := false.B
     io.lsu.ll_resp.bits := DontCare
 
-    io.mem <> DontCare
+    var found_mem_req = false.B
+    val mem_req_valid = Wire(Vec.fill(nMSHRs)(Bool()))
+    val mem_req_addr = Wire(UInt(p.paddrBits.W))
+
+    mem_req_addr := DontCare
+    mem_req_valid.foreach(_ := false.B)
+
+    for (i <- 0 until nMSHRs) {
+      when (mshrs(i).valid && mshrs(i).state === MSHRState.RefillReq.EN && !found_mem_req) {
+        mem_req_valid(i) := true.B
+        mem_req_addr := blockAlign(Cat(Seq(mshrs(i).tag, mshrs(i).set_idx, 0.U(offsetBits.W))))
+
+        when (io.mem.req.ready) {
+          mshrs(i).state := MSHRState.RefillWait.EN
+        }
+      }
+      found_mem_req = found_mem_req || mem_req_valid(i)
+    }
+
+    io.mem.req.valid := found_mem_req
+    io.mem.req.bits.addr := mem_req_addr
+    io.mem.req.bits.tpe := MagicMemMsg.Read.EN
+    io.mem.req.bits.data := DontCare
+    io.mem.req.bits.mask := DontCare
 
     when (reset.asBool) {
       s1_valid.foreach(_ := false.B)
@@ -383,7 +408,5 @@ class NonBlockingDCache(p: CoreParams) extends Module:
         mshrs(i).valid := false.B
         mshrs(i).state := MSHRState.Invalid.EN
       }
-
     }
-
   }
