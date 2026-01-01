@@ -114,6 +114,12 @@ object LSUExeUpdate:
       data = UInt(p.xlenBits.W),
     )
 
+case class LSUCommitBundle(
+  is_load: Bool,
+  ldq_idx: UInt,
+  stq_idx: UInt,
+) extends Bundle[LSUCommitBundle]
+
 case class LSUBundle(
   // Dispatch interface
   dispatch: Vec[Decoupled[UOp]],
@@ -127,12 +133,15 @@ case class LSUBundle(
   ld_resp: Vec[Valid[LSUResp]],
 
   // Commit interface (from ROB)
-  commit_store: Vec[Valid[UInt]],
+  commit: Vec[Valid[LSUCommitBundle]],
 
   // Branch resolution interface
   br_resolve: BranchResolve,
 
-  // Memory interface
+  // DCache interface
+  dcache: LSUDCacheIO,
+
+  // Memory interface (for now, for placeholder dcache)
   mem: MagicMemIf,
 ) extends Bundle[LSUBundle]
 
@@ -147,9 +156,15 @@ object LSUBundle:
 
       ld_resp = Output(Vec.fill(p.lsuIssueWidth)(Valid(LSUResp(p)))),
 
-      commit_store = Input(Vec.fill(p.retireWidth)(Valid(UInt(p.robIdxBits.W)))),
+      commit = Input(Vec.fill(p.retireWidth)(Valid(LSUCommitBundle(
+        is_load = Bool(),
+        ldq_idx = UInt(p.ldqIdxBits.W),
+        stq_idx = UInt(p.stqIdxBits.W),
+      )))),
 
       br_resolve = Input(BranchResolve(p)),
+
+      dcache = LSUDCacheIO(p),
 
       mem = MagicMemIf(p),
     )
@@ -165,8 +180,8 @@ class LSU(p: CoreParams) extends Module:
   val stqIdxBits = p.stqIdxBits
 
   body {
-    val dcache = Module(new DCache(p))
-    dcache.io.mem <> io.mem
+    // DCache will be connected externally or implemented separately
+    // For now, interface signals defined in LSUDCacheIO
 
     val ldq = Reg(Vec.fill(numLdqEntries)(LDQEntry(p)))
     val ldq_head = RegInit(0.U(ldqIdxBits.W))
@@ -316,4 +331,279 @@ class LSU(p: CoreParams) extends Module:
       }
     }
 
+    // ------------------------------------------------------------------------
+    // Branch misprediction recovery
+    // ------------------------------------------------------------------------
+    def updateBrMask(br_mask: UInt): UInt =
+      Mux(io.br_resolve.valid && !io.br_resolve.mispredict,
+        br_mask & ~io.br_resolve.tag,
+        br_mask)
+
+    // Update and kill LDQ entries on branch misprediction
+    for (i <- 0 until numLdqEntries) {
+      when (ldq(i).valid) {
+        val new_br_mask = updateBrMask(ldq(i).uop.br_mask)
+        ldq(i).uop.br_mask := new_br_mask
+
+        when (brKill(ldq(i).uop.br_mask)) {
+          ldq(i).valid := false.B
+          ldq(i).addr.valid := false.B
+        }
+      }
+    }
+
+    // Update and kill STQ entries on branch misprediction
+    for (i <- 0 until numStqEntries) {
+      when (stq(i).valid) {
+        val new_br_mask = updateBrMask(stq(i).uop.br_mask)
+        stq(i).uop.br_mask := new_br_mask
+
+        when (brKill(stq(i).uop.br_mask)) {
+          stq(i).valid := false.B
+          stq(i).addr.valid := false.B
+          stq(i).data.valid := false.B
+        }
+      }
+    }
+
+    // Reset tail pointers on misprediction (like BOOM)
+    when (io.br_resolve.valid && io.br_resolve.mispredict) {
+      ldq_tail := io.br_resolve.ldq_idx
+      stq_tail := io.br_resolve.stq_idx
+    }
+
+    // ------------------------------------------------------------------------
+    // Select loads to fire to DCache
+    // ------------------------------------------------------------------------
+    val lsuWidth = p.lsuIssueWidth
+
+    val can_fire_load = Wire(Vec.fill(numLdqEntries)(Bool()))
+    for (i <- 0 until numLdqEntries) {
+      can_fire_load(i) :=
+        ldq(i).valid &&
+        ldq(i).addr.valid &&
+        !ldq(i).executed &&
+        !brKill(ldq(i).uop.br_mask)
+    }
+
+    val can_fire_store = Wire(Vec.fill(numStqEntries)(Bool()))
+    for (i <- 0 until numStqEntries) {
+      can_fire_store(i) :=
+        stq(i).valid &&
+        stq(i).addr.valid &&
+        stq(i).data.valid &&
+        stq(i).committed &&
+        !stq(i).executed &&
+        !brKill(stq(i).uop.br_mask)
+    }
+
+    // Simple priority selection
+    val fire_load_idx = Wire(Vec.fill(lsuWidth)(Valid(UInt(ldqIdxBits.W))))
+    val fire_store_idx = Wire(Vec.fill(lsuWidth)(Valid(UInt(stqIdxBits.W))))
+
+    for (w <- 0 until lsuWidth) {
+      fire_load_idx(w).valid := false.B
+      fire_load_idx(w).bits := DontCare
+      fire_store_idx(w).valid := false.B
+      fire_store_idx(w).bits := DontCare
+    }
+
+    // Find first ready load for each port (simple priority encoder)
+    var load_found = 0.U(log2Ceil(lsuWidth + 1).W)
+    for (i <- 0 until numLdqEntries) {
+      val fire = can_fire_load(i) && load_found < lsuWidth.U
+      when (fire) {
+        fire_load_idx(load_found).valid := true.B
+        fire_load_idx(load_found).bits := i.U
+      }
+      load_found = Mux(fire, load_found + 1.U, load_found)
+    }
+
+    // Find first ready store for remaining ports
+    var store_found = 0.U(log2Ceil(lsuWidth + 1).W)
+    for (i <- 0 until numStqEntries) {
+      val fire = can_fire_store(i) && (load_found + store_found) < lsuWidth.U
+      when (fire) {
+        fire_store_idx(store_found).valid := true.B
+        fire_store_idx(store_found).bits := i.U
+      }
+      store_found = Mux(fire, store_found + 1.U, store_found)
+    }
+
+    for (w <- 0 until lsuWidth) {
+      io.dcache.req(w).valid := false.B
+      io.dcache.req(w).bits := DontCare
+      io.dcache.s1_kill(w) := false.B
+    }
+
+    for (w <- 0 until lsuWidth) {
+      when (fire_load_idx(w).valid) {
+        val idx = fire_load_idx(w).bits
+        val ldq_e = ldq(idx)
+
+        io.dcache.req(w).valid := true.B
+        io.dcache.req(w).bits.addr := ldq_e.addr.bits
+        io.dcache.req(w).bits.data := DontCare
+        io.dcache.req(w).bits.size := ldq_e.uop.ctrl.mem_width
+        io.dcache.req(w).bits.signed := ldq_e.uop.ctrl.mem_signed
+        io.dcache.req(w).bits.is_load := true.B
+        io.dcache.req(w).bits.is_store := false.B
+        io.dcache.req(w).bits.ldq_idx := idx
+        io.dcache.req(w).bits.stq_idx := DontCare
+        io.dcache.req(w).bits.rob_idx := ldq_e.uop.rob_idx
+        io.dcache.req(w).bits.br_mask := ldq_e.uop.br_mask
+
+        when (io.dcache.req(w).fire) {
+          ldq(idx).executed := true.B
+        }
+      }
+    }
+
+    var store_port = 0.U(log2Ceil(lsuWidth + 1).W)
+    for (w <- 0 until lsuWidth) {
+      when (!fire_load_idx(w).valid && fire_store_idx(w).valid) {
+        val idx = fire_store_idx(w).bits
+        val stq_e = stq(idx)
+
+        io.dcache.req(w).valid := true.B
+        io.dcache.req(w).bits.addr := stq_e.addr.bits
+        io.dcache.req(w).bits.data := stq_e.data.bits
+        io.dcache.req(w).bits.size := stq_e.uop.ctrl.mem_width
+        io.dcache.req(w).bits.signed := DontCare
+        io.dcache.req(w).bits.is_load := false.B
+        io.dcache.req(w).bits.is_store := true.B
+        io.dcache.req(w).bits.ldq_idx := DontCare
+        io.dcache.req(w).bits.stq_idx := idx
+        io.dcache.req(w).bits.rob_idx := stq_e.uop.rob_idx
+        io.dcache.req(w).bits.br_mask := stq_e.uop.br_mask
+
+        when (io.dcache.req(w).fire) {
+          stq(idx).executed := true.B
+        }
+      }
+    }
+
+    // ------------------------------------------------------------------------
+    // DCache response handling
+    // ------------------------------------------------------------------------
+
+    // Handle fast responses (cache hits)
+    for (w <- 0 until lsuWidth) {
+      when (io.dcache.resp(w).valid) {
+        val resp = io.dcache.resp(w).bits
+        val idx = resp.ldq_idx
+
+        when (ldq(idx).valid) {
+          ldq(idx).succeeded := true.B
+        }
+      }
+    }
+
+    // Handle nacks - need to retry
+    for (w <- 0 until lsuWidth) {
+      when (io.dcache.nack(w).valid) {
+        val nack_req = io.dcache.nack(w).bits
+        when (nack_req.is_load) {
+          val idx = nack_req.ldq_idx
+          ldq(idx).executed := false.B
+        } .elsewhen (nack_req.is_store) {
+          val idx = nack_req.stq_idx
+          stq(idx).executed := false.B
+        }
+      }
+    }
+
+    // Handle store acknowledgments
+    for (w <- 0 until lsuWidth) {
+      when (io.dcache.store_ack(w).valid) {
+        val idx = io.dcache.store_ack(w).bits.stq_idx
+        when (stq(idx).valid) {
+          stq(idx).succeeded := true.B
+        }
+      }
+    }
+
+    // Handle long-latency MSHR responses (cache misses)
+    io.dcache.ll_resp.ready := true.B
+    when (io.dcache.ll_resp.valid) {
+      val resp = io.dcache.ll_resp.bits
+      val idx = resp.ldq_idx
+
+      when (ldq(idx).valid) {
+        ldq(idx).succeeded := true.B
+      }
+    }
+
+    // ------------------------------------------------------------------------
+    // Load writeback
+    // ------------------------------------------------------------------------
+
+    io.ld_resp.foreach(r => {
+      r.valid := false.B
+      r.bits := DontCare
+    })
+
+    var resp_idx = 0.U
+    for (i <- 0 until numLdqEntries) {
+      when (ldq(i).valid && ldq(i).succeeded && resp_idx < lsuWidth.U) {
+        // Find data from either fast resp or ll_resp
+        val resp_data = Wire(UInt(p.xlenBits.W))
+        resp_data := DontCare
+
+        // Check fast responses
+        for (w <- 0 until lsuWidth) {
+          when (io.dcache.resp(w).valid && io.dcache.resp(w).bits.ldq_idx === i.U) {
+            resp_data := io.dcache.resp(w).bits.data
+          }
+        }
+
+        // Check long-latency response
+        when (io.dcache.ll_resp.valid && io.dcache.ll_resp.bits.ldq_idx === i.U) {
+          resp_data := io.dcache.ll_resp.bits.data
+        }
+
+        io.ld_resp(resp_idx).valid := true.B
+        io.ld_resp(resp_idx).bits.data := resp_data
+        io.ld_resp(resp_idx).bits.prd := ldq(i).uop.prd
+        io.ld_resp(resp_idx).bits.lrd := ldq(i).uop.lrd
+        io.ld_resp(resp_idx).bits.rob_idx := ldq(i).uop.rob_idx
+
+        resp_idx = resp_idx + 1.U
+      }
+    }
+
+    // ------------------------------------------------------------------------
+    // Free entries
+    // ------------------------------------------------------------------------
+
+    for (w <- 0 until p.retireWidth) {
+      val commit = io.commit(w)
+      when (commit.valid && !commit.bits.is_load) {
+        stq(commit.bits.stq_idx).committed := true.B
+      }
+    }
+
+    var num_ldq_freed = 0.U
+    for (w <- 0 until p.retireWidth) {
+      val idx = wrap_incr_ldq(ldq_head, num_ldq_freed)
+      val free = ldq(idx).valid && ldq(idx).succeeded && num_ldq_freed < p.retireWidth.U
+      when (free) {
+        ldq(idx).valid := false.B
+      }
+      num_ldq_freed = Mux(free, num_ldq_freed + 1.U, num_ldq_freed)
+    }
+    ldq_head := wrap_incr_ldq(ldq_head, num_ldq_freed)
+
+    var num_stq_freed = 0.U
+    for (w <- 0 until p.retireWidth) {
+      val idx = wrap_incr_stq(stq_head, num_stq_freed)
+      val free = stq(idx).valid && stq(idx).succeeded && stq(idx).committed && num_stq_freed < p.retireWidth.U
+      when (free) {
+        stq(idx).valid := false.B
+      }
+      num_stq_freed = Mux(free, num_stq_freed + 1.U, num_stq_freed)
+    }
+    stq_head := wrap_incr_stq(stq_head, num_stq_freed)
+
+    io.mem <> DontCare
   }

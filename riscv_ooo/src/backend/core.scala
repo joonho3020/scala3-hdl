@@ -286,6 +286,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
     exe_resolve_info.mispredict := has_mispred
     exe_resolve_info.taken := exe_cfi_taken
     exe_resolve_info.target := resolve_target
+    exe_resolve_info.ldq_idx := exe_cfi_uop.bits.ldq_idx
+    exe_resolve_info.stq_idx := exe_cfi_uop.bits.stq_idx
 
     dontTouch(exe_resolve_info)
 
@@ -388,8 +390,10 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       io.retire_info(i).bpu_hits := bpu_hit_count
 
       // Commit stores
-      lsu.io.commit_store(i).valid := comm_uops(i).valid && comm_uops(i).bits.ctrl.is_store
-      lsu.io.commit_store(i).bits := comm_uops(i).bits.rob_idx
+      lsu.io.commit(i).valid := comm_uops(i).valid && comm_uops(i).bits.ctrl.is_mem
+      lsu.io.commit(i).bits.ldq_idx := comm_uops(i).bits.ldq_idx
+      lsu.io.commit(i).bits.stq_idx := comm_uops(i).bits.stq_idx
+      lsu.io.commit(i).bits.is_load := comm_uops(i).bits.ctrl.is_load
     }
 
     // -----------------------------------------------------------------------
