@@ -286,6 +286,7 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     val s2_req   = Reg(Vec.fill(lsuWidth)(DCacheReq(p)))
     val s2_tag_hit_way = Reg(Vec.fill(lsuWidth)(OneHot(nWays.W)))
     val s2_tag_hit = Reg(Vec.fill(lsuWidth)(Bool()))
+    val s2_meta_array = Reg(Vec.fill(lsuWidth)(Vec.fill(nWays)(L1Metadata(p))))
     val s2_data_array = Reg(Vec.fill(lsuWidth)(Vec.fill(nWays)(UInt(lineBits.W))))
     val s2_replay = Reg(Vec.fill(lsuWidth)(Bool()))
     val s2_replay_mshr_idx = Reg(Vec.fill(lsuWidth)(UInt(log2Ceil(nMSHRs).W)))
@@ -327,6 +328,7 @@ class NonBlockingDCache(p: CoreParams) extends Module:
         s2_req(w) := s1_req(w)
         s2_tag_hit_way(w) := tag_hit_way
         s2_tag_hit(w) := tag_hit
+        s2_meta_array(w) := s1_meta_array(w)
         s2_data_array(w) := s1_data_array(w)
         s2_replay(w) := s1_replay(w)
         s2_replay_mshr_idx(w) := s1_replay_mshr_idx(w)
@@ -379,12 +381,31 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       val allocate_mshr = s2_valid(w) && !s2_tag_hit(w) && can_allocate_mshr(w)
       when (allocate_mshr) {
         val idx = mshr_alloc_idx(w)
+        val victim_way = getReplacementWay()
+        val victim_way_oh = UIntToOH(victim_way)
+
+        // Extract victim metadata and data
+        val victim_meta = MuxOneHot(victim_way_oh, s2_meta_array(w).elems)
+        val victim_data = MuxOneHot(victim_way_oh, s2_data_array(w).elems)
+
         mshrs(idx).valid := true.B
-        mshrs(idx).state := MSHRState.RefillReq.EN
         mshrs(idx).req := s2_req(w)
         mshrs(idx).set_idx := getSetIdx(s2_req(w).addr)
         mshrs(idx).tag := getTag(s2_req(w).addr)
-        mshrs(idx).way_en := UIntToOH(getReplacementWay())
+        mshrs(idx).way_en := victim_way_oh
+
+        // Store victim information for potential writeback
+        mshrs(idx).victim_tag := victim_meta.tag
+        mshrs(idx).victim_dirty := victim_meta.dirty
+        mshrs(idx).victim_valid := victim_meta.valid
+        mshrs(idx).refill_data := victim_data  // Temporarily store victim data
+
+        // If victim is dirty, we must writeback before refill
+        when (victim_meta.valid && victim_meta.dirty) {
+          mshrs(idx).state := MSHRState.WaitEvict.EN
+        }.otherwise {
+          mshrs(idx).state := MSHRState.RefillReq.EN
+        }
       }
       if w > 0 then {
         for (i <- 0 until nMSHRs) {
@@ -509,20 +530,44 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     io.lsu.ll_resp.valid := false.B
     io.lsu.ll_resp.bits := DontCare
 
+    // Memory request generation: Handle both writebacks (WaitEvict) and refills (RefillReq)
     var found_mem_req = false.B
     val mem_req_valid = Wire(Vec.fill(nMSHRs)(Bool()))
     val mem_req_addr = Wire(UInt(p.paddrBits.W))
     val mem_req_tag = Wire(UInt(log2Ceil(nMSHRs).W))
+    val mem_req_tpe = Wire(HWEnum(MagicMemMsg))
+    val mem_req_data = Wire(Vec.fill(p.memLineWords)(UInt(32.W)))
 
     mem_req_addr := DontCare
     mem_req_tag := DontCare
+    mem_req_tpe := MagicMemMsg.Read.EN
+    mem_req_data.foreach(_ := DontCare)
     mem_req_valid.foreach(_ := false.B)
 
+    // Priority: Writebacks before refills
     for (i <- 0 until nMSHRs) {
-      when (mshrs(i).valid && mshrs(i).state === MSHRState.RefillReq.EN && !found_mem_req) {
+      // Handle writeback (dirty eviction)
+      when (mshrs(i).valid && mshrs(i).state === MSHRState.WaitEvict.EN && !found_mem_req) {
+        mem_req_valid(i) := true.B
+        mem_req_addr := blockAlign(Cat(Seq(mshrs(i).victim_tag, mshrs(i).set_idx, 0.U(offsetBits.W))))
+        mem_req_tag := i.U
+        mem_req_tpe := MagicMemMsg.Write.EN
+
+        // Convert cache line to memory format (Vec of 32-bit words)
+        val victim_data_spliced = Splice(mshrs(i).refill_data, 32)
+        mem_req_data := victim_data_spliced
+
+        when (io.mem.req.ready) {
+          // Writeback sent, now proceed to refill
+          mshrs(i).state := MSHRState.RefillReq.EN
+        }
+      }
+      // Handle refill request
+      .elsewhen (mshrs(i).valid && mshrs(i).state === MSHRState.RefillReq.EN && !found_mem_req) {
         mem_req_valid(i) := true.B
         mem_req_addr := blockAlign(Cat(Seq(mshrs(i).tag, mshrs(i).set_idx, 0.U(offsetBits.W))))
         mem_req_tag := i.U
+        mem_req_tpe := MagicMemMsg.Read.EN
 
         when (io.mem.req.ready) {
           mshrs(i).state := MSHRState.RefillWait.EN
@@ -533,9 +578,9 @@ class NonBlockingDCache(p: CoreParams) extends Module:
 
     io.mem.req.valid := found_mem_req
     io.mem.req.bits.addr := mem_req_addr
-    io.mem.req.bits.tpe := MagicMemMsg.Read.EN
-    io.mem.req.bits.data := DontCare
-    io.mem.req.bits.mask := DontCare
+    io.mem.req.bits.tpe := mem_req_tpe
+    io.mem.req.bits.data := mem_req_data
+    io.mem.req.bits.mask := Fill(p.memLineBytes, true.B)  // Write entire cache line
     io.mem.req.bits.tag := mem_req_tag
 
     when (io.mem.resp.valid) {
