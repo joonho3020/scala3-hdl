@@ -185,6 +185,10 @@ class NonBlockingDCache(p: CoreParams) extends Module:
             (reads = 1, writes = 1, readwrites = 0, masked = true)
       ))
 
+    val mshrs = Reg(Vec.fill(nMSHRs)(MSHREntry(p)))
+
+
+
     val lfsr = RegInit(1.U(16.W))
     lfsr := Cat(Seq(lfsr(14,0), lfsr(15) ^ lfsr(13) ^ lfsr(12) ^ lfsr(10)))
 
@@ -284,9 +288,38 @@ class NonBlockingDCache(p: CoreParams) extends Module:
 
       io.lsu.store_ack(w).valid := s2_valid(w) && s2_req(w).is_store && s2_tag_hit(w)
       io.lsu.store_ack(w).bits := s2_req(w)
+    }
 
-      io.lsu.nack(w).valid := s2_valid(w) && !s2_tag_hit(w)
+    val mshr_alloc_idx = Wire(Vec.fill(lsuWidth)(UInt(log2Ceil(nMSHRs).W)))
+    val can_allocate_mshr = Wire(Vec.fill(lsuWidth)(Bool()))
+
+    var free_mshrs = Seq.fill(lsuWidth)(Wire(Vec.fill(nMSHRs)(Bool())))
+    free_mshrs(0).zip(mshrs).foreach((f, m) => f := !m.valid)
+
+    for (w <- 0 until lsuWidth) {
+      can_allocate_mshr(w) := free_mshrs(w).reduce(_ || _)
+      mshr_alloc_idx(w) := PriorityEncoder(Cat(free_mshrs.reverse))
+
+      io.lsu.nack(w).valid := s2_valid(w) && !s2_tag_hit(w) && !can_allocate_mshr(w)
       io.lsu.nack(w).bits := s2_req(w)
+
+      val allocate_mshr = s2_valid(w) && !s2_tag_hit(w) && can_allocate_mshr(w)
+      when (allocate_mshr) {
+        val idx = mshr_alloc_idx(w)
+        mshrs(idx).valid := true.B
+        mshrs(idx).state := MSHRState.RefillReq.EN
+        mshrs(idx).req := s2_req(w)
+        mshrs(idx).set_idx := getSetIdx(s2_req(w).addr)
+        mshrs(idx).tag := getTag(s2_req(w).addr)
+        mshrs(idx).way_en := UIntToOH(getReplacementWay())
+      }
+      if w > 0 then {
+        for (i <- 0 until nMSHRs) {
+          free_mshrs(w)(i) := Mux(allocate_mshr && i.U === mshr_alloc_idx(w),
+                                  false.B,
+                                  free_mshrs(w-1)(i))
+        }
+      }
     }
 
     for (w <- 0 until lsuWidth) {
@@ -345,6 +378,12 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     when (reset.asBool) {
       s1_valid.foreach(_ := false.B)
       s2_valid.foreach(_ := false.B)
+
+      for (i <- 0 until nMSHRs) {
+        mshrs(i).valid := false.B
+        mshrs(i).state := MSHRState.Invalid.EN
+      }
+
     }
 
   }
