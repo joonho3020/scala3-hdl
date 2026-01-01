@@ -377,12 +377,12 @@ class LSU(p: CoreParams) extends Module:
     // ------------------------------------------------------------------------
     def addr_match(ld_addr: UInt, ld_size: HWEnum[MemWidth],
                    st_addr: UInt, st_size: HWEnum[MemWidth]): Bool = {
-      val ld_size_bytes = Mux(ld_size === MemWidth.Byte, 1.U,
-                          Mux(ld_size === MemWidth.Half, 2.U,
-                          Mux(ld_size === MemWidth.Word, 4.U, 8.U)))
-      val st_size_bytes = Mux(st_size === MemWidth.Byte, 1.U,
-                          Mux(st_size === MemWidth.Half, 2.U,
-                          Mux(st_size === MemWidth.Word, 4.U, 8.U)))
+      val ld_size_bytes = Mux(ld_size === MemWidth.B.EN, 1.U,
+                          Mux(ld_size === MemWidth.H.EN, 2.U,
+                          Mux(ld_size === MemWidth.W.EN, 4.U, 8.U)))
+      val st_size_bytes = Mux(st_size === MemWidth.B.EN, 1.U,
+                          Mux(st_size === MemWidth.H.EN, 2.U,
+                          Mux(st_size === MemWidth.W.EN, 4.U, 8.U)))
 
       val ld_end = ld_addr + ld_size_bytes
       val st_end = st_addr + st_size_bytes
