@@ -129,6 +129,41 @@ object L1Metadata:
       dirty = Bool(),
     )
 
+case class TagWriteReq(
+  set_idx: UInt,
+  way_en: OneHot,
+  meta: L1Metadata
+) extends Bundle[TagWriteReq]
+
+object TagWriteReq:
+  def apply(p: CoreParams): TagWriteReq =
+    val dc = p.dc
+    val idxBits = log2Ceil(dc.nSets)
+    TagWriteReq(
+      set_idx = UInt(idxBits.W),
+      way_en = OneHot(dc.nWays.W),
+      meta = L1Metadata(p)
+    )
+
+case class DataWriteReq(
+  set_idx: UInt,
+  way_en: OneHot,
+  data: UInt,
+  wmask: Vec[Bool]
+) extends Bundle[DataWriteReq]
+
+object DataWriteReq:
+  def apply(p: CoreParams): DataWriteReq =
+    val dc = p.dc
+    val idxBits = log2Ceil(dc.nSets)
+    val lineBytes = dc.cacheLineBytes
+    DataWriteReq(
+      set_idx = UInt(idxBits.W),
+      way_en = OneHot(dc.nWays.W),
+      data = UInt((lineBytes * 8).W),
+      wmask = Vec.fill(lineBytes)(Bool())
+    )
+
 case class DCacheIO(
   lsu: LSUDCacheIO,
   mem: MagicMemIf,
@@ -187,7 +222,14 @@ class NonBlockingDCache(p: CoreParams) extends Module:
 
     val mshrs = Reg(Vec.fill(nMSHRs)(MSHREntry(p)))
 
+    // Tag write arbiter: MSHR refills + S3 stores
+    // Priority: MSHR (input 0) > S3 stores (inputs 1..lsuWidth)
+    val tagWriteArb = Module(new Arbiter(TagWriteReq(p), 1 + lsuWidth))
+    tagWriteArb.io.out.ready := true.B  // SRAM writes always complete immediately
 
+    // Data write arbiter: MSHR refills + S3 stores
+    val dataWriteArb = Module(new Arbiter(DataWriteReq(p), 1 + lsuWidth))
+    dataWriteArb.io.out.ready := true.B
 
     val lfsr = RegInit(1.U(16.W))
     lfsr := Cat(Seq(lfsr(14,0), lfsr(15) ^ lfsr(13) ^ lfsr(12) ^ lfsr(10)))
@@ -252,6 +294,7 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     val s3_req   = Reg(Vec.fill(lsuWidth)(DCacheReq(p)))
     val s3_way = Reg(Vec.fill(lsuWidth)(OneHot(nWays.W)))
     val s3_set_idx = Reg(Vec.fill(lsuWidth)(UInt(idxBits.W)))
+    val s3_tag_hit = Reg(Vec.fill(lsuWidth)(Bool()))
 
     val s1_meta_array = Wire(Vec.fill(lsuWidth)(Vec.fill(nWays)(L1Metadata(p))))
     val s1_data_array = Wire(Vec.fill(lsuWidth)(Vec.fill(nWays)(UInt(lineBits.W))))
@@ -317,9 +360,6 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       io.lsu.resp(w).valid := s2_valid(w) && s2_req(w).is_load && s2_tag_hit(w)
       io.lsu.resp(w).bits.data := load_data
       io.lsu.resp(w).bits.ldq_idx := s2_req(w).ldq_idx
-
-      io.lsu.store_ack(w).valid := s2_valid(w) && s2_req(w).is_store && s2_tag_hit(w)
-      io.lsu.store_ack(w).bits := s2_req(w)
     }
 
     // Sad path, misses
@@ -355,51 +395,114 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       }
     }
 
+    // S2 -> S3: Advance store hits to S3 for tag/data write arbitration
     for (w <- 0 until lsuWidth) {
-      s3_valid(w) := false.B
+      when (s2_valid(w) && s2_req(w).is_store && s2_tag_hit(w)) {
+        s3_valid(w) := true.B
+        s3_req(w) := s2_req(w)
+        s3_way(w) := s2_tag_hit_way(w)
+        s3_set_idx(w) := getSetIdx(s2_req(w).addr)
+        s3_tag_hit(w) := true.B
+      }.otherwise {
+        s3_valid(w) := false.B
+      }
+    }
+
+    // S3: Tag write arbitration
+    // Input 0: MSHR refills (highest priority)
+    // Inputs 1..lsuWidth: S3 store hits
+    tagWriteArb.io.in(0).valid := false.B  // Will be set by MSHR refill logic
+    tagWriteArb.io.in(0).bits := DontCare
+
+    for (w <- 0 until lsuWidth) {
+      val s3_store = s3_valid(w) && s3_tag_hit(w)
+      tagWriteArb.io.in(w + 1).valid := s3_store
+      tagWriteArb.io.in(w + 1).bits.set_idx := s3_set_idx(w)
+      tagWriteArb.io.in(w + 1).bits.way_en := s3_way(w)
+      tagWriteArb.io.in(w + 1).bits.meta.tag := getTag(s3_req(w).addr)
+      tagWriteArb.io.in(w + 1).bits.meta.valid := true.B
+      tagWriteArb.io.in(w + 1).bits.meta.dirty := true.B
+    }
+
+    // Perform winning tag write (broadcast to all tag arrays)
+    when (tagWriteArb.io.out.fire) {
       for (w <- 0 until lsuWidth) {
-        when (s2_valid(w) && s2_req(w).is_store && s2_tag_hit(w)) {
-          s3_valid(w) := true.B
-          s3_req(w) := s2_req(w)
-          s3_way(w) := s2_tag_hit_way(w)
-          s3_set_idx(w) := getSetIdx(s2_req(w).addr)
+        for (way <- 0 until nWays) {
+          when (tagWriteArb.io.out.bits.way_en.asUInt(way).asBool) {
+            meta_arrays(w)(way).writePorts(0).write(
+              tagWriteArb.io.out.bits.set_idx,
+              tagWriteArb.io.out.bits.meta
+            )
+          }
+        }
+      }
+    }
+
+    // S3: Data write arbitration
+    dataWriteArb.io.in(0).valid := false.B  // Will be set by MSHR refill logic
+    dataWriteArb.io.in(0).bits := DontCare
+
+    for (w <- 0 until lsuWidth) {
+      val s3_store = s3_valid(w) && s3_tag_hit(w)
+
+      val offset = getOffset(s3_req(w).addr)
+      val byte_offset = offset(log2Ceil(lineBytes) - 1, 0)
+      val write_data = s3_req(w).data << (byte_offset << 3.U)
+
+      val wmask = Wire(Vec.fill(lineBytes)(Bool()))
+      for (i <- 0 until lineBytes) {
+        wmask(i) := false.B
+      }
+      val num_bytes = Mux(s3_req(w).size === MemWidth.B.EN, 1.U,
+                        Mux(s3_req(w).size === MemWidth.H.EN, 2.U,
+                          Mux(s3_req(w).size === MemWidth.W.EN, 4.U, 8.U)))
+      for (i <- 0 until lineBytes) {
+        when (i.U >= byte_offset && i.U < (byte_offset + num_bytes)) {
+          wmask(i) := true.B
         }
       }
 
-      when (s3_valid(w)) {
-        val offset = getOffset(s3_req(w).addr)
-        val byte_offset = offset(log2Ceil(lineBytes) - 1, 0)
+      dataWriteArb.io.in(w + 1).valid := s3_store
+      dataWriteArb.io.in(w + 1).bits.set_idx := s3_set_idx(w)
+      dataWriteArb.io.in(w + 1).bits.way_en := s3_way(w)
+      dataWriteArb.io.in(w + 1).bits.data := write_data
+      dataWriteArb.io.in(w + 1).bits.wmask := wmask
+    }
 
-        val wmask = Wire(Vec.fill(lineBytes)(Bool()))
-        for (i <- 0 until lineBytes) {
-          wmask(i) := false.B
-        }
-
-        val num_bytes = Mux(s3_req(w).size === MemWidth.B.EN, 1.U,
-                          Mux(s3_req(w).size === MemWidth.H.EN, 2.U,
-                            Mux(s3_req(w).size === MemWidth.W.EN, 4.U, 8.U)))
-
-        for (i <- 0 until lineBytes) {
-          when (i.U >= byte_offset && i.U < (byte_offset + num_bytes)) {
-            wmask(i) := true.B
-          }
-        }
-
-        val write_data = s3_req(w).data << (byte_offset << 3.U)
-
+    // Perform winning data write (to specific port's data arrays)
+    when (dataWriteArb.io.out.fire) {
+      for (w <- 0 until lsuWidth) {
         for (way <- 0 until nWays) {
-          when (s3_way.asUInt(way).asBool) {
-            for (w <- 0 until lsuWidth) {
-              data_arrays(w)(way).writePorts(0).write(s3_set_idx(w), write_data, wmask)
-
-              val new_meta = Wire(L1Metadata(p))
-              new_meta.tag := getTag(s3_req(w).addr)
-              new_meta.valid := true.B
-              new_meta.dirty := true.B
-              meta_arrays(w)(way).writePorts(0).write(s3_set_idx(w), new_meta)
-            }
+          when (dataWriteArb.io.out.bits.way_en.asUInt(way).asBool) {
+            data_arrays(w)(way).writePorts(0).write(
+              dataWriteArb.io.out.bits.set_idx,
+              dataWriteArb.io.out.bits.data,
+              dataWriteArb.io.out.bits.wmask
+            )
           }
         }
+      }
+    }
+
+    // S3: Store ack/nack generation
+    for (w <- 0 until lsuWidth) {
+      val s3_store = s3_valid(w) && s3_tag_hit(w)
+      val s3_won_tag_arb = tagWriteArb.io.in(w + 1).ready
+      val s3_won_data_arb = dataWriteArb.io.in(w + 1).ready
+
+      Assert(!(s3_won_tag_arb ^ s3_won_data_arb),
+        "Tag and data arbitration going different ways")
+
+      // Ack if won both arbitrations
+      io.lsu.store_ack(w).valid := s3_store && s3_won_tag_arb && s3_won_data_arb
+      io.lsu.store_ack(w).bits := s3_req(w)
+
+      // Nack if wanted to write but lost arbitration
+      // NOTE: We keep the S2 nack for misses, add S3 nack for arbitration conflicts
+      val s3_nack = s3_store && (!s3_won_tag_arb || !s3_won_data_arb)
+      when (s3_nack) {
+        io.lsu.nack(w).valid := true.B
+        io.lsu.nack(w).bits := s3_req(w)
       }
     }
 
@@ -446,23 +549,32 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       }
     }
 
+    // MSHR Refill Write: Connect to arbiters (highest priority, input 0)
+    var found_refill = false.B
     for (i <- 0 until nMSHRs) {
-      when (mshrs(i).valid && mshrs(i).state === MSHRState.WriteCache.EN) {
-        for (way <- 0 until nWays) {
-          when (mshrs(i).way_en.asUInt(way).asBool) {
-            for (w <- 0 until lsuWidth) {
-              data_arrays(w)(way).writePorts(0).write(mshrs(i).set_idx, mshrs(i).refill_data)
+      when (mshrs(i).valid && mshrs(i).state === MSHRState.WriteCache.EN && !found_refill) {
+        // Tag write request
+        tagWriteArb.io.in(0).valid := true.B
+        tagWriteArb.io.in(0).bits.set_idx := mshrs(i).set_idx
+        tagWriteArb.io.in(0).bits.way_en := mshrs(i).way_en
+        tagWriteArb.io.in(0).bits.meta.tag := mshrs(i).tag
+        tagWriteArb.io.in(0).bits.meta.valid := true.B
+        tagWriteArb.io.in(0).bits.meta.dirty := false.B
 
-              val new_meta = Wire(L1Metadata(p))
-              new_meta.tag := mshrs(i).tag
-              new_meta.valid := true.B
-              new_meta.dirty := false.B
-              meta_arrays(w)(way).writePorts(0).write(mshrs(i).set_idx, new_meta)
-            }
-          }
+        // Data write request (full cache line, no mask)
+        dataWriteArb.io.in(0).valid := true.B
+        dataWriteArb.io.in(0).bits.set_idx := mshrs(i).set_idx
+        dataWriteArb.io.in(0).bits.way_en := mshrs(i).way_en
+        dataWriteArb.io.in(0).bits.data := mshrs(i).refill_data
+        dataWriteArb.io.in(0).bits.wmask.foreach(_ := true.B)  // Write entire cache line
+
+        // Transition to Replay when write completes
+        // Since arbiter out.ready is always true, write completes immediately
+        when (tagWriteArb.io.in(0).ready && dataWriteArb.io.in(0).ready) {
+          mshrs(i).state := MSHRState.Replay.EN
         }
 
-        mshrs(i).state := MSHRState.Replay.EN
+        found_refill = true.B
       }
     }
 
@@ -516,6 +628,7 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     when (reset.asBool) {
       s1_valid.foreach(_ := false.B)
       s2_valid.foreach(_ := false.B)
+      s3_valid.foreach(_ := false.B)
       s1_replay.foreach(_ := false.B)
       s2_replay.foreach(_ := false.B)
 
