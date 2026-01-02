@@ -161,6 +161,7 @@ class ICache(
     io.mem.req.bits.tpe  := MagicMemMsg.Read.EN
     io.mem.req.bits.data := DontCare
     io.mem.req.bits.mask := DontCare
+    io.mem.req.bits.tag := DontCare
 
     when (io.mem.req.fire) {
       miss_req_pending := false.B

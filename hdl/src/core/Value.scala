@@ -8,6 +8,7 @@ import scala.language.implicitConversions
 import scala.util.NotGiven
 import scala.quoted.*
 import scala.reflect.Selectable.reflectiveSelectable
+import scala.language.dynamics
 
 /** Classification of hardware nodes during elaboration. */
 enum NodeKind:
@@ -359,10 +360,9 @@ type FieldTypeFromTuple[Labels <: Tuple, Elems <: Tuple, L <: String] = (Labels,
   case (_ *: lt, _ *: et)  => FieldTypeFromTuple[lt, et, L]
   case _                   => Nothing
 
-/** Base trait for case-class bundles used as aggregates in the DSL.
- *  NOTE: Literals assume that the BundleIf is pure. That is, all fields are of HWData
- * and there is no mixing with Scala's library types such as Option, Seq, List */
-trait Bundle[T] extends Selectable with AggregateHWData { self: T =>
+sealed trait BundleBase extends AggregateHWData with Selectable
+
+trait Bundle[T] extends BundleBase { self: T =>
   type FieldToNode[X] = X match
     case _           => X
 
@@ -406,6 +406,111 @@ trait Bundle[T] extends Selectable with AggregateHWData { self: T =>
       case None    => throw new NoSuchElementException("Node does not carry a literal value")
 }
 
+object Bundle:
+  inline def apply[N <: Tuple, V <: Tuple](
+    inline nt: NamedTuple.NamedTuple[N, V]
+  ): TupleBundle[N, V] =
+    new TupleBundle(nt, extractNames[N])
+
+  inline def extractNames[N <: Tuple]: Array[String] =
+    inline erasedValue[N] match
+      case _: EmptyTuple => Array.empty[String]
+      case _: (h *: t) => Array(constValue[h].toString) ++ extractNames[t]
+
+  inline def names[N <: Tuple]: List[String] =
+    inline erasedValue[N] match
+      case _: EmptyTuple => Nil
+      case _: (h *: t) => constValue[h].toString :: names[t]
+
+type NamedTupleFieldType[N <: Tuple, V <: Tuple, L <: String] = (N, V) match
+  case (L *: _, h *: _)   => h
+  case (_ *: nt, _ *: vt) => NamedTupleFieldType[nt, vt, L]
+  case _                  => Nothing
+
+final class TupleBundle[N <: Tuple, V <: Tuple] (
+  private[hdl] val elems: NamedTuple.NamedTuple[N, V],
+  private[hdl] val fieldNames: Array[String]
+) extends BundleBase with scala.Dynamic:
+
+  transparent inline def selectDynamic(inline name: String): Any =
+    ${ TupleBundleMacros.selectDynamicImpl[N, V]('this, 'name) }
+
+  def toProduct: Product = new Product:
+    def productArity: Int = fieldNames.length
+    def productElement(n: Int): Any = elems.toTuple.productElement(n)
+    override def productElementName(n: Int): String = fieldNames(n)
+    def canEqual(that: Any): Boolean = that.isInstanceOf[TupleBundle[?, ?]]
+
+  override def flip: Unit =
+    dir = Direction.flip(dir)
+    elems.toTuple.productIterator.foreach {
+      case h: HWData => h.flip
+      case _ => ()
+    }
+
+  def setLitVal(payload: Any): Unit =
+    HWLiteral.set(this, payload)
+    this.literal = Some(payload)
+
+  def getLitVal: Any =
+    literal.getOrElse(throw new NoSuchElementException("TupleBundle does not carry a literal value"))
+
+  override def cloneType: this.type =
+    val cloned = elems.toTuple.productIterator.map {
+      case h: HWData => HWAggregate.cloneData(h)
+      case other => other
+    }.toArray
+    val newTuple = Tuple.fromArray(cloned).asInstanceOf[NamedTuple.NamedTuple[N, V]]
+    new TupleBundle(newTuple, fieldNames).asInstanceOf[this.type]
+
+  override def toString: String =
+    val fields = elems.toTuple.productIterator.mkString(", ")
+    s"Bundle($fields, $dir)"
+
+object TupleBundleMacros:
+  import scala.quoted.*
+
+  def selectDynamicImpl[N <: Tuple: Type, V <: Tuple: Type](
+    self: Expr[TupleBundle[N, V]],
+    name: Expr[String]
+  )(using Quotes): Expr[Any] =
+    import quotes.reflect.*
+
+    name.value match
+      case Some(fieldName) =>
+        val nType = TypeRepr.of[N]
+        val vType = TypeRepr.of[V]
+
+        def extractConstantString(tpe: TypeRepr): Option[String] =
+          tpe.dealias.simplified match
+            case ConstantType(StringConstant(s)) => Some(s)
+            case _ => None
+
+        def collectFieldsFromApplied(names: List[TypeRepr], values: List[TypeRepr]): List[(String, TypeRepr)] =
+          names.zip(values).flatMap { case (n, v) =>
+            extractConstantString(n).map(name => (name, v))
+          }
+
+        def collectFields(names: TypeRepr, values: TypeRepr): List[(String, TypeRepr)] =
+          (names.dealias.simplified, values.dealias.simplified) match
+            case (AppliedType(_, nameArgs), AppliedType(_, valueArgs)) if nameArgs.length == valueArgs.length =>
+              collectFieldsFromApplied(nameArgs, valueArgs)
+            case _ =>
+              Nil
+
+        val fields = collectFields(nType, vType)
+
+        fields.find(_._1 == fieldName) match
+          case Some((_, fieldType)) =>
+            val index = fields.indexWhere(_._1 == fieldName)
+            fieldType.asType match
+              case '[t] =>
+                '{ $self.elems.toTuple.productElement(${Expr(index)}).asInstanceOf[t] }
+          case None =>
+            report.errorAndAbort(s"Field '$fieldName' not found in TupleBundle. Available fields: ${fields.map(_._1).mkString(", ")}. N type: ${nType.show}")
+      case None =>
+        report.errorAndAbort("Field name must be a literal string")
+
 /** Mark a value as an input. */
 object Input:
   def apply[T <: HWData](t: T): T =
@@ -435,6 +540,15 @@ private[hdl] object HWLiteral:
       case (v: Vec[?], seq: Seq[?]) =>
         v.elems.zip(seq).foreach { case (e, v2) => set(e, v2) }
         v.literal = Some(seq)
+      case (tb: TupleBundle[?, ?], p: Product) =>
+        val tbp = tb.toProduct
+        val arity = tbp.productArity
+        assert(arity == p.productArity)
+        var i = 0
+        while i < arity do
+          set(tbp.productElement(i), p.productElement(i))
+          i += 1
+        tb.literal = Some(value)
       case (b: Bundle[?], p: Product) =>
         val bp = b.asInstanceOf[Product]
         val arity = bp.productArity

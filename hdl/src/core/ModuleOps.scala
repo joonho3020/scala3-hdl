@@ -15,6 +15,15 @@ private[hdl] object ModuleOps:
     case v: Vec[?] =>
       val elemType = v.elems.headOption.map(irTypeOf).getOrElse(IR.BoolType)
       IR.VecType(v.length, elemType)
+    case tb: TupleBundle[?, ?] =>
+      val p = tb.toProduct
+      val fields = (0 until p.productArity).flatMap { i =>
+        val name = p.productElementName(i)
+        fieldInfo(p.productElement(i)).map { case (dir, tpe) =>
+          IR.BundleField(IR.Identifier(name), dir == Direction.In, tpe)
+        }
+      }
+      IR.BundleType(fields.toSeq)
     case bundle: Bundle[?] =>
       val p = bundle.asInstanceOf[Product]
       val fields = (0 until p.productArity).flatMap { i =>
@@ -129,7 +138,7 @@ private[hdl] object ModuleOps:
         case (dv: Vec[?], sv: Vec[?]) =>
           val dElems = dv.elems
           val sElems = sv.elems
-          assert(dElems.length == sElems.length, s"d ${dElems.length} s ${sElems.length}")
+          assert(dElems.length == sElems.length, s"destination ${dElems.length} source ${sElems.length} vector length mismatch")
           val len = dElems.length
           var i = 0
           while i < len do
@@ -245,6 +254,7 @@ private[hdl] object ModuleOps:
       case oh: OneHot   => Seq(ohToUInt(oh, mod))
       case v: Vec[?]    => Seq(asUInt(v, mod))
       case e: HWEnum[?] => Seq(asUInt(e, mod))
+      case tb: TupleBundle[?, ?] => Seq(asUInt(tb, mod))
       case b: Bundle[?] => Seq(asUInt(b, mod))
       case _: DontCare.type => Seq.empty
     }
@@ -336,7 +346,7 @@ private[hdl] object ModuleOps:
     }
     HWAggregate.foreach(data, base) { (h, path) =>
       h match
-        case _: Vec[?] | _: Bundle[?] =>
+        case _: Vec[?] | _: Bundle[?] | _: TupleBundle[?, ?] =>
           ()
         case _ =>
           mod.getBuilder.addDontTouch(path)

@@ -10,62 +10,64 @@ import scala.reflect.ClassTag
 
 final case class SimpleIO(in: UInt, out: UInt) extends Bundle[SimpleIO]
 
-private def id(name: String): IR.Identifier = IR.Identifier(name)
-private def portIn(name: String, tpe: IR.Type): IR.Port = IR.Port(id(name), Direction.In, tpe)
-private def portOut(name: String, tpe: IR.Type): IR.Port = IR.Port(id(name), Direction.Out, tpe)
-private val clockPort: IR.Port = portIn("clock", IR.ClockType)
-private val resetPort: IR.Port = portIn("reset", IR.ResetType)
-private def u(width: Int): IR.Type = IR.UIntType(Width(width))
-private def s(width: Int): IR.Type = IR.SIntType(Width(width))
-private def bundle(fields: (String, Boolean, IR.Type)*): IR.Type =
-  IR.BundleType(fields.map { case (n, f, t) => IR.BundleField(id(n), f, t) })
-private def module(name: String, ports: Seq[IR.Port], body: Seq[IR.Stmt]): IR.Module =
-  IR.Module(id(name), ports, body)
-private def wire(name: String, tpe: IR.Type): IR.Stmt = IR.Wire(id(name), tpe)
-private def reg(name: String, tpe: IR.Type, clock: IR.Expr): IR.Stmt = IR.Reg(id(name), tpe, clock)
-private def regReset(name: String, tpe: IR.Type, clock: IR.Expr, reset: IR.Expr, init: IR.Expr): IR.Stmt =
-  IR.RegReset(id(name), tpe, clock, reset, init)
-private def ref(name: String): IR.Expr = IR.Ref(id(name))
-private def inst(name: String, module: String): IR.Stmt = IR.Inst(id(name), id(module))
-private def sf(e: IR.Expr, field: String): IR.Expr = e match
-  case IR.Ref(name) => IR.Ref(id(s"${name.value}.$field"))
-  case other => IR.SubField(other, id(field))
-private def si(e: IR.Expr, idx: Int): IR.Expr = IR.SubIndex(e, idx)
-private def sa(e: IR.Expr, idx: IR.Expr): IR.Expr = IR.SubAccess(e, idx)
-private def lit(value: String): IR.Expr = IR.Literal(id(value))
-private def addPrim(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Add, Seq(a, b))
-private def add(a: IR.Expr, b: IR.Expr): IR.Expr = tail(addPrim(a, b), 1)
-private def and(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.And, Seq(a, b))
-private def or(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Or, Seq(a, b))
-private def eqv(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Eq, Seq(a, b))
-private def neqv(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Neq, Seq(a, b))
-private def not(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
-private def bits(a: IR.Expr, hi: Int, lo: Int): IR.Expr = IR.DoPrim(IR.PrimOp.Bits, Seq(a), Seq(hi, lo))
-private def asBoolPrim(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.AsBool, Seq(e))
-private def tail(a: IR.Expr, n: Int): IR.Expr = IR.DoPrim(IR.PrimOp.Tail, Seq(a), Seq(n))
-private def dshr(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.DShr, Seq(a, b))
-private def reverseBits(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
-private def rem(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Rem, Seq(a, b))
-private def cat(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Cat, Seq(a, b))
-private def asUIntPrim(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.AsUInt, Seq(e))
-private def mem(name: String, tpe: IR.Type, depth: Int, readers: Seq[String], writers: Seq[String], readwriters: Seq[String]): IR.Stmt =
-  IR.Mem(
-    id(name),
-    tpe,
-    depth,
-    1,
-    1,
-    readers.map(id),
-    writers.map(id),
-    readwriters.map(id),
-    IR.ReadUnderWrite.Undefined
-  )
+private object TestHelpers:
+  def id(name: String): IR.Identifier = IR.Identifier(name)
+  def portIn(name: String, tpe: IR.Type): IR.Port = IR.Port(id(name), Direction.In, tpe)
+  def portOut(name: String, tpe: IR.Type): IR.Port = IR.Port(id(name), Direction.Out, tpe)
+  val clockPort: IR.Port = portIn("clock", IR.ClockType)
+  val resetPort: IR.Port = portIn("reset", IR.ResetType)
+  def u(width: Int): IR.Type = IR.UIntType(Width(width))
+  def s(width: Int): IR.Type = IR.SIntType(Width(width))
+  def bundle(fields: (String, Boolean, IR.Type)*): IR.Type =
+    IR.BundleType(fields.map { case (n, f, t) => IR.BundleField(id(n), f, t) })
+  def module(name: String, ports: Seq[IR.Port], body: Seq[IR.Stmt]): IR.Module =
+    IR.Module(id(name), ports, body)
+  def wire(name: String, tpe: IR.Type): IR.Stmt = IR.Wire(id(name), tpe)
+  def reg(name: String, tpe: IR.Type, clock: IR.Expr): IR.Stmt = IR.Reg(id(name), tpe, clock)
+  def regReset(name: String, tpe: IR.Type, clock: IR.Expr, reset: IR.Expr, init: IR.Expr): IR.Stmt =
+    IR.RegReset(id(name), tpe, clock, reset, init)
+  def ref(name: String): IR.Expr = IR.Ref(id(name))
+  def inst(name: String, module: String): IR.Stmt = IR.Inst(id(name), id(module))
+  def sf(e: IR.Expr, field: String): IR.Expr = e match
+    case IR.Ref(name) => IR.Ref(id(s"${name.value}.$field"))
+    case other => IR.SubField(other, id(field))
+  def si(e: IR.Expr, idx: Int): IR.Expr = IR.SubIndex(e, idx)
+  def sa(e: IR.Expr, idx: IR.Expr): IR.Expr = IR.SubAccess(e, idx)
+  def lit(value: String): IR.Expr = IR.Literal(id(value))
+  def addPrim(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Add, Seq(a, b))
+  def add(a: IR.Expr, b: IR.Expr): IR.Expr = tailExpr(addPrim(a, b), 1)
+  def and(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.And, Seq(a, b))
+  def or(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Or, Seq(a, b))
+  def eqv(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Eq, Seq(a, b))
+  def neqv(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Neq, Seq(a, b))
+  def not(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
+  def bits(a: IR.Expr, hi: Int, lo: Int): IR.Expr = IR.DoPrim(IR.PrimOp.Bits, Seq(a), Seq(hi, lo))
+  def asBoolPrim(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.AsBool, Seq(e))
+  def tailExpr(a: IR.Expr, n: Int): IR.Expr = IR.DoPrim(IR.PrimOp.Tail, Seq(a), Seq(n))
+  def dshr(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.DShr, Seq(a, b))
+  def reverseBits(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Not, Seq(e))
+  def rem(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Rem, Seq(a, b))
+  def cat(a: IR.Expr, b: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.Cat, Seq(a, b))
+  def asUIntPrim(e: IR.Expr): IR.Expr = IR.DoPrim(IR.PrimOp.AsUInt, Seq(e))
+  def mem(name: String, tpe: IR.Type, depth: Int, readers: Seq[String], writers: Seq[String], readwriters: Seq[String]): IR.Stmt =
+    IR.Mem(
+      id(name),
+      tpe,
+      depth,
+      1,
+      1,
+      readers.map(id),
+      writers.map(id),
+      readwriters.map(id),
+      IR.ReadUnderWrite.Undefined
+    )
+  def assertDesigns(label: String, actual: Seq[ElaboratedDesign], expected: Seq[IR.Module]): Unit =
+    val renderer = new Elaborator
+    val actualRendered = renderer.emitAll(actual)
+    val expectedRendered = renderer.emitAll(expected.map(m => ElaboratedDesign(m.name, m)))
+    assert(actualRendered == expectedRendered)
 
-private def assertDesigns(label: String, actual: Seq[ElaboratedDesign], expected: Seq[IR.Module]): Unit =
-  val renderer = new Elaborator
-  val actualRendered = renderer.emitAll(actual)
-  val expectedRendered = renderer.emitAll(expected.map(m => ElaboratedDesign(m.name, m)))
-  assert(actualRendered == expectedRendered)
+import TestHelpers.*
 
 def simple_module_test(): Unit =
   class A extends Module:
@@ -433,9 +435,9 @@ def inheritance_check(): Unit =
       Seq(
         IR.Connect(sf(ref("io"), "out"), sf(ref("io"), "in")),
         IR.DefNode(id("add_result"), addPrim(sf(ref("io"), "in"), sf(ref("io"), "in"))),
-        IR.DefNode(id("add_result_0"), tail(ref("add_result"), 1)),
+        IR.DefNode(id("add_result_0"), tailExpr(ref("add_result"), 1)),
         IR.DefNode(id("add_result_1"), addPrim(ref("add_result_0"), sf(ref("io"), "in"))),
-        IR.DefNode(id("add_result_2"), tail(ref("add_result_1"), 1)),
+        IR.DefNode(id("add_result_2"), tailExpr(ref("add_result_1"), 1)),
         IR.Connect(sf(ref("io"), "out"), ref("add_result_2"))
       )
     )
@@ -876,13 +878,13 @@ def nested_seq_generation_check(): Unit =
         IR.Connect(ref("mats_3"), add(sf(ref("io"), "in"), lit("UInt<8>(4)"))),
         IR.Connect(ref("mats_4"), add(sf(ref("io"), "in"), lit("UInt<8>(5)"))),
         IR.DefNode(id("rowSums"), addPrim(ref("mats"), ref("mats_0"))),
-        IR.DefNode(id("rowSums_0"), tail(ref("rowSums"), 1)),
+        IR.DefNode(id("rowSums_0"), tailExpr(ref("rowSums"), 1)),
         IR.DefNode(id("rowSums_1"), addPrim(ref("rowSums_0"), ref("mats_1"))),
-        IR.DefNode(id("rowSums_2"), tail(ref("rowSums_1"), 1)),
+        IR.DefNode(id("rowSums_2"), tailExpr(ref("rowSums_1"), 1)),
         IR.DefNode(id("rowSums_3"), addPrim(ref("mats_2"), ref("mats_3"))),
-        IR.DefNode(id("rowSums_4"), tail(ref("rowSums_3"), 1)),
+        IR.DefNode(id("rowSums_4"), tailExpr(ref("rowSums_3"), 1)),
         IR.DefNode(id("rowSums_5"), addPrim(ref("rowSums_4"), ref("mats_4"))),
-        IR.DefNode(id("rowSums_6"), tail(ref("rowSums_5"), 1)),
+        IR.DefNode(id("rowSums_6"), tailExpr(ref("rowSums_5"), 1)),
         IR.Connect(sf(ref("io"), "out"), add(ref("rowSums_2"), ref("rowSums_6")))
       )
     )
@@ -1233,7 +1235,7 @@ def queue_check(): Unit =
         IR.DefNode(id("enq_fire"), enqFire),
         IR.DefNode(id("deq_fire"), deqFire),
         IR.DefNode(id("almost_full"), addPrim(ref("enq_ptr"), lit("UInt(1)"))),
-        IR.DefNode(id("almost_full_0"), tail(ref("almost_full"), 1)),
+        IR.DefNode(id("almost_full_0"), tailExpr(ref("almost_full"), 1)),
         IR.DefNode(id("almost_full_1"), rem(ref("almost_full_0"), lit("UInt(4)"))),
         IR.DefNode(id("almost_full_2"), eqv(ref("almost_full_1"), ref("deq_ptr"))),
         IR.When(
@@ -1361,7 +1363,7 @@ def queue_check(): Unit =
         IR.DefNode(id("enq_fire"), enqFire2),
         IR.DefNode(id("deq_fire"), deqFire2),
         IR.DefNode(id("almost_full"), addPrim(ref("enq_ptr"), lit("UInt(1)"))),
-        IR.DefNode(id("almost_full_0"), tail(ref("almost_full"), 1)),
+        IR.DefNode(id("almost_full_0"), tailExpr(ref("almost_full"), 1)),
         IR.DefNode(id("almost_full_1"), rem(ref("almost_full_0"), lit("UInt(4)"))),
         IR.DefNode(id("almost_full_2"), eqv(ref("almost_full_1"), ref("deq_ptr"))),
         IR.When(
@@ -2158,11 +2160,11 @@ def sint_basic_check(): Unit =
       Seq(
         IR.Connect(
           sf(ref("io"), "sum"),
-          IR.DoPrim(IR.PrimOp.AsSInt, Seq(tail(IR.DoPrim(IR.PrimOp.Add, Seq(sf(ref("io"), "a"), sf(ref("io"), "b"))), 1)))
+          IR.DoPrim(IR.PrimOp.AsSInt, Seq(tailExpr(IR.DoPrim(IR.PrimOp.Add, Seq(sf(ref("io"), "a"), sf(ref("io"), "b"))), 1)))
         ),
         IR.Connect(
           sf(ref("io"), "diff"),
-          IR.DoPrim(IR.PrimOp.AsSInt, Seq(tail(IR.DoPrim(IR.PrimOp.Sub, Seq(sf(ref("io"), "a"), sf(ref("io"), "b"))), 1)))
+          IR.DoPrim(IR.PrimOp.AsSInt, Seq(tailExpr(IR.DoPrim(IR.PrimOp.Sub, Seq(sf(ref("io"), "a"), sf(ref("io"), "b"))), 1)))
         ),
         IR.Connect(
           sf(ref("io"), "neg"),
@@ -2297,6 +2299,102 @@ def connection_type_check(): Unit =
   val a = new ConnectionTest
   val designs = elaborator.elaborate(a)
 
+def tuple_bundle_check(): Unit =
+  class TupleBundleModule extends Module:
+    given Module = this
+    val io = IO(Bundle((
+      a = Input(UInt(Width(8))),
+      b = Input(UInt(Width(8))),
+      sum = Output(UInt(Width(9)))
+    )))
+    body:
+      io.sum := io.a +& io.b
+
+  val elaborator = new Elaborator
+  val a = new TupleBundleModule
+  val designs = elaborator.elaborate(a)
+  val expected = Seq(
+    module(
+      "TupleBundleModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("a", true, u(8)),
+          ("b", true, u(8)),
+          ("sum", false, u(9))
+        ))
+      ),
+      Seq(
+        IR.Connect(
+          sf(ref("io"), "sum"),
+          addPrim(sf(ref("io"), "a"), sf(ref("io"), "b"))
+        )
+      )
+    )
+  )
+  assertDesigns("tuple_bundle_check", designs, expected)
+
+def nested_tuple_bundle_check(): Unit =
+  case class InnerBundle(x: UInt, y: UInt) extends Bundle[InnerBundle]
+
+  class NestedTupleBundleModule extends Module:
+    given Module = this
+    val io = IO(Bundle((
+      inner = Input(InnerBundle(UInt(Width(4)), UInt(Width(4)))),
+      out = Output(UInt(Width(4)))
+    )))
+    body:
+      io.out := io.inner.x + io.inner.y
+
+  val elaborator = new Elaborator
+  val a = new NestedTupleBundleModule
+  val designs = elaborator.elaborate(a)
+  val expected = Seq(
+    module(
+      "NestedTupleBundleModule",
+      Seq(
+        clockPort,
+        resetPort,
+        portOut("io", bundle(
+          ("inner", true, bundle(
+            ("x", false, u(4)),
+            ("y", false, u(4))
+          )),
+          ("out", false, u(4))
+        ))
+      ),
+      Seq(
+        IR.Connect(
+          sf(ref("io"), "out"),
+          tailExpr(addPrim(sf(sf(ref("io"), "inner"), "x"), sf(sf(ref("io"), "inner"), "y")), 1)
+        )
+      )
+    )
+  )
+  assertDesigns("nested_tuple_bundle_check", designs, expected)
+
+def tuple_bundle_wire_check(): Unit =
+  class TupleBundleWireModule extends Module:
+    given Module = this
+    val io = IO(Bundle((
+      in = Input(UInt(Width(8))),
+      out = Output(UInt(Width(8)))
+    )))
+    body:
+      val temp = Wire(Bundle((
+        x = UInt(Width(8)),
+        y = UInt(Width(8))
+      )))
+      temp.x := io.in
+      temp.y := io.in + 1.U
+      io.out := temp.x + temp.y
+
+  val elaborator = new Elaborator
+  val a = new TupleBundleWireModule
+  val designs = elaborator.elaborate(a)
+  assert(designs.nonEmpty)
+
 object ModuleChecksSpec extends TestSuite:
   val tests = Tests {
     test("simple_module_test") { simple_module_test() }
@@ -2331,4 +2429,7 @@ object ModuleChecksSpec extends TestSuite:
     test("sint_basic_check") { sint_basic_check() }
     test("sint_conversion_check") { sint_conversion_check() }
     test("connection_type_check") { connection_type_check() }
+    test("tuple_bundle_check") { tuple_bundle_check() }
+    test("nested_tuple_bundle_check") { nested_tuple_bundle_check() }
+    test("tuple_bundle_wire_check") { tuple_bundle_wire_check() }
   }

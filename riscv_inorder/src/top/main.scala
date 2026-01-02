@@ -32,6 +32,7 @@ def runFirtool(firFile: String): (Int, String) =
 
 @main def main(): Unit =
   val p = CoreParams(
+    magic_mem_outstanding = 8,
     pcBits = 64,
     xlenBits = 64,
     paddrBits = 64,

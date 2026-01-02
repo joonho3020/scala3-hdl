@@ -32,12 +32,14 @@ def runFirtool(firFile: String): (Int, String) =
 
 @main def main(): Unit =
   val p = CoreParams(
+    magic_mem_outstanding = 4,
     debug = true,
     pcBits = 64,
     xlenBits = 64,
     paddrBits = 64,
     fetchWidth = 2,
-    issueWidth = 2,
+    intIssueWidth = 2,
+    lsuIssueWidth = 2,
     icacheFetchBytes = 2 * 4,
     instBytes = 4,
     ic = ICacheParams(

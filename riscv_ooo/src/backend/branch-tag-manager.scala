@@ -11,6 +11,8 @@ case class BranchResolve(
   mispredict: Bool,
   taken: Bool,
   target: UInt,
+  ldq_idx: UInt,
+  stq_idx: UInt,
 ) extends Bundle[BranchResolve]
 
 object BranchResolve:
@@ -21,6 +23,8 @@ object BranchResolve:
       mispredict = Bool(),
       taken = Bool(),
       target = UInt(p.pcBits.W),
+      ldq_idx = UInt(p.ldqIdxBits.W),
+      stq_idx = UInt(p.stqIdxBits.W),
     )
 
 case class BranchTagManagerIO(

@@ -180,7 +180,8 @@ class ICache(p: CoreParams) extends Module with CoreCacheable(p):
     io.mem.req.bits.addr := miss_req_addr
     io.mem.req.bits.tpe  := MagicMemMsg.Read.EN
     io.mem.req.bits.data := DontCare
-    io.mem.req.bits.mask := DontCare
+    io.mem.req.bits.mask := Fill(p.memLineBytes, true.B)
+    io.mem.req.bits.tag := 0.U
 
     when (io.mem.req.fire) {
       miss_req_pending := false.B

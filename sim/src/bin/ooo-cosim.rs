@@ -1,5 +1,6 @@
 use hdl_sim::asm_parser::parse_asm_file;
 use hdl_sim::Dut;
+use riscv_sim::bus::Device;
 use riscv_sim::RefCore;
 use rvdasm::disassembler::Disassembler;
 use std::{collections::HashMap, collections::HashSet, collections::VecDeque, env};
@@ -10,9 +11,21 @@ const WORD_SIZE: u64 = 4;
 const HALT_OPCODE: u32 = 0x0000006f;
 const PAGE_SIZE: usize = 4096;
 const MEM_TYPE_WRITE: u64 = 1;
-const RETIRE_WIDTH: usize = 2;
+const RETIRE_WIDTH: usize = 4;
 const MAX_MISMATCHES: usize = 10;
 const PC_HISTORY_SIZE: usize = 20;
+const HANG_THRESHOLD: usize = 200;
+const MAX_CYCLES: usize = 100000;
+
+#[derive(Clone)]
+struct MemReq {
+    addr: u64,
+    tpe: u64,
+    tag: u64,
+    is_write: bool,
+    data: [u64; CACHE_LINE_WORDS],
+    mask: u64,
+}
 
 struct SparseMemory {
     pages: HashMap<u64, Box<[u8; PAGE_SIZE]>>,
@@ -75,6 +88,8 @@ enum MismatchType {
     PCMismatch,
     WBDstMismatch,
     WBDataMismatch,
+    MemAddrMismatch,
+    StoreDataMismatch,
 }
 
 #[derive(Debug)]
@@ -86,6 +101,10 @@ struct RetireInfo {
     wb_data: u64,
     bpu_preds: u64,
     bpu_hits: u64,
+    mem_addr: u64,
+    is_load: bool,
+    is_store: bool,
+    store_data: u64,
 }
 
 fn get_retire_info(dut: &mut Dut, idx: usize) -> RetireInfo {
@@ -97,6 +116,10 @@ fn get_retire_info(dut: &mut Dut, idx: usize) -> RetireInfo {
         wb_data: dut.io().retire_info().get(idx).wb_data().peek(),
         bpu_preds: dut.io().retire_info().get(idx).bpu_preds().peek(),
         bpu_hits: dut.io().retire_info().get(idx).bpu_hits().peek(),
+        mem_addr: dut.io().retire_info().get(idx).mem_addr().peek(),
+        is_load: dut.io().retire_info().get(idx).is_load().peek() != 0,
+        is_store: dut.io().retire_info().get(idx).is_store().peek() != 0,
+        store_data: dut.io().retire_info().get(idx).store_data().peek(),
     }
 }
 
@@ -119,11 +142,90 @@ fn compare_retire_with_ref(retire: &RetireInfo, ref_result: &riscv_sim::StepResu
             return Some(MismatchType::WBDataMismatch);
         }
     }
+
+    if retire.is_load {
+        if retire.mem_addr != ref_result.mem_read_addr.unwrap() {
+            return Some(MismatchType::MemAddrMismatch);
+        }
+    }
+
+    if retire.is_store {
+        if retire.mem_addr != ref_result.mem_write_addr.unwrap() {
+            return Some(MismatchType::MemAddrMismatch);
+        }
+        if retire.store_data != ref_result.mem_write_data.unwrap() {
+            return Some(MismatchType::StoreDataMismatch);
+        }
+    }
+
     None
 }
 
 fn get_word_at_addr(memory: &mut SparseMemory, addr: u64) -> u32 {
     memory.read_u32(addr)
+}
+
+fn read_ref_memory_u32(ref_core: &mut RefCore, addr: u64) -> Option<u32> {
+    let mut buf = [0u8; 4];
+    match ref_core.bus.read(addr, &mut buf) {
+        Ok(_) => Some(u32::from_le_bytes(buf)),
+        Err(_) => None,
+    }
+}
+
+fn compare_dram_contents(
+    memory: &mut SparseMemory,
+    ref_core: &mut RefCore,
+    start_addr: u64,
+    num_words: usize,
+    store_history: &HashMap<u64, (usize, u64, usize)>,
+) {
+    println!("\n  Comparing DRAM contents (testharness vs reference):");
+    println!("  Checking {} words starting from 0x{:x}", num_words, start_addr);
+
+    let mut diff_count = 0;
+    let max_diffs_to_show = 20;
+
+    for i in 0..num_words {
+        let addr = start_addr + (i as u64 * 4);
+        let testharness_val = memory.read_u32(addr);
+        let ref_val = match read_ref_memory_u32(ref_core, addr) {
+            Some(val) => val,
+            None => {
+                println!("  [!] Failed to read from reference memory at 0x{:x}", addr);
+                continue;
+            }
+        };
+
+        if testharness_val != ref_val {
+            if diff_count < max_diffs_to_show {
+                let cycle_info = match store_history.get(&addr) {
+                    Some((write_cycle, store_pc, retire_cycle)) => {
+                        format!(
+                            " (store PC=0x{:x} retired@cycle {} written@cycle {})",
+                            store_pc, retire_cycle, write_cycle
+                        )
+                    }
+                    None => " (never stored)".to_string(),
+                };
+                println!(
+                    "  [DIFF] 0x{:08x}: testharness=0x{:08x} ref=0x{:08x}{}",
+                    addr, testharness_val, ref_val, cycle_info
+                );
+            }
+            diff_count += 1;
+        }
+    }
+
+    if diff_count == 0 {
+        println!("  No differences found in checked region");
+    } else {
+        println!("  Total differences: {}", diff_count);
+        if diff_count > max_diffs_to_show {
+            println!("  (showing first {} differences)", max_diffs_to_show);
+        }
+    }
+    println!();
 }
 
 fn record_coverage(pc: u64, instructions_len: usize, coverage: &mut HashSet<usize>) {
@@ -149,6 +251,8 @@ fn process_retire(
     instructions_len: usize,
     pc_history: &mut VecDeque<u64>,
     dut: &mut Dut,
+    store_history: &HashMap<u64, (usize, u64, usize)>,
+    pending_stores: &mut HashMap<u64, (u64, usize)>,
 ) -> bool {
     let pipe_label = format!("pipe {}", pipe_idx);
     let ref_result = ref_core.step();
@@ -158,8 +262,35 @@ fn process_retire(
         println!("Cycle: {} {:?} {}", cycle, mismatch, pipe_label);
         println!("- RefCore {:x?}", ref_result);
         println!("- RTL     {:x?}", retire);
+        match (ref_result.mem_read_addr, ref_result.mem_write_addr) {
+            (Some(read), Some(write)) => {
+                println!("- RefCore mem read 0x{:x} write 0x{:x}", read, write);
+                if let Some(write_data) = ref_result.mem_write_data {
+                    println!("- RefCore mem write data 0x{:x}", write_data);
+                }
+            }
+            (Some(read), None) => println!("- RefCore mem read 0x{:x}", read),
+            (None, Some(write)) => {
+                println!("- RefCore mem write 0x{:x}", write);
+                if let Some(write_data) = ref_result.mem_write_data {
+                    println!("- RefCore mem write data 0x{:x}", write_data);
+                }
+            }
+            (None, None) => {}
+        }
+        if retire.is_load {
+            println!("- RTL     mem load 0x{:x}", retire.mem_addr);
+        } else if retire.is_store {
+            println!("- RTL     mem store 0x{:x} data 0x{:x}", retire.mem_addr, retire.store_data);
+        }
         log_decoded_instruction(&pipe_label, memory, ref_result.pc, disasm);
         ref_core.dump_state();
+
+        if matches!(mismatch, MismatchType::WBDataMismatch) && retire.is_load {
+            let cache_line_addr = retire.mem_addr & !((CACHE_LINE_WORDS as u64 * WORD_SIZE) - 1);
+            compare_dram_contents(memory, ref_core, cache_line_addr, CACHE_LINE_WORDS * 4, store_history);
+        }
+
         println!("- Previous {} PCs:", pc_history.len());
         for (i, pc) in pc_history.iter().enumerate() {
             print!("  0x{:x}", pc);
@@ -173,6 +304,11 @@ fn process_retire(
         println!();
         *mismatch_count += 1;
     }
+    let mem_addr = ref_result.mem_read_addr.or(ref_result.mem_write_addr).unwrap_or(0);
+    let is_load = ref_result.mem_read_addr.is_some();
+    let is_store = ref_result.mem_write_addr.is_some();
+    let store_data = ref_result.mem_write_data.unwrap_or(0);
+
     poke_cosim_info(
         dut,
         pipe_idx,
@@ -183,6 +319,10 @@ fn process_retire(
         ref_result.wb_data,
         ref_result.wb_rd,
         has_mismatch,
+        mem_addr,
+        is_load,
+        is_store,
+        store_data,
     );
     if pc_history.len() >= PC_HISTORY_SIZE {
         pc_history.pop_front();
@@ -190,6 +330,31 @@ fn process_retire(
     pc_history.push_back(retire.pc);
     *retired_count += 1;
     record_coverage(retire.pc, instructions_len, coverage);
+
+    if retire.is_load {
+        let in_pending = pending_stores.contains_key(&retire.mem_addr);
+        let in_history = store_history.contains_key(&retire.mem_addr);
+        let status = if in_history {
+            "completed"
+        } else if in_pending {
+            "pending"
+        } else {
+            "NEVER_STORED"
+        };
+// println!(
+// "Load: cycle: {} addr=0x{:08x} data=0x{:08x} [{}]",
+// cycle, retire.mem_addr, retire.wb_data, status
+// );
+    }
+
+    if retire.is_store {
+        pending_stores.insert(retire.mem_addr, (retire.pc, cycle));
+// println!(
+// "Store: cycle: {} addr=0x{:08x} data=0x{:08x}",
+// cycle, retire.mem_addr, retire.store_data
+// );
+    }
+
     get_word_at_addr(memory, retire.pc) == HALT_OPCODE
 }
 
@@ -207,6 +372,12 @@ fn poke_mem_resp_data(dut: &mut Dut, data: &[u64; CACHE_LINE_WORDS]) {
     }
 }
 
+fn poke_mem_resp(dut: &mut Dut, req: &MemReq, data: &[u64; CACHE_LINE_WORDS]) {
+    dut.io().mem().resp().bits().tag().poke(req.tag);
+    dut.io().mem().resp().bits().tpe().poke(req.tpe);
+    poke_mem_resp_data(dut, data);
+}
+
 fn poke_cosim_info(
     dut: &mut Dut,
     idx: usize,
@@ -217,6 +388,10 @@ fn poke_cosim_info(
     wb_data: u64,
     wb_rd: u64,
     mismatch: bool,
+    mem_addr: u64,
+    is_load: bool,
+    is_store: bool,
+    store_data: u64,
 ) {
     dut.io().cosim_info().get(idx).valid().poke(valid as u64);
     dut.io().cosim_info().get(idx).pc().poke(pc);
@@ -225,6 +400,10 @@ fn poke_cosim_info(
     dut.io().cosim_info().get(idx).wb_data().poke(wb_data);
     dut.io().cosim_info().get(idx).wb_rd().poke(wb_rd);
     dut.io().cosim_info().get(idx).mismatch().poke(mismatch as u64);
+    dut.io().cosim_info().get(idx).mem_addr().poke(mem_addr);
+    dut.io().cosim_info().get(idx).is_load().poke(is_load as u64);
+    dut.io().cosim_info().get(idx).is_store().poke(is_store as u64);
+    dut.io().cosim_info().get(idx).store_data().poke(store_data);
 }
 
 fn main() {
@@ -263,27 +442,28 @@ fn main() {
 
     println!("Starting OOO co-simulation with reference core comparison...\n");
 
-    let mut pending_mem_req = false;
-    let mut pending_mem_addr = 0u64;
-    let mut pending_mem_is_write = false;
-    let mut pending_mem_data: [u64; CACHE_LINE_WORDS] = [0; CACHE_LINE_WORDS];
-    let mut pending_mem_mask: u64 = 0;
+    let mut pending_mem_reqs: VecDeque<MemReq> = VecDeque::new();
     let mut retired_count: usize = 0;
     let mut mismatch_count: usize = 0;
     let mut coverage = HashSet::new();
     let target_coverage = instructions_len;
     let mut stop_reason: Option<String> = None;
     let mut pc_history: VecDeque<u64> = VecDeque::with_capacity(PC_HISTORY_SIZE);
+    let mut cycles_since_retire: usize = 0;
+    let mut store_history: HashMap<u64, (usize, u64, usize)> = HashMap::new();
+    let mut pending_stores: HashMap<u64, (u64, usize)> = HashMap::new();
 
     let disasm = Disassembler::new(rvdasm::disassembler::Xlen::XLEN64);
 
     dut.io().mem().req().ready().poke(1);
 
-    for cycle in 0..100000 {
+    for cycle in 0..MAX_CYCLES {
         let mut halt_detected = false;
+        let mut any_retired = false;
         for lane in 0..RETIRE_WIDTH {
             let retire = get_retire_info(&mut dut, lane);
             if retire.valid {
+                any_retired = true;
                 if process_retire(
                     &retire,
                     lane,
@@ -297,22 +477,31 @@ fn main() {
                     instructions_len,
                     &mut pc_history,
                     &mut dut,
+                    &store_history,
+                    &mut pending_stores,
                 ) {
                     halt_detected = true;
                 }
             } else {
-                poke_cosim_info(&mut dut, lane, false, 0, 0, false, 0, 0, false);
+                poke_cosim_info(&mut dut, lane, false, 0, 0, false, 0, 0, false, 0, false, false, 0);
             }
         }
 
-        if pending_mem_req {
-            let line_base_addr = pending_mem_addr & !(((CACHE_LINE_WORDS * WORD_SIZE as usize) - 1) as u64);
-            if pending_mem_is_write {
+        if any_retired {
+            cycles_since_retire = 0;
+        } else {
+            cycles_since_retire += 1;
+        }
+
+        if let Some(mem_req) = pending_mem_reqs.pop_front() {
+            let line_base_addr =
+                mem_req.addr & !(((CACHE_LINE_WORDS * WORD_SIZE as usize) - 1) as u64);
+            if mem_req.is_write {
                 for i in 0..CACHE_LINE_WORDS {
-                    let word_mask = (pending_mem_mask >> (i * 4)) & 0xF;
+                    let word_mask = (mem_req.mask >> (i * 4)) & 0xF;
                     if word_mask != 0 {
                         let word_addr = line_base_addr + (i as u64 * WORD_SIZE);
-                        let data_word = pending_mem_data[i] as u32;
+                        let data_word = mem_req.data[i] as u32;
                         let existing = memory.read_u32(word_addr);
                         let mut new_val = existing;
                         for byte_idx in 0..4 {
@@ -322,6 +511,12 @@ fn main() {
                             }
                         }
                         memory.write_u32(word_addr, new_val);
+
+                        if let Some((store_pc, retire_cycle)) = pending_stores.get(&word_addr) {
+                            store_history.insert(word_addr, (cycle, *store_pc, *retire_cycle));
+                        } else {
+                            store_history.insert(word_addr, (cycle, 0, 0));
+                        }
                     }
                 }
             }
@@ -331,9 +526,8 @@ fn main() {
                 let word_addr = line_base_addr + (i as u64 * WORD_SIZE);
                 resp_data[i] = get_word_at_addr(&mut memory, word_addr) as u64;
             }
-            poke_mem_resp_data(&mut dut, &resp_data);
+            poke_mem_resp(&mut dut, &mem_req, &resp_data);
             dut.io().mem().resp().valid().poke(1);
-            pending_mem_req = false;
         } else {
             dut.io().mem().resp().valid().poke(0);
         }
@@ -342,13 +536,24 @@ fn main() {
         if mem_req_valid != 0 {
             let addr = dut.io().mem().req().bits().addr().peek();
             let req_type = dut.io().mem().req().bits().tpe().peek();
-            pending_mem_req = true;
-            pending_mem_addr = addr;
-            pending_mem_is_write = req_type == MEM_TYPE_WRITE;
-            if pending_mem_is_write {
-                pending_mem_data = read_mem_req_data(&mut dut);
-                pending_mem_mask = dut.io().mem().req().bits().mask().peek();
-            }
+            let tag = dut.io().mem().req().bits().tag().peek();
+            let is_write = req_type == MEM_TYPE_WRITE;
+            let (data, mask) = if is_write {
+                (
+                    read_mem_req_data(&mut dut),
+                    dut.io().mem().req().bits().mask().peek(),
+                )
+            } else {
+                ([0u64; CACHE_LINE_WORDS], 0)
+            };
+            pending_mem_reqs.push_back(MemReq {
+                addr,
+                tpe: req_type,
+                tag,
+                is_write,
+                data,
+                mask,
+            });
         }
 
         let coverage_complete = coverage.len() >= target_coverage;
@@ -358,6 +563,8 @@ fn main() {
             stop_reason = Some(format!("halt instruction retired at cycle {}", cycle));
         } else if coverage_complete {
             stop_reason = Some(format!("retired all {} instructions by cycle {}", target_coverage, cycle));
+        } else if cycles_since_retire >= HANG_THRESHOLD {
+            stop_reason = Some(format!("core hung: no instructions retired for {} cycles (cycle {})", HANG_THRESHOLD, cycle));
         }
         if stop_reason.is_some() {
             break;
