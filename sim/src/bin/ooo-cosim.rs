@@ -1,5 +1,6 @@
 use hdl_sim::asm_parser::parse_asm_file;
 use hdl_sim::Dut;
+use riscv_sim::bus::Device;
 use riscv_sim::RefCore;
 use rvdasm::disassembler::Disassembler;
 use std::{collections::HashMap, collections::HashSet, collections::VecDeque, env};
@@ -14,6 +15,7 @@ const RETIRE_WIDTH: usize = 4;
 const MAX_MISMATCHES: usize = 10;
 const PC_HISTORY_SIZE: usize = 20;
 const HANG_THRESHOLD: usize = 200;
+const MAX_CYCLES: usize = 100000;
 
 #[derive(Clone)]
 struct MemReq {
@@ -141,17 +143,17 @@ fn compare_retire_with_ref(retire: &RetireInfo, ref_result: &riscv_sim::StepResu
         }
     }
 
-    if retire.is_load && ref_result.mem_read_addr.is_some() {
+    if retire.is_load {
         if retire.mem_addr != ref_result.mem_read_addr.unwrap() {
             return Some(MismatchType::MemAddrMismatch);
         }
     }
 
-    if retire.is_store && ref_result.mem_write_addr.is_some() {
+    if retire.is_store {
         if retire.mem_addr != ref_result.mem_write_addr.unwrap() {
             return Some(MismatchType::MemAddrMismatch);
         }
-        if ref_result.mem_write_data.is_some() && retire.store_data != ref_result.mem_write_data.unwrap() {
+        if retire.store_data != ref_result.mem_write_data.unwrap() {
             return Some(MismatchType::StoreDataMismatch);
         }
     }
@@ -161,6 +163,69 @@ fn compare_retire_with_ref(retire: &RetireInfo, ref_result: &riscv_sim::StepResu
 
 fn get_word_at_addr(memory: &mut SparseMemory, addr: u64) -> u32 {
     memory.read_u32(addr)
+}
+
+fn read_ref_memory_u32(ref_core: &mut RefCore, addr: u64) -> Option<u32> {
+    let mut buf = [0u8; 4];
+    match ref_core.bus.read(addr, &mut buf) {
+        Ok(_) => Some(u32::from_le_bytes(buf)),
+        Err(_) => None,
+    }
+}
+
+fn compare_dram_contents(
+    memory: &mut SparseMemory,
+    ref_core: &mut RefCore,
+    start_addr: u64,
+    num_words: usize,
+    store_history: &HashMap<u64, (usize, u64, usize)>,
+) {
+    println!("\n  Comparing DRAM contents (testharness vs reference):");
+    println!("  Checking {} words starting from 0x{:x}", num_words, start_addr);
+
+    let mut diff_count = 0;
+    let max_diffs_to_show = 20;
+
+    for i in 0..num_words {
+        let addr = start_addr + (i as u64 * 4);
+        let testharness_val = memory.read_u32(addr);
+        let ref_val = match read_ref_memory_u32(ref_core, addr) {
+            Some(val) => val,
+            None => {
+                println!("  [!] Failed to read from reference memory at 0x{:x}", addr);
+                continue;
+            }
+        };
+
+        if testharness_val != ref_val {
+            if diff_count < max_diffs_to_show {
+                let cycle_info = match store_history.get(&addr) {
+                    Some((write_cycle, store_pc, retire_cycle)) => {
+                        format!(
+                            " (store PC=0x{:x} retired@cycle {} written@cycle {})",
+                            store_pc, retire_cycle, write_cycle
+                        )
+                    }
+                    None => " (never stored)".to_string(),
+                };
+                println!(
+                    "  [DIFF] 0x{:08x}: testharness=0x{:08x} ref=0x{:08x}{}",
+                    addr, testharness_val, ref_val, cycle_info
+                );
+            }
+            diff_count += 1;
+        }
+    }
+
+    if diff_count == 0 {
+        println!("  No differences found in checked region");
+    } else {
+        println!("  Total differences: {}", diff_count);
+        if diff_count > max_diffs_to_show {
+            println!("  (showing first {} differences)", max_diffs_to_show);
+        }
+    }
+    println!();
 }
 
 fn record_coverage(pc: u64, instructions_len: usize, coverage: &mut HashSet<usize>) {
@@ -186,6 +251,8 @@ fn process_retire(
     instructions_len: usize,
     pc_history: &mut VecDeque<u64>,
     dut: &mut Dut,
+    store_history: &HashMap<u64, (usize, u64, usize)>,
+    pending_stores: &mut HashMap<u64, (u64, usize)>,
 ) -> bool {
     let pipe_label = format!("pipe {}", pipe_idx);
     let ref_result = ref_core.step();
@@ -218,6 +285,12 @@ fn process_retire(
         }
         log_decoded_instruction(&pipe_label, memory, ref_result.pc, disasm);
         ref_core.dump_state();
+
+        if matches!(mismatch, MismatchType::WBDataMismatch) && retire.is_load {
+            let cache_line_addr = retire.mem_addr & !((CACHE_LINE_WORDS as u64 * WORD_SIZE) - 1);
+            compare_dram_contents(memory, ref_core, cache_line_addr, CACHE_LINE_WORDS * 4, store_history);
+        }
+
         println!("- Previous {} PCs:", pc_history.len());
         for (i, pc) in pc_history.iter().enumerate() {
             print!("  0x{:x}", pc);
@@ -257,6 +330,31 @@ fn process_retire(
     pc_history.push_back(retire.pc);
     *retired_count += 1;
     record_coverage(retire.pc, instructions_len, coverage);
+
+    if retire.is_load {
+        let in_pending = pending_stores.contains_key(&retire.mem_addr);
+        let in_history = store_history.contains_key(&retire.mem_addr);
+        let status = if in_history {
+            "completed"
+        } else if in_pending {
+            "pending"
+        } else {
+            "NEVER_STORED"
+        };
+// println!(
+// "Load: cycle: {} addr=0x{:08x} data=0x{:08x} [{}]",
+// cycle, retire.mem_addr, retire.wb_data, status
+// );
+    }
+
+    if retire.is_store {
+        pending_stores.insert(retire.mem_addr, (retire.pc, cycle));
+// println!(
+// "Store: cycle: {} addr=0x{:08x} data=0x{:08x}",
+// cycle, retire.mem_addr, retire.store_data
+// );
+    }
+
     get_word_at_addr(memory, retire.pc) == HALT_OPCODE
 }
 
@@ -352,12 +450,14 @@ fn main() {
     let mut stop_reason: Option<String> = None;
     let mut pc_history: VecDeque<u64> = VecDeque::with_capacity(PC_HISTORY_SIZE);
     let mut cycles_since_retire: usize = 0;
+    let mut store_history: HashMap<u64, (usize, u64, usize)> = HashMap::new();
+    let mut pending_stores: HashMap<u64, (u64, usize)> = HashMap::new();
 
     let disasm = Disassembler::new(rvdasm::disassembler::Xlen::XLEN64);
 
     dut.io().mem().req().ready().poke(1);
 
-    for cycle in 0..100000 {
+    for cycle in 0..MAX_CYCLES {
         let mut halt_detected = false;
         let mut any_retired = false;
         for lane in 0..RETIRE_WIDTH {
@@ -377,6 +477,8 @@ fn main() {
                     instructions_len,
                     &mut pc_history,
                     &mut dut,
+                    &store_history,
+                    &mut pending_stores,
                 ) {
                     halt_detected = true;
                 }
@@ -409,6 +511,12 @@ fn main() {
                             }
                         }
                         memory.write_u32(word_addr, new_val);
+
+                        if let Some((store_pc, retire_cycle)) = pending_stores.get(&word_addr) {
+                            store_history.insert(word_addr, (cycle, *store_pc, *retire_cycle));
+                        } else {
+                            store_history.insert(word_addr, (cycle, 0, 0));
+                        }
                     }
                 }
             }

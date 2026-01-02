@@ -213,7 +213,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       issue_queue.io.dis_uops(i).valid := dis_uops(i).valid && !dis_stall && !clear_br
       issue_queue.io.dis_uops(i).bits := dis_uop
 
-      lsu.io.dispatch(i).valid := dis_uops(i).valid && !dis_stall && !clear_br
+      lsu.io.dispatch(i).valid := dis_uops(i).valid && dis_uop.ctrl.is_mem && !dis_stall && !clear_br
       lsu.io.dispatch(i).bits := dis_uop
     }
 
@@ -473,6 +473,31 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
         exe_uops(i).valid := false.B
       }
     }
+
+// val cycle = RegInit(0.U)
+// cycle := cycle + 1.U
+
+// val cosim_store_data_mismatch = Wire(Vec.fill(retireWidth)(Bool()))
+// cosim_store_data_mismatch.foreach(_ := false.B)
+
+// val cosim_found_store_addr = Wire(Vec.fill(retireWidth)(Bool()))
+// cosim_found_store_addr.foreach(_ := false.B)
+// for (i <- 0 until retireWidth) {
+// Assert(io.cosim_info(i).valid ^ comm_uops(i).valid === false.B, "Cosim & RTL commit valid diverge")
+
+// when (io.cosim_info(i).valid && io.cosim_info(i).is_store) {
+// Assert(io.cosim_info(i).is_store ^ comm_uops(i).bits.ctrl.is_store === false.B, "Cosim & RTL commit is_store diverge")
+// when (io.cosim_info(i).store_data =/= lsu.io.commit_info(i).data) {
+// cosim_store_data_mismatch(i) := true.B
+// }
+// }
+
+// when (lsu.io.commit_info(i).addr === Lit(UInt(64.W))(BigInt("ffffffff800108b8", 16))) {
+// cosim_found_store_addr(i) := true.B
+// }
+// }
+// dontTouch(cosim_store_data_mismatch)
+// dontTouch(cosim_found_store_addr)
 
     dontTouch(io.cosim_info)
     dontTouch(dec_stall)

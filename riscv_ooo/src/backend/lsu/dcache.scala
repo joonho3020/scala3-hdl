@@ -286,6 +286,13 @@ class NonBlockingDCache(p: CoreParams) extends Module:
         s2_replay_mshr_idx(w) := s1_replay_mshr_idx(w)
       }.otherwise {
         s2_valid(w) := false.B
+        s2_req(w) := DontCare
+        s2_tag_hit_way(w) := 0.U(nWays.W).asOH
+        s2_tag_hit(w) := false.B
+        s2_meta_array(w) := DontCare
+        s2_data_array(w) := DontCare
+        s2_replay(w) := false.B
+        s2_replay_mshr_idx(w) := 0.U
       }
     }
 
@@ -388,6 +395,17 @@ class NonBlockingDCache(p: CoreParams) extends Module:
     dataWriteArb.io.in(0).bits := mshrFile.io.data_write.bits
     mshrFile.io.data_write.ready := dataWriteArb.io.in(0).ready
 
+    val debug_wmask = Wire(Vec.fill(lsuWidth)(UInt(lineBytes.W)))
+    val debug_numbytes = Wire(Vec.fill(lsuWidth)(UInt(4.W)))
+    val debug_write_data = Wire(Vec.fill(lsuWidth)(UInt(lineBits.W)))
+    val debug_byte_offset = Wire(Vec.fill(lsuWidth)(UInt(offsetBits.W)))
+    val debug_store_data_ext = Wire(Vec.fill(lsuWidth)(UInt(lineBits.W)))
+    dontTouch(debug_wmask)
+    dontTouch(debug_numbytes)
+    dontTouch(debug_write_data)
+    dontTouch(debug_byte_offset)
+    dontTouch(debug_store_data_ext)
+
     for (w <- 0 until lsuWidth) {
       val s3_store = s3_valid(w) && s3_tag_hit(w)
 
@@ -396,18 +414,19 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       val store_data_ext = Cat(Seq(0.U((lineBits - p.xlenBits).W), s3_req(w).data))
       val write_data = (store_data_ext << (byte_offset << 3.U))(lineBits - 1, 0)
 
-      val wmask = Wire(Vec.fill(lineBytes)(Bool()))
-      for (i <- 0 until lineBytes) {
-        wmask(i) := false.B
-      }
       val num_bytes = Mux(s3_req(w).size === MemWidth.B.EN, 1.U,
                         Mux(s3_req(w).size === MemWidth.H.EN, 2.U,
                           Mux(s3_req(w).size === MemWidth.W.EN, 4.U, 8.U)))
+      val wmask = Wire(Vec.fill(lineBytes)(Bool()))
       for (i <- 0 until lineBytes) {
-        when (i.U >= byte_offset && i.U < (byte_offset + num_bytes)) {
-          wmask(i) := true.B
-        }
+        wmask(i) := (i.U >= byte_offset) && (i.U < (byte_offset +& num_bytes))
       }
+
+      debug_numbytes(w) := num_bytes
+      debug_wmask(w) := Cat(wmask.reverse)
+      debug_write_data(w) := write_data
+      debug_byte_offset(w) := byte_offset
+      debug_store_data_ext(w) := store_data_ext
 
       dataWriteArb.io.in(w + 1).valid := s3_store
       dataWriteArb.io.in(w + 1).bits.set_idx := s3_set_idx(w)
@@ -483,8 +502,6 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       io.lsu.ll_resp.bits.data := load_data
       io.lsu.ll_resp.bits.ldq_idx := s2_req(0).ldq_idx
 
-      mshrFile.io.free.valid := true.B
-      mshrFile.io.free.bits := s2_replay_mshr_idx(0)
     }
 
     when (reset.asBool) {

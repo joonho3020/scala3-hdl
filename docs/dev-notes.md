@@ -1080,3 +1080,8 @@ Good time to perform a cleanup
 
 - Unify abstraction for cloning data
 - Unify abstraction for interfaces with width/interfaces that support bitoperations like popcount, priorityencoding etc
+
+---
+
+Need a way of capturing HWData in StableHash
+Otherwise, we can't cache modules that have HWData as type parameters (queues, arbiters, buffers...)
