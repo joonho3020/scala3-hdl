@@ -54,14 +54,14 @@ def runFirtool(firFile: String): (Int, String) =
   val top = new Tile(p)
 
   val elaborator = new Elaborator
-  val designs = elaborator.elaborate(top)
+  val (designs, elaborationNs) = Timing.timeNs(elaborator.elaborate(top))
   val top_name = top.moduleName
   val top_name_hashed = designs.map(_.name.value).filter(_.contains(top_name)).head
 
   val chirrtl = elaborator.emitChirrtl(designs, top_name_hashed)
   val fir_filename = s"${top_name}.fir"
 
-  println("Elaboration Finished")
+  println(s"Elaboration Finished (${Timing.formatNs(elaborationNs)})")
 
   // Export IO schema for simulator codegen
   IOSchemaExporter.exportIOSchema(designs, top_name_hashed)
@@ -69,6 +69,6 @@ def runFirtool(firFile: String): (Int, String) =
   writeChirrtl(fir_filename, chirrtl)
   println("Wrote CHIRRTL File")
 
-  val (exitCode, output) = runFirtool(fir_filename)
-  println("Verilog Generation Finished")
+  val ((exitCode, output), verilogGenNs) = Timing.timeNs(runFirtool(fir_filename))
+  println(s"Verilog Generation Finished (${Timing.formatNs(verilogGenNs)})")
   println(output)
