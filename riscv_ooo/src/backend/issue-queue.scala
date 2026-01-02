@@ -29,7 +29,7 @@ class IssueQueue(p: CoreParams) extends Module with CoreCacheable(p):
   given Module = this
 
   val numEntries = p.isq.numEntries
-  val issueWidth = p.intIssueWidth
+  val issueWidth = p.issueWidth
 
   val io = IO(IssueQueueIO(
     dis_uops    = Input(Vec.fill(p.coreWidth)(Valid(UOp(p)))),

@@ -45,8 +45,8 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
   val io = IO(ROBIO(
     dispatch_req = Input(Vec.fill(p.coreWidth)(Valid(UOp(p)))),
     dispatch_rob_idxs = Output(Vec.fill(p.coreWidth)(UInt(p.robIdxBits.W))),
-    wb_req = Input(Vec.fill(p.retireWidth)(Valid(UOp(p)))),
-    wb_data = Input(Vec.fill(p.retireWidth)(UInt(p.xlenBits.W))),
+    wb_req = Input(Vec.fill(p.issueWidth)(Valid(UOp(p)))),
+    wb_data = Input(Vec.fill(p.issueWidth)(UInt(p.xlenBits.W))),
     commit = Output(Vec.fill(p.retireWidth)(Valid(UOp(p)))),
     commit_data = Output(Vec.fill(p.retireWidth)(UInt(p.xlenBits.W))),
     full = Output(Bool()),
@@ -122,7 +122,7 @@ class ROB(p: CoreParams) extends Module with CoreCacheable(p):
     // -----------------------------------------------------------------------
     // Writeback and commit logic
     // -----------------------------------------------------------------------
-    for (i <- 0 until p.retireWidth) {
+    for (i <- 0 until p.issueWidth) {
       val req = io.wb_req(i)
       val rob_idx = req.bits.rob_idx
       val row  = robIdxToRow(rob_idx)
