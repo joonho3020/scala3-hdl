@@ -255,8 +255,8 @@ class LSU(p: CoreParams) extends Module:
                                   stq_head - stq_tail)).asWire
 
     // Pessimistic backpressure, but ok to keep things simple
-    val can_allocate_loads = num_loads_dispatching <= ldq_slots_available
-    val can_allocate_stores = num_stores_dispatching <= stq_slots_available
+    val can_allocate_loads = ldq_slots_available >= p.coreWidth.U
+    val can_allocate_stores = stq_slots_available >= p.coreWidth.U
     val can_dispatch = can_allocate_loads && can_allocate_stores
 
     val ldq_alloc_idx = Wire(Vec.fill(p.coreWidth)(UInt(p.ldqIdxBits.W)))
@@ -428,21 +428,32 @@ class LSU(p: CoreParams) extends Module:
 
     val ld_has_conflict = Wire(Vec.fill(numLdqEntries)(Bool()))
     for (i <- 0 until numLdqEntries) {
-      val older_stores = stores_between(stq_head, ldq(i).next_stq_idx)
+      val older_stores = stores_between(stq_head, ldq(i).next_stq_idx).asWire
 
       val ld_addr = Mux(ldq(i).addr.valid, ldq(i).addr.bits, 0.U)
 
       val has_unknown_addr = (0 until numStqEntries).foldLeft(false.B) { (acc, s) =>
         acc || (older_stores(s) && stq(s).valid && !stq(s).addr.valid)
-      }
+      }.asWire
 
       val has_addr_match = (0 until numStqEntries).foldLeft(false.B) { (acc, s) =>
         val st_addr = Mux(stq(s).addr.valid, stq(s).addr.bits, 0.U)
-        val addr_match = check_addr_overlap(ld_addr, ldq(i).uop.ctrl.mem_width, st_addr, stq(s).uop.ctrl.mem_width)
-        acc || (older_stores(s) && stq(s).valid && stq(s).addr.valid && ldq(i).addr.valid && addr_match)
-      }
+        val addr_match = check_addr_overlap(
+          ld_addr, ldq(i).uop.ctrl.mem_width,
+          st_addr, stq(s).uop.ctrl.mem_width)
+
+        (older_stores(s) &&
+         stq(s).valid &&
+         stq(s).addr.valid &&
+         ldq(i).addr.valid &&
+         addr_match) || acc
+      }.asWire
 
       ld_has_conflict(i) := has_unknown_addr || has_addr_match
+
+      dontTouch(older_stores)
+      dontTouch(has_addr_match)
+      dontTouch(has_unknown_addr)
     }
 
     // ------------------------------------------------------------------------
@@ -594,14 +605,13 @@ class LSU(p: CoreParams) extends Module:
     dcache.io.lsu.ll_resp.ready := true.B
     when (dcache.io.lsu.ll_resp.valid) {
       val idx = dcache.io.lsu.ll_resp.bits.ldq_idx
-      ldq(idx).succeeded := true.B
-
       io.ld_resp(0).valid := true.B
       io.ld_resp(0).bits.data := dcache.io.lsu.ll_resp.bits.data
       io.ld_resp(0).bits.prd := ldq(idx).uop.prd
       io.ld_resp(0).bits.lrd := ldq(idx).uop.lrd
       io.ld_resp(0).bits.rob_idx := ldq(idx).uop.rob_idx
 
+      ldq(idx).succeeded := true.B
       Assert(ldq(idx).valid, "DCache ll_resp to an invalid ldq entry")
     }
 
@@ -612,13 +622,13 @@ class LSU(p: CoreParams) extends Module:
       when (load_succeeded) {
         val resp = dcache.io.lsu.resp(w).bits
         val idx = resp.ldq_idx
-
-        io.ld_resp(resp_idx).valid := true.B
-        io.ld_resp(resp_idx).bits.data := dcache.io.lsu.resp(w).bits.data
-        io.ld_resp(resp_idx).bits.prd := ldq(idx).uop.prd
-        io.ld_resp(resp_idx).bits.lrd := ldq(idx).uop.lrd
-        io.ld_resp(resp_idx).bits.rob_idx := ldq(idx).uop.rob_idx
-
+        when (resp_idx < lsuWidth.U) {
+          io.ld_resp(resp_idx).valid := true.B
+          io.ld_resp(resp_idx).bits.data := dcache.io.lsu.resp(w).bits.data
+          io.ld_resp(resp_idx).bits.prd := ldq(idx).uop.prd
+          io.ld_resp(resp_idx).bits.lrd := ldq(idx).uop.lrd
+          io.ld_resp(resp_idx).bits.rob_idx := ldq(idx).uop.rob_idx
+        }
         ldq(idx).succeeded := true.B
         Assert(ldq(idx).valid, "DCache resp to an invalid ldq entry")
       }
@@ -654,7 +664,7 @@ class LSU(p: CoreParams) extends Module:
       }
     }
 
-    var num_ldq_freed = 0.U
+    var num_ldq_freed = 0.U(log2Ceil(p.retireWidth+1).W)
     for (w <- 0 until p.retireWidth) {
       val idx = wrap_incr_ldq(ldq_head, num_ldq_freed)
       val free = ldq(idx).valid && ldq(idx).succeeded && num_ldq_freed < p.retireWidth.U
@@ -665,7 +675,7 @@ class LSU(p: CoreParams) extends Module:
     }
     ldq_head := wrap_incr_ldq(ldq_head, num_ldq_freed)
 
-    var num_stq_freed = 0.U
+    var num_stq_freed = 0.U(log2Ceil(p.retireWidth+1).W)
     for (w <- 0 until p.retireWidth) {
       val idx = wrap_incr_stq(stq_head, num_stq_freed)
       val free = stq(idx).valid && stq(idx).succeeded && stq(idx).committed && num_stq_freed < p.retireWidth.U
@@ -686,4 +696,9 @@ class LSU(p: CoreParams) extends Module:
     dontTouch(stq_head)
     dontTouch(stq_tail)
     dontTouch(stq)
+
+    // Debug
+    val num_ldq_freed_final = Wire(UInt())
+    num_ldq_freed_final := num_ldq_freed
+    dontTouch(num_ldq_freed_final)
   }

@@ -191,12 +191,8 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       val dis_uop = Wire(UOp(p))
       dis_uop := dis_uops(i).bits
       dis_uop.rob_idx := rob.io.dispatch_rob_idxs(i)
-      when (dis_uops(i).valid && dis_uops(i).bits.ctrl.is_load) {
-        dis_uop.ldq_idx := lsu.io.dispatch_ldq_idx(i)
-      }
-      when (dis_uops(i).valid && dis_uops(i).bits.ctrl.is_store) {
-        dis_uop.stq_idx := lsu.io.dispatch_stq_idx(i)
-      }
+      dis_uop.ldq_idx := lsu.io.dispatch_ldq_idx(i)
+      dis_uop.stq_idx := lsu.io.dispatch_stq_idx(i)
 
       val clear_br = WireInit(false.B)
 
@@ -217,7 +213,7 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       issue_queue.io.dis_uops(i).valid := dis_uops(i).valid && !dis_stall && !clear_br
       issue_queue.io.dis_uops(i).bits := dis_uop
 
-      lsu.io.dispatch(i).valid := dis_uops(i).valid && !clear_br
+      lsu.io.dispatch(i).valid := dis_uops(i).valid && !dis_stall && !clear_br
       lsu.io.dispatch(i).bits := dis_uop
     }
 
