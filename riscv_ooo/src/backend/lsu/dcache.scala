@@ -479,7 +479,7 @@ class NonBlockingDCache(p: CoreParams) extends Module:
                       Mux(s2_req(0).size === MemWidth.W.EN, load_data_word,
                           load_data_dword)))
 
-      io.lsu.ll_resp.valid := true.B
+      io.lsu.ll_resp.valid := true.B && s2_req(0).is_load
       io.lsu.ll_resp.bits.data := load_data
       io.lsu.ll_resp.bits.ldq_idx := s2_req(0).ldq_idx
 
@@ -494,4 +494,31 @@ class NonBlockingDCache(p: CoreParams) extends Module:
       s1_replay.foreach(_ := false.B)
       s2_replay.foreach(_ := false.B)
     }
+
+    dontTouch(s0_valid)
+    dontTouch(s0_req)
+    dontTouch(s0_set_idx)
+    dontTouch(s0_replay)
+
+    dontTouch(s1_valid)
+    dontTouch(s1_req)
+    dontTouch(s1_replay)
+    dontTouch(s1_replay_mshr_idx)
+    dontTouch(s1_meta_array)
+    dontTouch(s1_data_array)
+
+    dontTouch(s2_valid)
+    dontTouch(s2_req)
+    dontTouch(s2_tag_hit_way)
+    dontTouch(s2_tag_hit)
+    dontTouch(s2_meta_array)
+    dontTouch(s2_data_array)
+    dontTouch(s2_replay)
+    dontTouch(s2_replay_mshr_idx)
+
+    dontTouch(s3_valid)
+    dontTouch(s3_req)
+    dontTouch(s3_way)
+    dontTouch(s3_set_idx)
+    dontTouch(s3_tag_hit)
   }

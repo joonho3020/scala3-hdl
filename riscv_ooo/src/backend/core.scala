@@ -15,7 +15,11 @@ case class RetireTraceIf(
   wb_data: UInt,
   wb_rd: UInt,
   bpu_preds: UInt,
-  bpu_hits: UInt
+  bpu_hits: UInt,
+  mem_addr: UInt,
+  is_load: Bool,
+  is_store: Bool,
+  store_data: UInt
 ) extends Bundle[RetireTraceIf]
 
 object RetireTraceIf:
@@ -27,7 +31,11 @@ object RetireTraceIf:
       wb_data  = Output(UInt(p.xlenBits.W)),
       wb_rd    = Output(UInt(p.xlenBits.W)),
       bpu_preds = Output(UInt(p.xlenBits.W)),
-      bpu_hits = Output(UInt(p.xlenBits.W))
+      bpu_hits = Output(UInt(p.xlenBits.W)),
+      mem_addr = Output(UInt(p.paddrBits.W)),
+      is_load  = Output(Bool()),
+      is_store = Output(Bool()),
+      store_data = Output(UInt(p.xlenBits.W))
     )
 
 case class CoSimInfoIf(
@@ -37,7 +45,11 @@ case class CoSimInfoIf(
   wb_valid: Bool,
   wb_data: UInt,
   wb_rd:   UInt,
-  mismatch: Bool
+  mismatch: Bool,
+  mem_addr: UInt,
+  is_load: Bool,
+  is_store: Bool,
+  store_data: UInt
 ) extends Bundle[CoSimInfoIf]
 
 object CoSimInfoIf:
@@ -49,7 +61,11 @@ object CoSimInfoIf:
       wb_valid = Input(Bool()),
       wb_data  = Input(UInt(p.xlenBits.W)),
       wb_rd    = Input(UInt(p.xlenBits.W)),
-      mismatch = Input(Bool())
+      mismatch = Input(Bool()),
+      mem_addr = Input(UInt(p.paddrBits.W)),
+      is_load  = Input(Bool()),
+      is_store = Input(Bool()),
+      store_data = Input(UInt(p.xlenBits.W))
     )
 
 case class CoreIf(
@@ -92,6 +108,10 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       ri.wb_rd := 0.U
       ri.bpu_preds := bpu_pred_count
       ri.bpu_hits := bpu_hit_count
+      ri.mem_addr := 0.U
+      ri.is_load := false.B
+      ri.is_store := false.B
+      ri.store_data := 0.U
     })
 
     val renamer       = Module(new Renamer(p))
@@ -419,6 +439,12 @@ class Core(p: CoreParams) extends Module with CoreCacheable(p):
       io.retire_info(i).wb_rd := comm_uops(i).bits.lrd
       io.retire_info(i).bpu_preds := bpu_pred_count
       io.retire_info(i).bpu_hits := bpu_hit_count
+
+      val lsu_commit_info = lsu.io.commit_info(i)
+      io.retire_info(i).mem_addr := lsu_commit_info.addr
+      io.retire_info(i).is_load := comm_uops(i).valid && lsu_commit_info.valid && lsu_commit_info.is_load
+      io.retire_info(i).is_store := comm_uops(i).valid && lsu_commit_info.valid && lsu_commit_info.is_store
+      io.retire_info(i).store_data := lsu_commit_info.data
 
       // Commit stores
       lsu.io.commit(i).valid := comm_uops(i).valid && comm_uops(i).bits.ctrl.is_mem

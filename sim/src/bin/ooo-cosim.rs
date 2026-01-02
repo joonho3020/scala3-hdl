@@ -85,6 +85,8 @@ enum MismatchType {
     PCMismatch,
     WBDstMismatch,
     WBDataMismatch,
+    MemAddrMismatch,
+    StoreDataMismatch,
 }
 
 #[derive(Debug)]
@@ -96,6 +98,10 @@ struct RetireInfo {
     wb_data: u64,
     bpu_preds: u64,
     bpu_hits: u64,
+    mem_addr: u64,
+    is_load: bool,
+    is_store: bool,
+    store_data: u64,
 }
 
 fn get_retire_info(dut: &mut Dut, idx: usize) -> RetireInfo {
@@ -107,6 +113,10 @@ fn get_retire_info(dut: &mut Dut, idx: usize) -> RetireInfo {
         wb_data: dut.io().retire_info().get(idx).wb_data().peek(),
         bpu_preds: dut.io().retire_info().get(idx).bpu_preds().peek(),
         bpu_hits: dut.io().retire_info().get(idx).bpu_hits().peek(),
+        mem_addr: dut.io().retire_info().get(idx).mem_addr().peek(),
+        is_load: dut.io().retire_info().get(idx).is_load().peek() != 0,
+        is_store: dut.io().retire_info().get(idx).is_store().peek() != 0,
+        store_data: dut.io().retire_info().get(idx).store_data().peek(),
     }
 }
 
@@ -129,6 +139,22 @@ fn compare_retire_with_ref(retire: &RetireInfo, ref_result: &riscv_sim::StepResu
             return Some(MismatchType::WBDataMismatch);
         }
     }
+
+    if retire.is_load && ref_result.mem_read_addr.is_some() {
+        if retire.mem_addr != ref_result.mem_read_addr.unwrap() {
+            return Some(MismatchType::MemAddrMismatch);
+        }
+    }
+
+    if retire.is_store && ref_result.mem_write_addr.is_some() {
+        if retire.mem_addr != ref_result.mem_write_addr.unwrap() {
+            return Some(MismatchType::MemAddrMismatch);
+        }
+        if ref_result.mem_write_data.is_some() && retire.store_data != ref_result.mem_write_data.unwrap() {
+            return Some(MismatchType::StoreDataMismatch);
+        }
+    }
+
     None
 }
 
@@ -168,6 +194,27 @@ fn process_retire(
         println!("Cycle: {} {:?} {}", cycle, mismatch, pipe_label);
         println!("- RefCore {:x?}", ref_result);
         println!("- RTL     {:x?}", retire);
+        match (ref_result.mem_read_addr, ref_result.mem_write_addr) {
+            (Some(read), Some(write)) => {
+                println!("- RefCore mem read 0x{:x} write 0x{:x}", read, write);
+                if let Some(write_data) = ref_result.mem_write_data {
+                    println!("- RefCore mem write data 0x{:x}", write_data);
+                }
+            }
+            (Some(read), None) => println!("- RefCore mem read 0x{:x}", read),
+            (None, Some(write)) => {
+                println!("- RefCore mem write 0x{:x}", write);
+                if let Some(write_data) = ref_result.mem_write_data {
+                    println!("- RefCore mem write data 0x{:x}", write_data);
+                }
+            }
+            (None, None) => {}
+        }
+        if retire.is_load {
+            println!("- RTL     mem load 0x{:x}", retire.mem_addr);
+        } else if retire.is_store {
+            println!("- RTL     mem store 0x{:x} data 0x{:x}", retire.mem_addr, retire.store_data);
+        }
         log_decoded_instruction(&pipe_label, memory, ref_result.pc, disasm);
         ref_core.dump_state();
         println!("- Previous {} PCs:", pc_history.len());
@@ -183,6 +230,11 @@ fn process_retire(
         println!();
         *mismatch_count += 1;
     }
+    let mem_addr = ref_result.mem_read_addr.or(ref_result.mem_write_addr).unwrap_or(0);
+    let is_load = ref_result.mem_read_addr.is_some();
+    let is_store = ref_result.mem_write_addr.is_some();
+    let store_data = ref_result.mem_write_data.unwrap_or(0);
+
     poke_cosim_info(
         dut,
         pipe_idx,
@@ -193,6 +245,10 @@ fn process_retire(
         ref_result.wb_data,
         ref_result.wb_rd,
         has_mismatch,
+        mem_addr,
+        is_load,
+        is_store,
+        store_data,
     );
     if pc_history.len() >= PC_HISTORY_SIZE {
         pc_history.pop_front();
@@ -233,6 +289,10 @@ fn poke_cosim_info(
     wb_data: u64,
     wb_rd: u64,
     mismatch: bool,
+    mem_addr: u64,
+    is_load: bool,
+    is_store: bool,
+    store_data: u64,
 ) {
     dut.io().cosim_info().get(idx).valid().poke(valid as u64);
     dut.io().cosim_info().get(idx).pc().poke(pc);
@@ -241,6 +301,10 @@ fn poke_cosim_info(
     dut.io().cosim_info().get(idx).wb_data().poke(wb_data);
     dut.io().cosim_info().get(idx).wb_rd().poke(wb_rd);
     dut.io().cosim_info().get(idx).mismatch().poke(mismatch as u64);
+    dut.io().cosim_info().get(idx).mem_addr().poke(mem_addr);
+    dut.io().cosim_info().get(idx).is_load().poke(is_load as u64);
+    dut.io().cosim_info().get(idx).is_store().poke(is_store as u64);
+    dut.io().cosim_info().get(idx).store_data().poke(store_data);
 }
 
 fn main() {
@@ -313,7 +377,7 @@ fn main() {
                     halt_detected = true;
                 }
             } else {
-                poke_cosim_info(&mut dut, lane, false, 0, 0, false, 0, 0, false);
+                poke_cosim_info(&mut dut, lane, false, 0, 0, false, 0, 0, false, 0, false, false, 0);
             }
         }
 

@@ -251,6 +251,10 @@ class DCacheMSHRFile(p: CoreParams) extends Module:
     io.replay.valid := replayArb.io.out.valid
     io.replay.bits := replayArb.io.out.bits
 
+    when (replayArb.io.out.fire) {
+      mshrs(replayArb.io.chosen).state := MSHRState.Invalid.EN
+    }
+
     when (io.free.valid) {
       mshrs(io.free.bits).valid := false.B
       mshrs(io.free.bits).state := MSHRState.Invalid.EN

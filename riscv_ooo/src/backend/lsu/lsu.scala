@@ -120,6 +120,24 @@ case class LSUCommitBundle(
   stq_idx: UInt,
 ) extends Bundle[LSUCommitBundle]
 
+case class LSUCommitInfo(
+  valid: Bool,
+  is_load: Bool,
+  is_store: Bool,
+  addr: UInt,
+  data: UInt,
+) extends Bundle[LSUCommitInfo]
+
+object LSUCommitInfo:
+  def apply(p: CoreParams): LSUCommitInfo =
+    LSUCommitInfo(
+      valid = Bool(),
+      is_load = Bool(),
+      is_store = Bool(),
+      addr = UInt(p.paddrBits.W),
+      data = UInt(p.xlenBits.W),
+    )
+
 case class LSUBundle(
   // Dispatch interface
   dispatch: Vec[Decoupled[UOp]],
@@ -134,6 +152,9 @@ case class LSUBundle(
 
   // Commit interface (from ROB)
   commit: Vec[Valid[LSUCommitBundle]],
+
+  // For debug
+  commit_info: Vec[LSUCommitInfo],
 
   // Branch resolution interface
   br_resolve: BranchResolve,
@@ -161,6 +182,7 @@ object LSUBundle:
         ldq_idx = UInt(p.ldqIdxBits.W),
         stq_idx = UInt(p.stqIdxBits.W),
       )))),
+      commit_info = Output(Vec.fill(p.retireWidth)(LSUCommitInfo(p))),
 
       br_resolve = Input(BranchResolve(p)),
 
@@ -636,6 +658,24 @@ class LSU(p: CoreParams) extends Module:
       when (commit.valid && !commit.bits.is_load) {
         stq(commit.bits.stq_idx).committed := true.B
       }
+
+      io.commit_info(w).valid := commit.valid
+      io.commit_info(w).is_load := commit.bits.is_load
+      io.commit_info(w).is_store := !commit.bits.is_load
+      when (commit.valid) {
+        when (commit.bits.is_load) {
+          val ldq_entry = ldq(commit.bits.ldq_idx)
+          io.commit_info(w).addr := ldq_entry.addr.bits
+          io.commit_info(w).data := 0.U
+        } .otherwise {
+          val stq_entry = stq(commit.bits.stq_idx)
+          io.commit_info(w).addr := stq_entry.addr.bits
+          io.commit_info(w).data := stq_entry.data.bits
+        }
+      } .otherwise {
+        io.commit_info(w).addr := 0.U
+        io.commit_info(w).data := 0.U
+      }
     }
 
     var num_ldq_freed = 0.U
@@ -661,4 +701,12 @@ class LSU(p: CoreParams) extends Module:
     stq_head := wrap_incr_stq(stq_head, num_stq_freed)
 
     io.mem <> dcache.io.mem
+
+    dontTouch(ldq_head)
+    dontTouch(ldq_tail)
+    dontTouch(ldq)
+
+    dontTouch(stq_head)
+    dontTouch(stq_tail)
+    dontTouch(stq)
   }

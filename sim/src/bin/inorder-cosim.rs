@@ -178,6 +178,12 @@ fn process_retire(
         println!("Cycle: {} {:?} {}", cycle, mismatch, pipe_label);
         println!("- RefCore {:x?}", ref_result);
         println!("- RTL     {:x?}", retire);
+        match (ref_result.mem_read_addr, ref_result.mem_write_addr) {
+            (Some(read), Some(write)) => println!("- RefCore mem read 0x{:x} write 0x{:x}", read, write),
+            (Some(read), None) => println!("- RefCore mem read 0x{:x}", read),
+            (None, Some(write)) => println!("- RefCore mem write 0x{:x}", write),
+            (None, None) => {}
+        }
         log_decoded_instruction("-", memory, ref_result.pc, disasm);
         ref_core.dump_state();
         println!("- Previous {} PCs:", pc_history.len());
