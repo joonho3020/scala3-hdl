@@ -13,6 +13,7 @@ const MEM_TYPE_WRITE: u64 = 1;
 const RETIRE_WIDTH: usize = 4;
 const MAX_MISMATCHES: usize = 10;
 const PC_HISTORY_SIZE: usize = 20;
+const HANG_THRESHOLD: usize = 200;
 
 #[derive(Clone)]
 struct MemReq {
@@ -350,6 +351,7 @@ fn main() {
     let target_coverage = instructions_len;
     let mut stop_reason: Option<String> = None;
     let mut pc_history: VecDeque<u64> = VecDeque::with_capacity(PC_HISTORY_SIZE);
+    let mut cycles_since_retire: usize = 0;
 
     let disasm = Disassembler::new(rvdasm::disassembler::Xlen::XLEN64);
 
@@ -357,9 +359,11 @@ fn main() {
 
     for cycle in 0..100000 {
         let mut halt_detected = false;
+        let mut any_retired = false;
         for lane in 0..RETIRE_WIDTH {
             let retire = get_retire_info(&mut dut, lane);
             if retire.valid {
+                any_retired = true;
                 if process_retire(
                     &retire,
                     lane,
@@ -379,6 +383,12 @@ fn main() {
             } else {
                 poke_cosim_info(&mut dut, lane, false, 0, 0, false, 0, 0, false, 0, false, false, 0);
             }
+        }
+
+        if any_retired {
+            cycles_since_retire = 0;
+        } else {
+            cycles_since_retire += 1;
         }
 
         if let Some(mem_req) = pending_mem_reqs.pop_front() {
@@ -445,6 +455,8 @@ fn main() {
             stop_reason = Some(format!("halt instruction retired at cycle {}", cycle));
         } else if coverage_complete {
             stop_reason = Some(format!("retired all {} instructions by cycle {}", target_coverage, cycle));
+        } else if cycles_since_retire >= HANG_THRESHOLD {
+            stop_reason = Some(format!("core hung: no instructions retired for {} cycles (cycle {})", HANG_THRESHOLD, cycle));
         }
         if stop_reason.is_some() {
             break;

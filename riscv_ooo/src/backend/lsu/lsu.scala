@@ -430,19 +430,16 @@ class LSU(p: CoreParams) extends Module:
     for (i <- 0 until numLdqEntries) {
       val older_stores = stores_between(stq_head, ldq(i).next_stq_idx)
 
-      var has_unknown_addr = false.B
-      var has_addr_match = false.B
+      val ld_addr = Mux(ldq(i).addr.valid, ldq(i).addr.bits, 0.U)
 
-      for (s <- 0 until numStqEntries) {
-        val addr_match = check_addr_overlap(ldq(i).addr.bits, ldq(i).uop.ctrl.mem_width,
-                                            stq(s).addr.bits, stq(s).uop.ctrl.mem_width)
-        when (older_stores(s) && stq(s).valid) {
-          when (!stq(s).addr.valid) {
-            has_unknown_addr = true.B
-          } .elsewhen (ldq(i).addr.valid && addr_match) {
-            has_addr_match = true.B
-          }
-        }
+      val has_unknown_addr = (0 until numStqEntries).foldLeft(false.B) { (acc, s) =>
+        acc || (older_stores(s) && stq(s).valid && !stq(s).addr.valid)
+      }
+
+      val has_addr_match = (0 until numStqEntries).foldLeft(false.B) { (acc, s) =>
+        val st_addr = Mux(stq(s).addr.valid, stq(s).addr.bits, 0.U)
+        val addr_match = check_addr_overlap(ld_addr, ldq(i).uop.ctrl.mem_width, st_addr, stq(s).uop.ctrl.mem_width)
+        acc || (older_stores(s) && stq(s).valid && stq(s).addr.valid && ldq(i).addr.valid && addr_match)
       }
 
       ld_has_conflict(i) := has_unknown_addr || has_addr_match
@@ -564,18 +561,6 @@ class LSU(p: CoreParams) extends Module:
     // DCache response handling
     // ------------------------------------------------------------------------
 
-    // Handle fast responses (cache hits)
-    for (w <- 0 until lsuWidth) {
-      when (dcache.io.lsu.resp(w).valid) {
-        val resp = dcache.io.lsu.resp(w).bits
-        val idx = resp.ldq_idx
-
-        when (ldq(idx).valid) {
-          ldq(idx).succeeded := true.B
-        }
-      }
-    }
-
     // Handle nacks - need to retry
     for (w <- 0 until lsuWidth) {
       when (dcache.io.lsu.store_nack(w).valid) {
@@ -600,53 +585,44 @@ class LSU(p: CoreParams) extends Module:
       }
     }
 
-    // Handle long-latency MSHR responses (cache misses)
-    dcache.io.lsu.ll_resp.ready := true.B
-    when (dcache.io.lsu.ll_resp.valid) {
-      val resp = dcache.io.lsu.ll_resp.bits
-      val idx = resp.ldq_idx
-
-      when (ldq(idx).valid) {
-        ldq(idx).succeeded := true.B
-      }
-    }
-
-    // ------------------------------------------------------------------------
-    // Load writeback
-    // ------------------------------------------------------------------------
-
     io.ld_resp.foreach(r => {
       r.valid := false.B
       r.bits := DontCare
     })
 
-    var resp_idx = 0.U
-    for (i <- 0 until numLdqEntries) {
-      when (ldq(i).valid && ldq(i).succeeded && resp_idx < lsuWidth.U) {
-        // Find data from either fast resp or ll_resp
-        val resp_data = Wire(UInt(p.xlenBits.W))
-        resp_data := DontCare
+    // Handle long-latency MSHR responses (cache misses)
+    dcache.io.lsu.ll_resp.ready := true.B
+    when (dcache.io.lsu.ll_resp.valid) {
+      val idx = dcache.io.lsu.ll_resp.bits.ldq_idx
+      ldq(idx).succeeded := true.B
 
-        // Check fast responses
-        for (w <- 0 until lsuWidth) {
-          when (dcache.io.lsu.resp(w).valid && dcache.io.lsu.resp(w).bits.ldq_idx === i.U) {
-            resp_data := dcache.io.lsu.resp(w).bits.data
-          }
-        }
+      io.ld_resp(0).valid := true.B
+      io.ld_resp(0).bits.data := dcache.io.lsu.ll_resp.bits.data
+      io.ld_resp(0).bits.prd := ldq(idx).uop.prd
+      io.ld_resp(0).bits.lrd := ldq(idx).uop.lrd
+      io.ld_resp(0).bits.rob_idx := ldq(idx).uop.rob_idx
 
-        // Check long-latency response
-        when (dcache.io.lsu.ll_resp.valid && dcache.io.lsu.ll_resp.bits.ldq_idx === i.U) {
-          resp_data := dcache.io.lsu.ll_resp.bits.data
-        }
+      Assert(ldq(idx).valid, "DCache ll_resp to an invalid ldq entry")
+    }
+
+    // Handle fast responses (cache hits)
+    var resp_idx = Mux(dcache.io.lsu.ll_resp.valid, 1.U, 0.U)
+    for (w <- 0 until lsuWidth) {
+      val load_succeeded = dcache.io.lsu.resp(w).valid
+      when (load_succeeded) {
+        val resp = dcache.io.lsu.resp(w).bits
+        val idx = resp.ldq_idx
 
         io.ld_resp(resp_idx).valid := true.B
-        io.ld_resp(resp_idx).bits.data := resp_data
-        io.ld_resp(resp_idx).bits.prd := ldq(i).uop.prd
-        io.ld_resp(resp_idx).bits.lrd := ldq(i).uop.lrd
-        io.ld_resp(resp_idx).bits.rob_idx := ldq(i).uop.rob_idx
+        io.ld_resp(resp_idx).bits.data := dcache.io.lsu.resp(w).bits.data
+        io.ld_resp(resp_idx).bits.prd := ldq(idx).uop.prd
+        io.ld_resp(resp_idx).bits.lrd := ldq(idx).uop.lrd
+        io.ld_resp(resp_idx).bits.rob_idx := ldq(idx).uop.rob_idx
 
-        resp_idx = resp_idx + 1.U
+        ldq(idx).succeeded := true.B
+        Assert(ldq(idx).valid, "DCache resp to an invalid ldq entry")
       }
+      resp_idx = Mux(load_succeeded, resp_idx + 1.U, resp_idx)
     }
 
     // ------------------------------------------------------------------------
@@ -705,6 +681,7 @@ class LSU(p: CoreParams) extends Module:
     dontTouch(ldq_head)
     dontTouch(ldq_tail)
     dontTouch(ldq)
+    dontTouch(ld_has_conflict)
 
     dontTouch(stq_head)
     dontTouch(stq_tail)
