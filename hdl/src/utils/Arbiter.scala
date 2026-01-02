@@ -1,6 +1,7 @@
 package hdl.util
 
 import hdl.core._
+import hdl.elaboration._
 
 final case class ArbiterIO[T <: HWData](
   in: Vec[Decoupled[T]],
@@ -17,8 +18,12 @@ object ArbiterIO:
       chosen = Output(UInt(log2Ceil(n).W))
     )
 
-class Arbiter[T <: HWData](gen: T, n: Int) extends Module:
+class Arbiter[T <: HWData](gen: T, n: Int) extends Module with CacheableModule:
   require(n >= 1, "Arbiter requires n >= 1")
+
+  type ElabParams = (HWData, Int)
+  given stableHashElabParams: StableHash[ElabParams] = StableHash.derived
+  def elabParams: ElabParams = (gen, n)
 
   val io = IO(ArbiterIO(gen, n))
 
@@ -44,8 +49,12 @@ class Arbiter[T <: HWData](gen: T, n: Int) extends Module:
       io.in(i).ready := io.out.ready && grantOH.asUInt(i).asBool
       i += 1
 
-class RRArbiter[T <: HWData](gen: T, n: Int) extends Module:
+class RRArbiter[T <: HWData](gen: T, n: Int) extends Module with CacheableModule:
   require(n >= 1, "RRArbiter requires n >= 1")
+
+  type ElabParams = (HWData, Int)
+  given stableHashElabParams: StableHash[ElabParams] = StableHash.derived
+  def elabParams: ElabParams = (gen, n)
 
   val io = IO(ArbiterIO(gen, n))
 

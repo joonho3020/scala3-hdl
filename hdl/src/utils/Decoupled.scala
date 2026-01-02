@@ -1,6 +1,7 @@
 package hdl.util
 
 import hdl.core._
+import hdl.elaboration._
 
 /** Ready/valid interface bundle. */
 case class Decoupled[T <: HWData](valid: Bool, ready: Bool, bits: T) extends Bundle[Decoupled[T]]:
@@ -45,7 +46,11 @@ object QueueBundle:
       deq =         Decoupled(x))
 
 /** Simple ready/valid queue module. */
-class Queue[T <: HWData](x: T, entries: Int) extends Module:
+class Queue[T <: HWData](x: T, entries: Int) extends Module with CacheableModule:
+  type ElabParams = (HWData, Int)
+  given stableHashElabParams: StableHash[ElabParams] = StableHash.derived
+  def elabParams: ElabParams = (x, entries)
+
   val io = IO(QueueBundle(x))
 
   body:
